@@ -137,18 +137,36 @@ Every action is a roll, including `MOVE` — a bad move roll means you stumble l
 
 Oil is expressed as a **labelled modifier on the roll, never as a hidden DC change.** A raised DC is invisible; `Guttering lamp −2` sitting in the roll breakdown teaches the mechanic for free and honours the labelled-modifier rule in `CLAUDE.md` §4.
 
-| Oil | State | Roll modifier | Lantern radius |
-|---|---|---|---|
-| 12–7 | Bright | — | 2 |
-| 6–3 | Guttering | −2 | 1 |
-| 2–1 | Ember | −4 | 1 |
-| 0 | Dark | −6 | 0 |
+| Oil | State | Roll modifier | Lantern radius | Tell range |
+|---|---|---|---|---|
+| 12–7 | Bright | — | 2 | all four doorways |
+| 6–3 | Guttering | −2 | 1 | all four doorways |
+| 2–1 | Ember | −4 | 1 | **facing doorway only** |
+| 0 | Dark | −6 | 0 | **facing doorway only** |
 
 - Start a run with **12**. Burn **1 every 2 turns**, so a clean 20-turn run finishes with a little left.
 - `SEARCH`, `READ` and `REST` burn **1 extra**. This is what makes oil an action budget: it only bites if you dawdle, which is exactly the right pressure against the turn limit.
 - An oil flask restores **4**.
 
-**Oil never degrades the tells.** Darkness raises difficulty and shrinks what you can see of the room you are standing in; the stench still comes through the doorway. Anything else quietly breaks "tells never lie."
+#### Darkness restricts range, never reliability
+
+**Oil never degrades the honesty of a tell.** What the player receives is always true. In the dark they simply receive *less* of it: at Ember and below, only the doorway they last moved through leaks anything.
+
+`LISTEN` reveals all four doorways, truthfully, for the price of one turn.
+
+That is the whole mechanic: **in the dark, information costs turns.** With the Wumpus loose and four turns left, spending one to listen is a real decision — and it is the first thing in the design that gives `LISTEN` a reason to exist.
+
+Three deliberate choices here:
+
+- **Probabilistic tells were rejected.** They compound with the −2/−4/−6 penalty into an unrecoverable state (worse at everything *and* blind), they relocate blame from the player's judgement to the dice, and they make the tell-ignored metric in `docs/EVALS.md` and `docs/OBSERVABILITY.md` unmeasurable — you could no longer tell "ignored the warning" apart from "the warning didn't fire."
+- **Range restriction starts at Ember, not Guttering.** The first oil threshold stays purely arithmetic so the deep one lands as a genuine change of state rather than more of the same.
+- **`LISTEN` costs no extra oil.** It is the escape valve; charging for it twice would close the valve.
+
+#### Darkness changes the channel, not the fact
+
+Free atmosphere, no mechanics: only one tell is genuinely vision-dependent (the snare's chisel glint). The rest reach the player by smell, sound, or touch. So in the dark the *prose* shifts modality while the information stays identical — the player stops seeing dust motes and starts feeling cold on their face, stops glimpsing a shadow and only hears it skitter.
+
+Write both variants into the outcome table. It costs nothing and it is the difference between darkness as arithmetic and darkness as a place.
 
 ### 2.8.2 Confused — suppression, not misdirection
 

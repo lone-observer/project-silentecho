@@ -39,7 +39,7 @@ Reverted; suite green. An unverified guard is worse than no guard, so re-verify 
 
 All four open questions from this phase were decided and written into `docs/GDD.md`. Recorded here with reasoning, because the reasoning is what makes them safe to revisit later.
 
-**1 · Oil is a labelled modifier, not a DC change** (GDD 2.8.1). Bands rather than a linear slope: Bright / Guttering −2 / Ember −4 / Dark −6, with the lantern radius shrinking alongside. Start 12, burn 1 per 2 turns, `SEARCH`/`READ`/`REST` burn 1 extra, flasks restore 4.
+**1 · Oil is a labelled modifier, not a DC change** (GDD 2.8.1). Bands rather than a linear slope: Bright / Guttering −2 / Ember −4 / Dark −6, with the lantern radius shrinking alongside. Start 12, burn 1 per 2 turns, `SEARCH`/`READ`/`REST` burn 1 extra, flasks restore 4. **Revised 17 Sep:** at Ember and below, tells arrive only from the facing doorway and `LISTEN` reveals all four — darkness restricts range, never reliability.
 
 *Why a modifier:* a raised DC is invisible to the player. `Guttering lamp −2` in the roll breakdown teaches the mechanic for free. *Why those numbers:* they make oil an **action budget** rather than a second death clock — a clean 20-turn run finishes with a little left, so oil only bites if you dawdle. *Hard rule:* oil never degrades the tells.
 
