@@ -143,6 +143,8 @@ export interface Room {
 }
 
 export interface Labyrinth {
+  readonly seed: number
+  readonly difficulty: Difficulty
   readonly width: number
   readonly height: number
   readonly rooms: Readonly<Record<RoomId, Room>>
@@ -154,11 +156,15 @@ export interface Labyrinth {
 // Creatures and companions
 // ---------------------------------------------------------------------------
 
+/**
+ * v1 bestiary. The stone-grub is deliberately absent: it returns in a late
+ * phase as the labyrinth's shuffler (it eats walls, so the geometry drifts),
+ * which is a high-difficulty mechanic rather than a tameable companion.
+ */
 export type CreatureKind =
   | 'goblin'
   | 'lumewing'
   | 'grellhound'
-  | 'stoneGrub'
   | 'quietOne'
 
 export interface Companion {
@@ -227,10 +233,14 @@ export type ActionKind = Action['kind']
 
 export type RunOutcome =
   | 'inProgress'
-  | 'escaped' //      win
+  | 'escaped' //      win: left carrying the Heart
+  | 'retreated' //    left alive WITHOUT the Heart — a partial success; the map is the prize
   | 'caught' //       the Wumpus
   | 'killed' //       a hazard
   | 'outOfTurns'
+
+/** Difficulty is a contract on GENERATION, not just a Wumpus tier. See data/tuning.ts. */
+export type Difficulty = 'drowsing' | 'stirring' | 'hunting' | 'ravening'
 
 export interface GameState {
   readonly version: number

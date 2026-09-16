@@ -21,7 +21,7 @@ const ALL_ACTIONS: readonly ActionKind[] = [
   'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
 ]
 const ALL_CREATURES: readonly CreatureKind[] = [
-  'goblin', 'lumewing', 'grellhound', 'stoneGrub', 'quietOne',
+  'goblin', 'lumewing', 'grellhound', 'quietOne',
 ]
 const ALL_HAZARDS: readonly HazardKind[] = ['pit', 'sporeBloom', 'snareCarving', 'portal']
 const ALL_TIERS: readonly WumpusTier[] = [1, 2, 3, 4]

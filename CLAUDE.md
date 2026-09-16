@@ -76,6 +76,8 @@ These are game-design decisions already made and deliberately defended. Do not "
 | **Fighting is loud and fast; taming is quiet and slow.** | This asymmetry is the entire reason the creature system exists. If one option is ever strictly better, fix the costs — don't remove the choice. |
 | **Luck grants Fortune points, never a flat roll bonus.** | Otherwise it's a boring fourth modifier. |
 | **Mixed Success is the widest good band.** | "You got it, but —" should be the most common non-failure result. |
+| **A pit-free route to the Heart always exists** — at every difficulty, no exceptions. | A pit is an instant-loss check. Forcing one means a run can end to a die roll the player had no way to avoid. Blooms, snares and creatures may be forced, because failing them costs you without ending you. |
+| **Darkness restricts the RANGE of tells, never their honesty.** | Unreliable information relocates blame from the player's judgement to the dice, and makes the tell-ignored fairness metric unmeasurable. |
 
 If a sim run or playtest suggests one of these is broken, report it and propose a fix **within** the invariant. Don't discard the invariant.
 
@@ -117,6 +119,7 @@ Not for v1, no matter how natural they seem while you're in the code:
 - Multiplayer or any server component
 - A killable Wumpus
 - Persistent creature collection across runs (companions are run-only)
+- A tameable stone-grub — retired from the v1 bestiary; it returns in a late phase as the labyrinth's *shuffler* (it eats walls, so the geometry drifts), which is a high-difficulty mechanic, not a companion
 - Real-time movement or combat
 - Procedural prose generation at runtime
 - Accounts, auth, or cloud saves

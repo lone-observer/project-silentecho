@@ -17,15 +17,37 @@ The tone is **cozy horror**: warm lamplight, hand-lettered signage, a comforting
 
 One run = one labyrinth crawl, **20 turns maximum**.
 
-1. **Descend.** Player enters at the mouth of a procedurally generated labyrinth (default 5×5 grid, ~20 reachable rooms).
+1. **Descend.** Player enters at the mouth of a procedurally generated labyrinth — a **10×10 grid, 100 rooms**, of which only about half are reachable inside half the turn budget.
 2. **Explore.** One action per turn. You always see the room you're standing in. Adjacent rooms leak *tells* — and the tells are shown as directional overlays pointing at the doorway they come from (§4).
 3. **Find the Heart.** One room contains the treasure. Taking it is loud. The labyrinth notices.
 4. **Escape.** Carry the Heart back to the entrance and leave.
 
 **Win:** Exit the entrance carrying the Heart.
-**Lose:** Caught by the Wumpus, killed by a hazard, or turn 20 ends without escaping.
+**Partial:** **Retreat** — leave alive without the Heart. Not a loss. The map is the prize (§2.11).
+**Lose:** Caught by the Wumpus, killed by a hazard, or the turn limit ends without escaping.
+
+**Why 100 rooms when the Heart is never more than 7 away.** A round trip costs at least twice the Heart's distance, so at 20 turns the Heart has to sit in the near third whatever the grid size — the turn budget binds, not the geometry. The other ~70 rooms are the **too-deep region**: you never *choose* to go there, you end up there by searching the wrong direction, and then the turn count decides whether you get back. At 5×5 the whole map could be brute-forced inside the limit and nothing was ever truly unknown.
 
 Turn 20 is a real antagonist. A 5×5 labyrinth is ~8 turns deep and ~8 turns back — the margin is thin, and every detour costs.
+
+### 2.2.1 Difficulty is a contract on generation
+
+Difficulty is not merely a Wumpus tier. It is a set of guarantees the generator must satisfy before a labyrinth is playable.
+
+| Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Turns |
+|---|---|---|---|---|---|
+| Drowsing | 1 | 2 | +2 | 5–6 | 20 |
+| Stirring | 2 | 1 | +3 | 6–7 | 20 |
+| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 20 |
+| Ravening | 4 | 0 | — | 7 | 18 |
+
+A **hazard-free route** avoids every hazard *and* every creature. Two routes count as distinct when closing any single room on the first still leaves a way through.
+
+**The minimum safe detour is the point of the whole system.** Without it the safe route is usually free, every player takes it, and hazards stop being a decision. Making safety cost turns turns each run into *fast and risky, or slow and safe* — a choice that bites directly against the turn limit.
+
+**A pit-free route must exist at every difficulty, including Ravening.** See `CLAUDE.md` §3. Pits are instant-loss checks; blooms, snares and creatures cost you without ending you, so those may be forced.
+
+**The top tiers get harder through pressure, not distance.** Ravening loses two turns rather than gaining two corridors — fewer turns bites on every decision in the run at once, whereas a deeper Heart just adds walking.
 
 ## 2.3 Presentation model
 
@@ -209,15 +231,16 @@ This matters most at an encounter: the grellhound's hazard reveal has to land *b
 
 The player may **spend a Fortune point to keep a bolting companion.** That is an emotional purchase rather than a mechanical one, it gives Luck a use outside treasure and traps, and it turns a mixed tame into something you can defend rather than a downgraded consolation prize.
 
-**The bestiary (v1 — five creatures):**
+**The bestiary (v1 — four creatures):**
 
 | Creature | Passive | Tone |
 |---|---|---|
 | **Wild goblin** | +2 to `SEARCH`. Scrounges — occasionally finds oil. | Grubby, opportunistic, weirdly loyal once fed. |
 | **Lumewing** (cave moth) | Lantern radius +1, so oil lasts longer. | Gentle. Genuinely beautiful. Sits on your shoulder. |
 | **Grellhound** (blind hound) | Reveals hazards in adjacent rooms. Growls when the Wumpus reaches radius 2 — an extra turn of warning. | The good one. Players will get attached. |
-| **Stone-grub** | Can be spent to eat through one wall, creating a shortcut. Consumed on use. | Placid, enormous, slow. Chews masonry like bread. |
 | **The Quiet One** | Mimics your voice. Passive: reduces your scent output. | This is the cozy-horror one. It is friendly. It should not be. It copies things it has heard you say, and once in a while it says something you haven't said yet. |
+
+**The stone-grub is not tameable and is not in v1.** It returns in a late phase as the labyrinth's **shuffler**: grubs eat walls, so on the higher difficulties the geometry drifts while you are inside it. That explains the changing world diegetically instead of by fiat, and it makes the grub a hazard with a personality rather than a companion with a gimmick.
 
 **`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail for 2–3 turns.
 
@@ -252,6 +275,7 @@ Between runs, in the **Lanternhouse** hub:
 - Review a run journal: what killed you, what you found, which companion you lost and where, the seed.
 - Unlock **Marks** — modest permanent modifiers earned by milestones ("Escaped at Tier 3", "Tamed all five", "Sent a companion and still got out"). They should tune a run, never trivialize it.
 - Choose the next labyrinth from 2–3 offers with visible Wumpus tier and rumored Heart value.
+- **Return to a labyrinth you mapped.** Retreating alive without the Heart preserves the seed and everything you charted. The Lanternhouse then offers that labyrinth back alongside fresh ones — you keep the map, but the Wumpus has moved, blooms have spread and creatures have wandered. This is what makes retreat a strategy rather than a consolation, and what makes a 100-room map worth having: no single run can chart it, so charting becomes something you do across runs.
 - A **bestiary page** that fills in as you tame each creature — a quiet collection reward that costs nothing to build and gives players a reason to try taming things they'd normally fight.
 
 ## 2.12 Art direction

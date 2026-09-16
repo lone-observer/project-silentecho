@@ -10,7 +10,7 @@
  * change the GDD too, or the two drift and the GDD stops being the source of truth.
  */
 
-import type { ActionKind, CreatureKind, HazardKind, WumpusTier } from '../types.ts'
+import type { ActionKind, CreatureKind, Difficulty, HazardKind, WumpusTier } from '../types.ts'
 import { DC } from '../types.ts'
 
 /**
@@ -28,10 +28,53 @@ export type TellRange = 'all' | 'facing'
 export const RUN = {
   /** Hard turn limit. The real antagonist alongside the Wumpus. */
   maxTurns: 20,
-  gridWidth: 5,
-  gridHeight: 5,
-  /** Minimum shortest-path distance from entrance to the Heart room. */
-  minHeartDistance: 4,
+  gridWidth: 10,
+  gridHeight: 10,
+
+  /**
+   * The Heart's distance band is bounded by the TURN BUDGET, not by grid size.
+   *
+   * A round trip costs at least 2x this distance, so at 20 turns a Heart 7
+   * rooms deep already spends 14 of them walking. Growing the grid does not
+   * change that arithmetic — which is the point of a 10x10 map: the Heart sits
+   * in the near third and the other ~70 rooms are the too-deep region. The
+   * player never CHOOSES to go too deep; they end up there by searching the
+   * wrong direction, and then the turn count decides whether they get back.
+   *
+   * Per-difficulty bands narrow this further — see DIFFICULTY.
+   */
+  minHeartDistance: 5,
+  maxHeartDistance: 7,
+} as const
+
+// ---------------------------------------------------------------------------
+// Generation — GDD 2.2
+// ---------------------------------------------------------------------------
+
+export const GENERATION = {
+  /**
+   * Fraction of the non-tree grid edges braided back in after the spanning tree.
+   *
+   * A perfect maze (0) has exactly one path between any two rooms, which is
+   * wrong for an evasion game: no loops means no route choice, and escaping
+   * means retracing your exact steps into whatever is following you. Braiding
+   * adds loops so the player can circle around. Too high and it stops reading
+   * as a labyrinth and becomes an open field.
+   */
+  braidRatio: 0.3,
+  /**
+   * How strongly a room's hazard pulls its archetype toward the thematic match
+   * (spore bloom -> fungal grotto, portal -> collapsed shrine, and so on).
+   * 1 = always, 0 = archetypes are pure noise. Coherence makes the world feel
+   * authored and gives (archetype x action) outcomes real meaning.
+   */
+  archetypeAffinity: 0.75,
+  /** Minimum distance from the entrance at which the Wumpus may start. */
+  minWumpusStartDistance: 5,
+  /** Whole-labyrinth regenerations before we accept the closest near-miss. */
+  maxGenerationAttempts: 60,
+  /** Place/measure/repair passes spent trying to hit a difficulty contract. */
+  maxRepairPasses: 40,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -210,7 +253,6 @@ export const TAME_DC: Record<CreatureKind, number> = {
   goblin: DC.easy,
   lumewing: DC.moderate,
   grellhound: DC.moderate,
-  stoneGrub: DC.easy,
   quietOne: DC.hard,
 }
 
@@ -241,17 +283,17 @@ export const COMPANION = {
 
 /** Inclusive [min, max] counts per generated labyrinth. */
 export const HAZARD_COUNTS: Record<HazardKind, readonly [number, number]> = {
-  pit: [2, 3],
-  sporeBloom: [1, 2],
-  snareCarving: [1, 2],
-  portal: [1, 1],
+  pit: [6, 9],
+  sporeBloom: [4, 6],
+  snareCarving: [4, 6],
+  portal: [3, 4],
 }
 
 export const POPULATION = {
-  oilFlasks: [2, 3] as const,
-  creatures: [2, 3] as const,
+  oilFlasks: [8, 12] as const,
+  creatures: [8, 12] as const,
   /** Graves from the player's own earlier runs. GDD 2.16 */
-  maxGraves: 2,
+  maxGraves: 4,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -276,3 +318,45 @@ export function oilBandFor(oil: number): OilBand {
   if (!band) throw new Error(`oilBandFor: no band covers oil=${clamped} — OIL_BANDS has a gap`)
   return band
 }
+
+// ---------------------------------------------------------------------------
+// Difficulty — a contract on GENERATION, not merely a Wumpus tier
+// ---------------------------------------------------------------------------
+
+/**
+ * `safeRoutes` counts hazard-free routes from the entrance to the Heart:
+ *   0 — no route avoids every hazard; a bloom, snare or creature is unavoidable
+ *   1 — one such route exists, but blocking a single room on it closes them all
+ *   2 — at least two meaningfully distinct hazard-free routes
+ *
+ * `minSafeDetour` is how many EXTRA moves the safe route costs. Without it the
+ * safe route is usually free, everyone takes it, and hazards stop being a
+ * decision — which is what the first 5x5 generator actually produced.
+ */
+export interface DifficultyContract {
+  readonly wumpusTier: WumpusTier
+  readonly safeRoutes: 0 | 1 | 2
+  readonly minSafeDetour: number
+  readonly heartDistance: readonly [number, number]
+  readonly maxTurns: number
+}
+
+export const DIFFICULTY: Record<Difficulty, DifficultyContract> = {
+  drowsing: { wumpusTier: 1, safeRoutes: 2, minSafeDetour: 2, heartDistance: [5, 6], maxTurns: 20 },
+  stirring: { wumpusTier: 2, safeRoutes: 1, minSafeDetour: 3, heartDistance: [6, 7], maxTurns: 20 },
+  hunting:  { wumpusTier: 3, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], maxTurns: 20 },
+  // Harder through pressure, not distance: a deeper Heart only adds corridors,
+  // whereas fewer turns bites on every decision in the run at once.
+  ravening: { wumpusTier: 4, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], maxTurns: 18 },
+}
+
+export const DEFAULT_DIFFICULTY: Difficulty = 'stirring'
+
+/**
+ * INVARIANT, not a tunable — see CLAUDE.md 3.
+ * A pit-free route to the Heart must exist at EVERY difficulty. A pit is an
+ * instant-loss check, so forcing one means a run can end to a die roll the
+ * player had no way to avoid. Blooms, snares and creatures may be forced
+ * because failing them costs you without ending you.
+ */
+export const PIT_FREE_ROUTE_REQUIRED = true
