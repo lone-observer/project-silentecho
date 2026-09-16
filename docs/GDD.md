@@ -30,6 +30,21 @@ One run = one labyrinth crawl, **20 turns maximum**.
 
 Turn 20 is a real antagonist. A 5×5 labyrinth is ~8 turns deep and ~8 turns back — the margin is thin, and every detour costs.
 
+### 2.2.2 Turn order
+
+`resolve.ts` must follow this exactly. **Two catch checks, not one.**
+
+1. Player acts — the action resolves, the roll lands, the outcome applies
+2. **Catch check — the Wumpus is in the room you just entered.** *You walked into it.*
+3. Effects: damage, oil, status, Heart pickup and its escalation
+4. Scent deposited for the action taken
+5. Wumpus moves, if it is due
+6. **Catch check — it entered your room.** *It came for you.*
+7. Companion passives, world drift (§2.9.1), scent decay, oil burn
+8. Win/loss evaluation, turn counter
+
+**Why step 2 exists.** The hunt visualiser caught a player walking clean through a Wumpus: they moved into its room, it stepped aside the same turn, and a check made only after the Wumpus moved found an empty room. Step 2 also closes the swap case for free — two bodies trading places down a corridor slip past a post-move check, but at step 2 the Wumpus has not moved yet, so it is still there to be found.
+
 ### 2.2.1 Difficulty is a contract on generation
 
 Difficulty is not merely a Wumpus tier. It is a set of guarantees the generator must satisfy before a labyrinth is playable.
@@ -89,11 +104,13 @@ This is the biggest presentation upgrade over a classic Wumpus. Instead of "you 
 | **Hum** | Portal adjacent | A faint standing-wave shimmer distorting the doorway's edge. |
 | **Fresh chisel** | Snare-carving adjacent | A subtle specular glint traveling along a wall section, once every few seconds. |
 | **Skittering** | Creature adjacent | Small quick shadow-flickers at the doorway's base. |
+| **Metallic** | The Heart, still on its plinth | A taste of iron and old coin on the air. Faint gold at the doorway's edge. Stops the instant the Heart is lifted — it is in your hands then, not through a door. |
 
 **Rules for overlays:**
 - Always honest. An overlay never appears for something that isn't there, and never fails to appear for something that is.
 - Always directional. If two hazards are adjacent through different doorways, you get two overlays in two places.
 - Intensity encodes nothing. Resist the urge to scale opacity with distance — it invites misreading. A thing is adjacent or it isn't.
+- **The Heart's call is radius 1, like everything else.** A longer-range beacon would make the search a homing exercise and delete the *retreat* outcome (§2.2), which depends on the Heart being genuinely findable-or-not. One room of warning does not help you search — but it does mean that running at Ember or Dark, where only the doorway you face reports, you can walk straight past the Heart and never know. That consequence is the reason the tell exists.
 - Every overlay has a colorblind-safe alternate form (shape/motion-based, not hue-based) behind an accessibility toggle.
 
 ## 2.5 Stats
@@ -248,43 +265,15 @@ The player may **spend a Fortune point to keep a bolting companion.** That is an
 
 This is the single most important design beat in the game. It is the escape valve that makes a Tier 4 Wumpus survivable, and it costs you the creature you spent two turns and a good roll earning. Make the log line for it land. Do not soften it, do not add a chance of return, do not let the player un-choose it.
 
-## 2.9.1 The world does not hold still
-
-**The problem.** Once you have the Heart, the obvious play is to retrace your steps: you already cleared that route, you already know what is on it. The inbound journey is exploration; the outbound would be mere execution. Half of every run would be less interesting than the other half.
-
-**The principle, and it is the same one that governs oil (§2.8.1):**
-
-> **The world changes. Your senses never lie. What goes stale is your memory, not your perception.**
-
-This rules out shuffling the labyrinth when the Heart is lifted — that silently invalidates knowledge which was true when it was earned, and arbitrary reversals are the feeling this design keeps refusing. Instead the world drifts *continuously, from turn one*, so your map ages predictably and every tell still fires honestly when you arrive.
-
-Three mechanisms, in increasing cost:
-
-### The Heart is loud
-
-Carrying the Heart multiplies the player's scent output (`COMPANION`-style constant in `tuning.ts`). Retracing your route now means laying a hot trail down a corridor the Wumpus is already moving toward — and at Tier 4 it is moving toward your exit anyway.
-
-This is the cheapest of the three and probably the most important. The return trip crosses the same rooms but poses a different problem: you are no longer solving a labyrinth, you are being tracked through one.
-
-### Creatures wander
-
-Untamed creatures move a room every few turns. The goblin you sneaked past is not reliably where you left it, and a corridor you cleared can be occupied on the way back. Cheap, and it makes the place feel inhabited rather than placed.
-
-### Spore blooms spread
-
-A bloom has a chance every few turns to propagate into an adjacent empty room. The clean corridor you came in by may not be clean on the way out.
-
-Critically, **the tell still fires**: you smell the new sweetness from the doorway exactly as you would an original bloom. This is a changing world, not a gotcha. It is also why the mechanism works at all — if blooms spread *and* the tells were unreliable, the player could not plan; because the tells stay honest, a spreading bloom is information rather than ambush.
-
-### Deferred: the stone-grub as shuffler
-
-Late phase, high difficulty. Grubs eat walls, so the geometry itself drifts while you are inside it — the diegetic explanation for a changing world, and the reason the grub exists at all. It mutates `Labyrinth` mid-run, which ripples into the map view, the agent view and anything caching paths, so it is deliberately held until after Gate 1. If the Heart-scent multiplier and wandering creatures already make the escape tense, this is a week saved.
-
 ## 2.10 The Wumpus
 
 It is not a monster that chases you. It is a **weather system with intent**. The design goal: *the player should always be able to tell it's coming, and should still sometimes get caught.*
 
 **Core mechanic — the scent trail.** The player leaves scent in each room they occupy; scent decays over 3 turns. The Wumpus navigates toward the strongest scent within its perception radius. Loud actions (`FORCE`, `FIGHT`, a critical failure, a sent companion) drop much stronger markers. `SNEAK` and `TAME` drop very little.
+
+**What the fairness guarantee actually is.** The Wumpus never crosses more than one room to reach you, so it is always adjacent before it catches you. That means **a player who holds still is always warned**: the stench arrives a full turn before the thing does.
+
+It does *not* mean you can never be caught unwarned. Move into a room that happens to be adjacent to the Wumpus and nothing leaked at your previous room, because it was two away. That is the cost of exploring blind, it is what makes a moving threat different from a static hazard, and it is exactly the hole the **grellhound** exists to close — it growls at radius 2, buying back the turn of warning that movement costs you. Tests in `tests/wumpus.test.ts` assert both halves.
 
 **Adjacency tells are mandatory and always honest** — the violet stench overlay plus the ambience dropout (§4). *Never* hide this. The fear comes from knowing.
 
@@ -392,3 +381,48 @@ Later runs find those graves in the labyrinth. Entering the room gives you the e
 
 This is the mechanic the project is named for. A sent companion, a lost run, a voice the Quiet One copied — the labyrinth keeps everything and gives none of it back intact.
 
+
+## 2.17 The information model
+
+The engine owns **what the player knows**. Renderers own **how it looks**. Every constraint below is a property of the engine, which is why each one holds identically in text, in the diorama, and in the agent view — and why none of them can drift between the three.
+
+### One model, three renderings
+
+`Tell` is direction-keyed — `{ direction, kind }` — so the same fact renders as "North: a violet stench", as wisps at the north doorway, and as a tuple in `AgentView`. Proximity (information attached to the thing it concerns) is enforced by the data shape rather than by each renderer remembering to do it.
+
+The same rule governs actions. `legalActions` is computed **in the engine**, filtered to what is actually available this turn. No renderer may build its own list, and none may show the full thirteen verbs with the unavailable ones greyed out — a menu of thirteen where three apply is a menu of thirteen as far as the player's decision cost is concerned.
+
+### The status budget
+
+A player can hold about seven things in working memory. The run currently asks them to track: turn count, oil level, oil band, health, Fortune, companion, carrying-Heart, active statuses — **before** the four directional tells.
+
+That is over budget, and every phase adds to it. So:
+
+- **Chunk before adding.** Oil level and oil band are one fact presented together, never two lines.
+- **Anything that can be derived is not tracked.** If the player can see it in the room description, it does not also belong in the status line.
+- **A new status effect must displace something**, or justify why the budget grew.
+
+This applies to `AgentView.status` for the same reason in a different currency: human working memory and model context pressure both reward the same discipline.
+
+### Exactly one alarming signal
+
+Pallid violet, and the stench it renders, belong to the Wumpus alone. This is what makes it readable at a glance across a busy room — it is the *only* thing that looks like that.
+
+The corollary is a standing constraint on everything added later: **no second signal may compete for that register.** The metallic Heart call is the near miss to watch — it is also singular, so it must read as warm and inviting where the stench reads as wrong. If two things in the palette feel like alarms, neither is one.
+
+### Endings carry the run
+
+What a player remembers of a run is its hardest moment and its last one. The design already puts those together: the escape is the hardest part by construction, and it is the end.
+
+Two consequences for the outcome table:
+
+- **Every ending needs a beat**, including the quiet ones. *Retreat* — leaving alive without the Heart — is the second-best outcome in the game and currently has no closing line at all, so it would read as the run simply stopping. It needs writing with the same care as the escape.
+- **The epitaph is the literal last thing** a failed run produces (§2.16). It carries more weight than any single turn inside that run.
+
+### What is deliberately not applied
+
+Most published game-UX guidance is about real-time execution: input buffering, coyote time, aim assist, sub-100ms hit feedback, cursor travel distance, radial menus.
+
+**None of it applies here, and adding it would be a mistake.** Complexity in this game lives entirely in *decision* — which doorway, fight or tame, spend the turn listening or not — and none of it in *execution*. There is no timing, no aim, no dexterity to forgive. A future session reaching for those techniques is solving a problem this design does not have.
+
+The exception is response time in the diorama, which is handled where it belongs: the movement transition is skippable (§2.3).
