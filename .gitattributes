@@ -1,0 +1,12 @@
+# Normalise line endings. Without this, every file committed from Windows shows
+# as wholly rewritten when touched from another machine, which buries real diffs.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.woff  binary
+*.woff2 binary

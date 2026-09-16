@@ -34,7 +34,7 @@ Types, seeded RNG, dice resolver, engine-isolation guard, empty React shell.
 
 The largest phase. Everything except pictures.
 
-Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · the outcomes data table · text renderer · agent/sim harness.
+Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · text renderer · agent/sim harness.
 
 **The agent interface is a Phase 1 deliverable, built to `docs/EVALS.md` requirements** — pluggable policies, fixed seed sets, full per-turn logging, no state leakage, resumable batches. `npm run sim` is one policy among several. Building it as a one-off script means rebuilding it in week 5.
 
@@ -137,7 +137,7 @@ Full version to itch.io. Devlog. Second Signal & Drift essay. Decide then, with 
 2. The Lanternhouse hub (ship with a plain between-run stat screen)
 3. Marks
 4. Two of the six background plates (ship with four archetypes)
-5. Two of the five creatures — **keep the goblin, the grellhound, and the Quiet One**
+5. One of the four creatures — **keep the goblin, the grellhound and the Quiet One** (the stone-grub is already out of v1)
 6. The MCP agent surface (delightful, but a bonus)
 7. Dashboard panels 4–6 — keep the funnel, the win-rate trend and the replay viewer
 

@@ -248,6 +248,38 @@ The player may **spend a Fortune point to keep a bolting companion.** That is an
 
 This is the single most important design beat in the game. It is the escape valve that makes a Tier 4 Wumpus survivable, and it costs you the creature you spent two turns and a good roll earning. Make the log line for it land. Do not soften it, do not add a chance of return, do not let the player un-choose it.
 
+## 2.9.1 The world does not hold still
+
+**The problem.** Once you have the Heart, the obvious play is to retrace your steps: you already cleared that route, you already know what is on it. The inbound journey is exploration; the outbound would be mere execution. Half of every run would be less interesting than the other half.
+
+**The principle, and it is the same one that governs oil (§2.8.1):**
+
+> **The world changes. Your senses never lie. What goes stale is your memory, not your perception.**
+
+This rules out shuffling the labyrinth when the Heart is lifted — that silently invalidates knowledge which was true when it was earned, and arbitrary reversals are the feeling this design keeps refusing. Instead the world drifts *continuously, from turn one*, so your map ages predictably and every tell still fires honestly when you arrive.
+
+Three mechanisms, in increasing cost:
+
+### The Heart is loud
+
+Carrying the Heart multiplies the player's scent output (`COMPANION`-style constant in `tuning.ts`). Retracing your route now means laying a hot trail down a corridor the Wumpus is already moving toward — and at Tier 4 it is moving toward your exit anyway.
+
+This is the cheapest of the three and probably the most important. The return trip crosses the same rooms but poses a different problem: you are no longer solving a labyrinth, you are being tracked through one.
+
+### Creatures wander
+
+Untamed creatures move a room every few turns. The goblin you sneaked past is not reliably where you left it, and a corridor you cleared can be occupied on the way back. Cheap, and it makes the place feel inhabited rather than placed.
+
+### Spore blooms spread
+
+A bloom has a chance every few turns to propagate into an adjacent empty room. The clean corridor you came in by may not be clean on the way out.
+
+Critically, **the tell still fires**: you smell the new sweetness from the doorway exactly as you would an original bloom. This is a changing world, not a gotcha. It is also why the mechanism works at all — if blooms spread *and* the tells were unreliable, the player could not plan; because the tells stay honest, a spreading bloom is information rather than ambush.
+
+### Deferred: the stone-grub as shuffler
+
+Late phase, high difficulty. Grubs eat walls, so the geometry itself drifts while you are inside it — the diegetic explanation for a changing world, and the reason the grub exists at all. It mutates `Labyrinth` mid-run, which ripples into the map view, the agent view and anything caching paths, so it is deliberately held until after Gate 1. If the Heart-scent multiplier and wandering creatures already make the escape tense, this is a week saved.
+
 ## 2.10 The Wumpus
 
 It is not a monster that chases you. It is a **weather system with intent**. The design goal: *the player should always be able to tell it's coming, and should still sometimes get caught.*
