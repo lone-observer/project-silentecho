@@ -128,10 +128,35 @@ Every action is a roll, including `MOVE` — a bad move roll means you stumble l
 | Hazard | Behavior |
 |---|---|
 | **Pits** | Tell: draft. AGI save on entry. Failure ends the run; mixed success costs health and the lamp gutters. |
-| **Spore blooms** | Tell: sweetness. INT to recognize, AGI to pass. Failure applies *Confused* — directions scramble for 2 turns. |
+| **Spore blooms** | Tell: sweetness. INT to recognize, AGI to pass. Failure applies *Confused* — see below. |
 | **Snare-carvings** | Tell: fresh chisel. INT to spot, STR to break free. |
 | **Portals** | Tell: hum. Entering shuffles you into a *different* labyrinth — map knowledge resets, but you may land closer to a Heart, and the Wumpus loses your scent entirely. INT to read where it goes. |
-| **Lamp oil** | A soft timer beneath the turn timer. Low oil raises all DCs **and visibly shrinks the lantern radius in the diorama** — the screen literally closes in on you. Found in rooms, spent by some actions. |
+| **Lamp oil** | An action budget rather than a second clock. Low oil applies a labelled penalty to every roll **and visibly shrinks the lantern radius** — the screen closes in on you. See below. |
+
+### 2.8.1 Oil — the light budget
+
+Oil is expressed as a **labelled modifier on the roll, never as a hidden DC change.** A raised DC is invisible; `Guttering lamp −2` sitting in the roll breakdown teaches the mechanic for free and honours the labelled-modifier rule in `CLAUDE.md` §4.
+
+| Oil | State | Roll modifier | Lantern radius |
+|---|---|---|---|
+| 12–7 | Bright | — | 2 |
+| 6–3 | Guttering | −2 | 1 |
+| 2–1 | Ember | −4 | 1 |
+| 0 | Dark | −6 | 0 |
+
+- Start a run with **12**. Burn **1 every 2 turns**, so a clean 20-turn run finishes with a little left.
+- `SEARCH`, `READ` and `REST` burn **1 extra**. This is what makes oil an action budget: it only bites if you dawdle, which is exactly the right pressure against the turn limit.
+- An oil flask restores **4**.
+
+**Oil never degrades the tells.** Darkness raises difficulty and shrinks what you can see of the room you are standing in; the stench still comes through the doorway. Anything else quietly breaks "tells never lie."
+
+### 2.8.2 Confused — suppression, not misdirection
+
+For **2 turns** after a failed spore-bloom check, the sweetness drowns out everything else and the player receives **no tells at all**.
+
+Confused does **not** scramble movement — a failed `MOVE` roll already does that, so scrambled movement would add nothing the dice don't. And it does not scramble the tells into lies: absence is not falsehood, the player is told plainly that they are Confused, and they know exactly how long it lasts. The invariant survives intact.
+
+Moving blind for two turns with the Wumpus at large is frightening enough. If playtesting proves it tame, *scrambling* the tell directions is the spicier alternative — but it bends "tells never lie" and should not be reached for first.
 
 ## 2.9 Creatures and companions
 
@@ -151,12 +176,20 @@ The labyrinth is inhabited by things that are not the Wumpus. They are not obsta
 |---|---|
 | Critical Failure | It turns hostile, and it *shrieks*. Heavy scent marker, Wumpus advances, you take damage. |
 | Failure | It bolts, noisily. Moderate scent marker. Turn wasted. |
-| Mixed Success | Tamed, but skittish — costs you lamp oil or a ration to keep, and it will flee if you take damage. |
+| Mixed Success | Tamed, but **skittish** — costs lamp oil to keep, and it bolts when you take damage unless you spend a Fortune point. |
 | Success | Tamed. Companion joins you. |
 | Strong Success | Tamed, and it knows this place — reveals one adjacent room. |
 | Critical Success | Tamed and **brave** — this one can be sent to bait the Wumpus (see below). |
 
 **One companion slot.** Taming a new creature releases the current one. Choosing which creature to keep is a real decision, and abandoning one should cost you something emotionally — give it a line in the log.
+
+**Companion passives resolve at the start of the turn, before the player chooses.** One rule for all five creatures, no per-creature special cases.
+
+This matters most at an encounter: the grellhound's hazard reveal has to land *before* fight/tame, or it is flavour rather than a decision input. Firing first gives every companion visible tactical value at the moment you are deciding whether to release it — which is what makes "do I give up my grellhound to tame this goblin?" a real question.
+
+**Skittish companions bolt on damage taken, not on a failed roll.** Failed rolls are far too common — over 40% at starting stats — so tying flight to them would make the Mixed Success tame worthless.
+
+The player may **spend a Fortune point to keep a bolting companion.** That is an emotional purchase rather than a mechanical one, it gives Luck a use outside treasure and traps, and it turns a mixed tame into something you can defend rather than a downgraded consolation prize.
 
 **The bestiary (v1 — five creatures):**
 

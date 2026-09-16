@@ -35,14 +35,21 @@ Reverted; suite green. An unverified guard is worse than no guard, so re-verify 
 
 5. **Vitest is configured for `tests/` only**, not colocated tests, so the isolation walker never trips over test files sitting inside `src/engine/`.
 
-## Ambiguities in the GDD worth resolving in Phase 1
+## Ambiguities in the GDD — resolved 16 Sep
 
-- **Oil's effect on DCs is not quantified.** GDD 2.8 says low oil "raises all DCs" without saying by how much or at what threshold. Needs a number in `data/`.
-- **Confused** (spore blooms, GDD 2.8) says directions "scramble" for 2 turns — is that a random remap of all four, or a chance per move to go somewhere else? The second is easier to communicate in text.
-- **Companion passives during an encounter** — does the grellhound's hazard reveal fire before the player chooses fight/tame, or after? Materially changes the choice.
-- **Skittish companions** flee "if the player takes damage" — any damage, or a failed roll?
+All four open questions from this phase were decided and written into `docs/GDD.md`. Recorded here with reasoning, because the reasoning is what makes them safe to revisit later.
 
-None block Phase 1; all need a decision recorded when they are implemented.
+**1 · Oil is a labelled modifier, not a DC change** (GDD 2.8.1). Bands rather than a linear slope: Bright / Guttering −2 / Ember −4 / Dark −6, with the lantern radius shrinking alongside. Start 12, burn 1 per 2 turns, `SEARCH`/`READ`/`REST` burn 1 extra, flasks restore 4.
+
+*Why a modifier:* a raised DC is invisible to the player. `Guttering lamp −2` in the roll breakdown teaches the mechanic for free. *Why those numbers:* they make oil an **action budget** rather than a second death clock — a clean 20-turn run finishes with a little left, so oil only bites if you dawdle. *Hard rule:* oil never degrades the tells.
+
+**2 · Confused suppresses tells for 2 turns** (GDD 2.8.2). Not scrambled movement, which would duplicate a failed `MOVE` roll and add nothing the dice don't. Not scrambled tells either — that bends "tells never lie" and is held in reserve if suppression plays tame.
+
+**3 · Companion passives resolve at the start of the turn, before the player chooses** (GDD 2.9). One rule, all five creatures. Information arriving after a decision is flavour, not a decision input; firing first is what gives the grellhound tactical value at the moment you are deciding whether to release it.
+
+**4 · Skittish companions bolt on damage taken, not on a failed roll** (GDD 2.9), and a Fortune point can keep one. Failed rolls exceed 40% at starting stats, so tying flight to them would make the Mixed Success tame band worthless. The Fortune save gives Luck a use outside treasure and traps, and makes the purchase an emotional one.
+
+All four are cheap to reverse: three are values in `src/engine/data/`, one is a turn-order line in `resolve.ts`.
 
 ## Dependency versions — corrected 16 Sep
 
