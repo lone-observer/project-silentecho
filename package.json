@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "sim": "tsx scripts/sim.ts",
-    "map": "tsx scripts/map.ts"
+    "map": "tsx scripts/map.ts",
+    "hunt": "tsx scripts/hunt.ts",
+    "devlog": "tsx scripts/devlog.ts"
   },
   "dependencies": {
     "react": "19.3.0",

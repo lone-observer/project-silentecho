@@ -229,8 +229,20 @@ export const SCENT_BY_ACTION: Record<ActionKind, number> = {
 }
 
 export const SCENT = {
-  /** Scent in a room decays to nothing over this many turns. */
+  /** Nominal lifetime of a trail, in turns. Documentation for decayFactor. */
   decayTurns: 3,
+  /**
+   * Multiplied into every room's scent each turn. 0.37 (~1/e) leaves about 5%
+   * of a deposit after `decayTurns`.
+   *
+   * Exponential rather than linear on purpose: it preserves the ORDERING of
+   * trails, so a fight stays louder than a sneak for as long as both exist.
+   * A linear rate would make loud actions linger absurdly (a 4-weight fight
+   * outlasting the whole run) or quiet ones vanish instantly.
+   */
+  decayFactor: 0.37,
+  /** Below this a trail is deleted outright, keeping the field sparse and JSON small. */
+  epsilon: 0.02,
   /** Added on top of the action's weight when the roll is a critical failure. */
   criticalFailureBonus: 2,
   /** Taking the Heart is the loudest thing in the game. */
@@ -301,6 +313,14 @@ export const POPULATION = {
 // ---------------------------------------------------------------------------
 
 export const HEART = {
+  /**
+   * The Heart is LOUD. Carrying it multiplies every scent deposit.
+   *
+   * This is the answer to "why not just retrace my steps" (GDD 2.9.1): the way
+   * out crosses the same rooms but poses a different problem, because you are
+   * now laying a hot trail down a corridor the Wumpus is already moving toward.
+   */
+  carryScentMultiplier: 2,
   /** Tiers the Wumpus jumps when the Heart leaves its plinth (capped at 4). */
   tierEscalation: 1,
   /** Turns the Wumpus knows the player's exact position after the Heart is taken. */

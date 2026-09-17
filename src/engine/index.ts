@@ -9,3 +9,5 @@
 export * from './types.ts'
 export * from './rng.ts'
 export * from './dice.ts'
+export * from './generate.ts'
+export * from './wumpus.ts'

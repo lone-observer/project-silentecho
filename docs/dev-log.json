@@ -1,0 +1,58 @@
+{
+  "$comment": "Source of truth for the development log. docs/DEV-LOG.md is generated from this by `npm run devlog`; do not hand-edit the table there. Anything git can derive (commits, lines changed, files touched) is left out on purpose — only enter what git cannot know.",
+  "project": "Project Silent Echo",
+  "sessions": [
+    {
+      "id": 1,
+      "date": "2026-09-16",
+      "label": "Phase 0 — scaffold",
+      "hours": null,
+      "surface": "cowork",
+      "steps": ["0"],
+      "tests": { "before": 0, "after": 44 },
+      "tokens": { "input": null, "output": null, "cacheRead": null },
+      "costUsd": null,
+      "commits": ["269cce4", "987e807"],
+      "landed": "Type model, seeded RNG, dice resolver, engine-isolation guard verified by deliberate violation. Four GDD ambiguities resolved.",
+      "defects": [
+        { "what": "Dependencies two years stale; 5 advisories including a path traversal in @vitest/mocker", "foundBy": "tooling" }
+      ]
+    },
+    {
+      "id": 2,
+      "date": "2026-09-16",
+      "label": "Phase 1a–1c",
+      "hours": null,
+      "surface": "cowork",
+      "steps": ["1a", "1b", "1b-fix", "1c"],
+      "tests": { "before": 44, "after": 118 },
+      "tokens": { "input": null, "output": null, "cacheRead": null },
+      "costUsd": null,
+      "commits": ["ce71479", "7a643e6", "81911d0", "ef05f90"],
+      "landed": "Tuning constants. Labyrinth generation + ASCII map tool. Rewrite to 10x10 with difficulty contracts and the pit-free invariant; stone-grub retired. Wumpus scent AI, honest tells, hunt visualiser. Turn order corrected, metallic Heart tell.",
+      "defects": [
+        { "what": "7.1% of seeds placed the Heart too deep to return from — unwinnable before the first action", "foundBy": "probe" },
+        { "what": "68.7% of seeds forced the player across a hazard with no alternative route", "foundBy": "probe" },
+        { "what": "Tier 4 Wumpus walked past a player it could smell, to guard the entrance", "foundBy": "visualiser" },
+        { "what": "Player walked clean through the Wumpus — one catch check, made after the Wumpus moved", "foundBy": "visualiser" },
+        { "what": "Fairness invariant mis-specified: 'never caught without warning' is not true, and should not be", "foundBy": "tests" },
+        { "what": "Vertical doors drawn one column right of their rooms", "foundBy": "eye" },
+        { "what": "Hunt map drew no hazards or creatures, so the tells had nothing to check against", "foundBy": "eye" }
+      ]
+    },
+    {
+      "id": 3,
+      "date": "2026-09-17",
+      "label": "Docs and hygiene",
+      "hours": null,
+      "surface": "cowork",
+      "steps": ["docs"],
+      "tests": { "before": 118, "after": 118 },
+      "tokens": { "input": null, "output": null, "cacheRead": null },
+      "costUsd": null,
+      "commits": [],
+      "landed": "GDD 2.17 information model. Phase 1 progress note. Remote branch hygiene; main pushed. Dev log and generator.",
+      "defects": []
+    }
+  ]
+}

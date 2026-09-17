@@ -119,6 +119,7 @@ export type TellKind =
   | 'hum' //         portal
   | 'freshChisel' // snare carving
   | 'skittering' //  creature
+  | 'metallic' //    the Heart, still on its plinth
 
 export interface Tell {
   readonly direction: Direction
@@ -183,6 +184,8 @@ export type WumpusTier = 1 | 2 | 3 | 4
 
 export interface Wumpus {
   readonly roomId: RoomId
+  /** Where it came from, so it does not oscillate in corridors. */
+  readonly lastRoomId: RoomId | null
   readonly tier: WumpusTier
   /** Turns until it may move again. */
   readonly moveCooldown: number
@@ -202,6 +205,12 @@ export type StatusEffect = 'confused'
 
 export interface Player {
   readonly roomId: RoomId
+  /**
+   * The direction of the player's last MOVE — what they are facing.
+   * At low oil only this doorway leaks a tell (GDD 2.8.1); null means they
+   * have not committed to a direction yet and sense all four.
+   */
+  readonly facing: Direction | null
   readonly stats: Stats
   readonly health: number
   readonly maxHealth: number
