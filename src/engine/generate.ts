@@ -118,12 +118,46 @@ export function roomsAtLeast(labyrinth: Labyrinth, fromId: RoomId, min: number):
     .sort((a, b) => (dist[a] as number) - (dist[b] as number))
 }
 
+/**
+ * Where the Wumpus begins the run.
+ *
+ * Its distance from the entrance is a BAND (see DifficultyContract), not a
+ * minimum. The floor keeps it off the player at turn one; the ceiling is what
+ * makes it a threat at all — an unbounded start put it a mean of 11 rooms away
+ * on a 10x10, which a tier-1 Wumpus cannot cross inside twenty turns.
+ *
+ * Because the Heart also sits in a band (5-7) and the start band overlaps it,
+ * the Wumpus tends to begin somewhere near the prize rather than near the door.
+ * That is the shape the design wants: it shows up around the time you lift the
+ * Heart, so the escape is the hard part rather than the approach.
+ */
 export function chooseWumpusStart(labyrinth: Labyrinth, rng: Rng): RoomId {
-  const eligible = roomsAtLeast(labyrinth, labyrinth.entranceId, GENERATION.minWumpusStartDistance)
-    .filter((id) => id !== labyrinth.heartRoomId)
-  if (eligible.length > 0) return rng.pick(eligible)
+  const [lo, hi] = DIFFICULTY[labyrinth.difficulty].wumpusStartDistance
   const dist = distancesFrom(labyrinth, labyrinth.entranceId)
-  return Object.keys(dist).reduce((far, id) => ((dist[id] as number) > (dist[far] as number) ? id : far))
+
+  const inBand = (min: number, max: number): RoomId[] =>
+    Object.keys(dist)
+      .filter((id) => {
+        const d = dist[id] as number
+        return d >= min && d <= max && id !== labyrinth.heartRoomId && id !== labyrinth.entranceId
+      })
+      .sort()
+
+  const preferred = inBand(lo, hi)
+  if (preferred.length > 0) return rng.pick(preferred)
+
+  // Degenerate layouts only. Relax OUTWARD first — a Wumpus that starts too far
+  // is a disappointing run; one that starts too close is an unfair one.
+  for (let widen = 1; widen <= labyrinth.width + labyrinth.height; widen++) {
+    const wider = inBand(lo, hi + widen)
+    if (wider.length > 0) return rng.pick(wider)
+    const closer = inBand(Math.max(1, lo - widen), hi + widen)
+    if (closer.length > 0) return rng.pick(closer)
+  }
+
+  const reachable = Object.keys(dist).filter((id) => id !== labyrinth.entranceId).sort()
+  if (reachable.length === 0) return labyrinth.entranceId
+  return reachable.reduce((far, id) => ((dist[id] as number) > (dist[far] as number) ? id : far))
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +513,8 @@ function assemble(
       exits: a.exits[id] as Partial<Record<Direction, RoomId>>,
       hazard,
       creature: a.pop.creatures[id] ?? null,
+      // Nothing starts angry. Hostility is earned, by a critically failed tame.
+      creatureHostile: false,
       isEntrance: id === a.entranceId,
       hasHeart: id === a.heartRoomId,
       oilFlask: a.oil.has(id),

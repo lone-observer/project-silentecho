@@ -53,7 +53,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 1 | 2026-09-16 | Phase 0 — scaffold | — | 0 | 0 → 44 (+44) | +2118 / −9 | — | 1 |
 | 2 | 2026-09-16 | Phase 1a–1c | — | 1a, 1b, 1b-fix, 1c | 44 → 118 (+74) | +1731 / −31 | — | 7 |
 | 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | — | — | — |
-| | | **Total** | **—** | | **118** | **+3,849 / −40** | **—** | **8** |
+| 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | — | — | 7 |
+| | | **Total** | **2.0 h** | | **180** | **+3,849 / −40** | **—** | **15** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -61,11 +62,11 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| probe | 2 | 25% |
-| visualiser | 2 | 25% |
-| eye | 2 | 25% |
-| tooling | 1 | 13% |
-| tests | 1 | 13% |
+| visualiser | 5 | 33% |
+| eye | 5 | 33% |
+| probe | 2 | 13% |
+| tests | 2 | 13% |
+| tooling | 1 | 7% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -77,6 +78,13 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-16 | Fairness invariant mis-specified: 'never caught without warning' is not true, and should not be | tests |
 | 2026-09-16 | Vertical doors drawn one column right of their rooms | eye |
 | 2026-09-16 | Hunt map drew no hazards or creatures, so the tells had nothing to check against | eye |
+| 2026-09-17 | GDD 2.9.1 (world drift) did not exist — referenced by the turn order, the roadmap and a tuning comment, with nine words of spec anywhere | eye |
+| 2026-09-17 | Turn order step 7 ran companion passives BEFORE world drift, so a grellhound reported hazards from a labyrinth that no longer existed | eye |
+| 2026-09-17 | A brave companion is unobtainable at starting stats — P(critical-success tame) is 0% for every creature at INT 8, and 0% for the Quiet One at every stat. SEND fired 0 times in 150 runs | visualiser |
+| 2026-09-17 | SEND's decoy out-smells the player for 1 turn while carrying the Heart, not the 2–3 the GDD promises; COMPANION.sendDecoyTurns = 3 was a number no value of sendScent could honour | visualiser |
+| 2026-09-17 | Wumpus start distance had a floor and no ceiling — mean 11 rooms away on a 10x10 against tier reaches of 6–18, so it was unreachable in 83% of Drowsing and 63% of Stirring seeds | visualiser |
+| 2026-09-17 | The tame sweep's adjacency metric undercounted: runs that ended in a catch broke before closestWumpus was updated, recording Infinity. Spotted because adjacency (40%) came out below the catch rate (47%), which is impossible | eye |
+| 2026-09-17 | First hostility-travel test asserted the vacated room was calm, which fails legitimately when a second hostile creature moves into it during the same drift pass. The test was wrong, not the code | tests |
 
 <!-- devlog:end -->
 

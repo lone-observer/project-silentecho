@@ -10,7 +10,7 @@ import {
 } from '../src/engine/generate.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
 import type { Difficulty, Direction, Labyrinth, Room } from '../src/engine/types.ts'
-import { DIFFICULTY, GENERATION, HAZARD_COUNTS, POPULATION, RUN } from '../src/engine/data/tuning.ts'
+import { DIFFICULTY, HAZARD_COUNTS, POPULATION, RUN, wumpusReach } from '../src/engine/data/tuning.ts'
 
 const DIFFICULTIES: readonly Difficulty[] = ['drowsing', 'stirring', 'hunting', 'ravening']
 
@@ -231,14 +231,62 @@ describe('placement', () => {
 })
 
 describe('the Wumpus start', () => {
-  it('is far from the entrance and never on the Heart or entrance', () => {
-    for (const seed of SEEDS.slice(0, 25)) {
-      const rng = createRng(seed)
-      const lab = generateLabyrinth(rng)
-      const start = chooseWumpusStart(lab, rng)
-      expect(distancesFrom(lab, lab.entranceId)[start]).toBeGreaterThanOrEqual(GENERATION.minWumpusStartDistance)
-      expect(start).not.toBe(lab.heartRoomId)
-      expect(start).not.toBe(lab.entranceId)
+  it('lands inside its difficulty band, and never on the Heart or entrance', () => {
+    for (const difficulty of DIFFICULTIES) {
+      const [lo, hi] = DIFFICULTY[difficulty].wumpusStartDistance
+      for (const seed of SEEDS.slice(0, 25)) {
+        const rng = createRng(seed)
+        const lab = generateLabyrinth(rng, { difficulty })
+        const start = chooseWumpusStart(lab, rng)
+        const d = distancesFrom(lab, lab.entranceId)[start] as number
+        expect(d, `${difficulty}/seed ${seed} started at ${d}, band [${lo},${hi}]`).toBeGreaterThanOrEqual(lo)
+        expect(d, `${difficulty}/seed ${seed} started at ${d}, band [${lo},${hi}]`).toBeLessThanOrEqual(hi)
+        expect(start).not.toBe(lab.heartRoomId)
+        expect(start).not.toBe(lab.entranceId)
+      }
+    }
+  })
+
+  /**
+   * THE REGRESSION TEST.
+   *
+   * The original bug was a start distance specified at one end only: a floor of
+   * 5 and no ceiling. On a 10x10 that placed the Wumpus a mean of 11 rooms from
+   * the entrance while a tier-1 Wumpus covers 6 in twenty turns, so in 83% of
+   * Drowsing seeds the monster could not reach the player at all — and Drowsing
+   * is the tier whose whole job is to teach what the stench means.
+   *
+   * This is the same shape as the unwinnable-seed bug in 1b. If a band ever
+   * loses its ceiling again, or a tier is slowed down without the band being
+   * retightened, this fails.
+   */
+  it('can always physically reach the player inside the turn budget', () => {
+    for (const difficulty of DIFFICULTIES) {
+      const [lo, hi] = DIFFICULTY[difficulty].wumpusStartDistance
+      const reach = wumpusReach(difficulty)
+      expect(hi, `${difficulty}: band ceiling ${hi} exceeds a tier-${DIFFICULTY[difficulty].wumpusTier} reach of ${reach}`)
+        .toBeLessThanOrEqual(reach)
+      expect(lo).toBeGreaterThan(0)
+      expect(lo).toBeLessThanOrEqual(hi)
+      expect(Number.isFinite(hi), `${difficulty}: band must have a ceiling`).toBe(true)
+    }
+  })
+
+  it('starts nowhere near the entrance — no turn-one ambush', () => {
+    for (const difficulty of DIFFICULTIES) {
+      // Two rooms is the floor below which the stench is already on you before
+      // the run begins. Every band must clear it comfortably.
+      expect(DIFFICULTY[difficulty].wumpusStartDistance[0]).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('is deterministic for a given seed and difficulty', () => {
+    for (const difficulty of DIFFICULTIES) {
+      for (const seed of SEEDS.slice(0, 10)) {
+        const a = (() => { const r = createRng(seed); return chooseWumpusStart(generateLabyrinth(r, { difficulty }), r) })()
+        const b = (() => { const r = createRng(seed); return chooseWumpusStart(generateLabyrinth(r, { difficulty }), r) })()
+        expect(a).toBe(b)
+      }
     }
   })
 })

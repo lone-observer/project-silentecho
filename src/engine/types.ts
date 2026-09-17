@@ -135,6 +135,16 @@ export interface Room {
   readonly exits: Partial<Record<Direction, RoomId>>
   readonly hazard: HazardKind | null
   readonly creature: CreatureKind | null
+  /**
+   * The creature in this room has turned on the player — the result of a
+   * critically failed TAME (GDD 2.9). A hostile creature can no longer be
+   * tamed; only fought, snuck past, or fled from.
+   *
+   * This belongs to the CREATURE, not the room: world drift carries it along
+   * when the creature wanders (GDD 2.9.1). A hostile flag left behind in an
+   * empty chamber is a bug. Always false where `creature` is null.
+   */
+  readonly creatureHostile: boolean
   readonly isEntrance: boolean
   readonly hasHeart: boolean
   readonly oilFlask: boolean

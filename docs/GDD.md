@@ -40,8 +40,10 @@ Turn 20 is a real antagonist. A 5×5 labyrinth is ~8 turns deep and ~8 turns bac
 4. Scent deposited for the action taken
 5. Wumpus moves, if it is due
 6. **Catch check — it entered your room.** *It came for you.*
-7. Companion passives, world drift (§2.9.1), scent decay, oil burn
+7. World drift (§2.9.1), companion passives, scent decay, oil burn
 8. Win/loss evaluation, turn counter
+
+**Why drift precedes passives in step 7.** A grellhound reveals what is in the adjacent rooms. If it reported them before a creature wandered in, it would be describing a world that no longer exists — a companion whose entire job is honest information, lying. Drift first, then passives. See §2.9.1.
 
 **Why step 2 exists.** The hunt visualiser caught a player walking clean through a Wumpus: they moved into its room, it stepped aside the same turn, and a check made only after the Wumpus moved found an empty room. Step 2 also closes the swap case for free — two bodies trading places down a corridor slip past a post-move check, but at step 2 the Wumpus has not moved yet, so it is still there to be found.
 
@@ -49,12 +51,18 @@ Turn 20 is a real antagonist. A 5×5 labyrinth is ~8 turns deep and ~8 turns bac
 
 Difficulty is not merely a Wumpus tier. It is a set of guarantees the generator must satisfy before a labyrinth is playable.
 
-| Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Turns |
-|---|---|---|---|---|---|
-| Drowsing | 1 | 2 | +2 | 5–6 | 20 |
-| Stirring | 2 | 1 | +3 | 6–7 | 20 |
-| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 20 |
-| Ravening | 4 | 0 | — | 7 | 18 |
+| Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Wumpus start | Turns |
+|---|---|---|---|---|---|---|
+| Drowsing | 1 | 2 | +2 | 5–6 | 4–6 | 20 |
+| Stirring | 2 | 1 | +3 | 6–7 | 5–8 | 20 |
+| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 5–8 | 20 |
+| Ravening | 4 | 0 | — | 7 | 5–8 | 18 |
+
+**The Wumpus start is a band, and the ceiling is the load-bearing half.** It was once a floor alone — "at least 5 rooms from the entrance" — which on a 10×10 grid put it a mean of 11 rooms away. A Drowsing Wumpus covers 6 rooms in twenty turns, so in 83% of Drowsing seeds and 63% of Stirring ones **it could not reach the player at all**, and the teaching tier could not teach the tell it exists to teach. This is the same failure as a Heart distance specified at one end only (§2.2): a bound that only says *not too close* guarantees *too far*.
+
+The band compensates for how fast each tier moves, so that the thing arrives at all; the **tier** then decides how bad its arrival is. Drowsing is tighter because a tier-1 Wumpus moves once every three turns. The other three share a band and escalate purely through perception radius and move rate — a tier-4 Wumpus placed identically to a tier-2 one is a far worse problem.
+
+Because the start band overlaps the Heart's, the Wumpus tends to begin nearer the prize than the door, and first contact lands around turn 7 — the moment the Heart leaves the plinth. That is the intended shape: **the escape is the hard part, not the approach.**
 
 A **hazard-free route** avoids every hazard *and* every creature. Two routes count as distinct when closing any single room on the first still leaves a way through.
 
@@ -231,12 +239,14 @@ The labyrinth is inhabited by things that are not the Wumpus. They are not obsta
 
 | Band | Result |
 |---|---|
-| Critical Failure | It turns hostile, and it *shrieks*. Heavy scent marker, Wumpus advances, you take damage. |
+| Critical Failure | It turns hostile, and it *shrieks*. Heavy scent marker, Wumpus advances, you take damage. **It stays in the room and can never be tamed again** — `TAME` leaves the menu, and what remains is to fight it, slip past it, or run. This is the only band that leaves a live, untamed creature standing in front of you. |
 | Failure | It bolts, noisily. Moderate scent marker. Turn wasted. |
 | Mixed Success | Tamed, but **skittish** — costs lamp oil to keep, and it bolts when you take damage unless you spend a Fortune point. |
 | Success | Tamed. Companion joins you. |
-| Strong Success | Tamed, and it knows this place — reveals one adjacent room. |
+| Strong Success | Tamed, and it knows this place — reveals one adjacent room, and it's **brave** enough to send (see below). |
 | Critical Success | Tamed and **brave** — this one can be sent to bait the Wumpus (see below). |
+
+**A natural 20 on the tame roll is always brave**, regardless of which band the margin lands in — the same principle as the natural-20-always-carries-a-gift rule above (§2.6), extended one step further so that no creature's difficulty can make the escape valve permanently unreachable. This is the Quiet One's only realistic path to being sendable: its Hard DC rarely clears Strong Success even at high INT, and without this floor the creature GDD names as the reason `SEND` matters most would be the one creature it never works on. *(Decided 17 Sep 2026 — see `claude/design-decisions.md` in the project; revises the original criticalSuccess-only gate from 16 Sep.)*
 
 **One companion slot.** Taming a new creature releases the current one. Choosing which creature to keep is a real decision, and abandoning one should cost you something emotionally — give it a line in the log.
 
@@ -259,11 +269,58 @@ The player may **spend a Fortune point to keep a bolting companion.** That is an
 
 **The stone-grub is not tameable and is not in v1.** It returns in a late phase as the labyrinth's **shuffler**: grubs eat walls, so on the higher difficulties the geometry drifts while you are inside it. That explains the changing world diegetically instead of by fiat, and it makes the grub a hazard with a personality rather than a companion with a gimmick.
 
-**`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail for 2–3 turns.
+**`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail — **3 turns for a goblin, lumewing or grellhound (2 if you're carrying the Heart), 2 turns for the Quiet One (1 with the Heart).** The decoy's strength scales with how hard the creature was to tame: `COMPANION.sendScent` is 10 for the Easy/Moderate-DC creatures and 5 for the Quiet One's Hard DC, against the same `SCENT.decayFactor` everyone else decays by — the harder creature isn't a worse decoy by design, it's what the shared scent-decay math produces once "1 turn while carrying the Heart" is held fixed. *(Decided 17 Sep 2026 — see `claude/design-decisions.md`; the flat `sendScent = 5` / "2–3 turns" figure from 16 Sep is superseded.)*
 
 **The companion does not come back.**
 
 This is the single most important design beat in the game. It is the escape valve that makes a Tier 4 Wumpus survivable, and it costs you the creature you spent two turns and a good roll earning. Make the log line for it land. Do not soften it, do not add a chance of return, do not let the player un-choose it.
+
+### 2.9.1 World drift — the labyrinth is not a board
+
+**Within a run, exactly two things move: the creatures, and the Wumpus.** A third thing changes you rather than the map.
+
+**The terrain does not drift.** Hazards are fixed at generation and stay where they were put for the whole run. This is deliberate and it is what makes a charted map worth having: what you learn about *where the pits are* stays true, and what decays is the living half of your knowledge — the Wumpus has moved, and the creatures have wandered off. §2.11 promises that a labyrinth you retreat from and return to has "the Wumpus moved, blooms spread and creatures wandered"; **the blooms spreading is the between-runs half of that promise, not a per-turn one.** Between visits the labyrinth grows; inside a visit it only stirs.
+
+That split is what answers the obvious exploit — *map it once, then walk the safe line every time* — without punishing the player for having mapped it. The route you learned is still geometrically sound; what you cannot count on is that it is still empty.
+
+Drift resolves at **step 7** of the turn order (§2.2.2), the last thing before the next turn's tells are read. That placement is load-bearing: every tell the player ever sees describes the world **after** the most recent drift, so drift can never make a reported tell false. The invariant survives untouched.
+
+#### Wandering creatures
+
+Each untamed creature has a per-turn chance to step into an adjacent room. A creature may only move into a room that is **empty** — no hazard, no other creature, not the entrance, not the Heart's chamber, not the room the Wumpus occupies. One thing per room is what keeps a doorway's tells unambiguous, and drift must not break what generation guarantees.
+
+A creature **may** wander into the room the player is standing in. It does **not** trigger an encounter when it does. The encounter choice (§2.9) stays bound to the player *entering* a room, for two reasons: a forced encounter from drift would consume a turn the player never spent, and the player's turn has already resolved by step 7 — there is nothing left to choose with. The creature is simply there, visible in the room description, and the player decides next turn. A creature that walks in on you is an intrusion, not an ambush.
+
+**The rate is deliberately low.** At a high rate the skittering tell degenerates into noise: knowing a creature is east is worthless if it will not be east when you get there. A quarter-chance per creature per turn means a tell you act on immediately is usually still true, while the map you charted ten turns ago is not.
+
+**Hostility travels with the creature**, never with the room. A goblin that turned on you after a botched tame (§2.9) and then wandered next door is still angry, and the chamber it left is merely empty. A hostile flag stranded in a vacated room is a bug.
+
+#### The Heart-carrying scent multiplier
+
+The other drift is not on the map. Lifting the Heart multiplies every scent deposit the player makes for the rest of the run (`HEART.carryScentMultiplier`), and this is what answers *why not simply retrace my steps*: the way out crosses the same rooms but poses a different problem, because you are now laying a hot trail down a corridor the Wumpus is already moving toward. It is applied at step 4 in `resolve.ts`, not in the drift pass — it belongs here because it is the third thing that changes state mid-run, not because it shares an implementation.
+
+#### Drift scales with difficulty, and Drowsing does not drift
+
+| Difficulty | Drift |
+|---|---|
+| Drowsing | **none** |
+| Stirring | normal |
+| Hunting | normal |
+| Ravening | accelerated |
+
+**Drowsing is the teaching tier** (§2.10: "Teaches the tells"). A player learning what *skittering* means cannot learn it in a world where the thing has moved by the time they arrive — the lesson becomes unlearnable and the tells read as arbitrary, which is precisely the failure "tells never lie" exists to prevent. A static world on the first difficulty is not a missing feature; it is the tutorial.
+
+Ravening already loses two turns rather than gaining two corridors (§2.2.1). Accelerated drift is the same idea in a different currency: pressure, not distance.
+
+#### Companion passives, and where they actually resolve
+
+§2.9 says companion passives resolve before the player chooses, so that the grellhound's hazard reveal is a decision input rather than flavour. That reason is right. The implementation is cleaner as a split:
+
+- **Informational passives are queries**, computed at read time alongside the tells — the grellhound's adjacent-hazard reveal and its radius-2 growl, the lumewing's lantern radius. Being derived rather than stored, they cannot go stale, and they are by construction available before any choice.
+- **Modifier passives are labelled modifiers** supplied at roll time — the goblin's `+2` to `SEARCH`, the Quiet One's multiplier on scent output.
+- **Only state changes are step-7 effects** — the goblin's occasional oil scrounge, and the skittish companion's oil upkeep.
+
+This preserves §2.9's guarantee (the reveal always lands before fight-or-tame) without needing an ordering rule to enforce it. It also removes a live bug: if passives resolved as stored effects *before* drift in step 7, a grellhound would report the pre-drift hazards and then a bloom would spread — a companion whose whole job is honest information, lying. Step 7 is ordered **drift first, then passives**, and the informational half is a query regardless.
 
 ## 2.10 The Wumpus
 

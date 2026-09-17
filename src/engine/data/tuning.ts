@@ -10,7 +10,7 @@
  * change the GDD too, or the two drift and the GDD stops being the source of truth.
  */
 
-import type { ActionKind, CreatureKind, Difficulty, HazardKind, WumpusTier } from '../types.ts'
+import type { ActionKind, CreatureKind, Difficulty, HazardKind, OutcomeBand, WumpusTier } from '../types.ts'
 import { DC } from '../types.ts'
 
 /**
@@ -69,8 +69,10 @@ export const GENERATION = {
    * authored and gives (archetype x action) outcomes real meaning.
    */
   archetypeAffinity: 0.75,
-  /** Minimum distance from the entrance at which the Wumpus may start. */
-  minWumpusStartDistance: 5,
+  // Wumpus start distance is a BAND, per difficulty — see DifficultyContract.
+  // It used to be a lone minimum here, which is how a monster that could never
+  // reach the player shipped for three steps. A distance specified at only one
+  // end is the same bug that produced arithmetically unwinnable maps in 1b.
   /** Whole-labyrinth regenerations before we accept the closest near-miss. */
   maxGenerationAttempts: 60,
   /** Place/measure/repair passes spent trying to hit a difficulty contract. */
@@ -273,20 +275,175 @@ export const COMPANION = {
   skittishFleesOnDamage: true,
   /** Fortune points spent to keep a bolting skittish companion. GDD 2.9 */
   skittishFortuneSave: 1,
-  /** A sent companion drops this much scent in the target room. */
+  /**
+   * A sent companion drops this much scent in the target room.
+   *
+   * The decoy is PURE SCENT — there is no "the Wumpus is distracted" flag, and
+   * there must not be one. The bait works by out-smelling the player's own trail
+   * inside the existing perception model, which means it is tuned by this one
+   * number and stays legible in the hunt/tame visualisers. A special-case lock
+   * would make SEND the only thing in the game the Wumpus AI knows about by name.
+   *
+   * Its duration is therefore arithmetic, not a setting: see sendDecoyTurns.
+   */
   sendScent: 5,
-  /** Turns the Wumpus stays drawn to the decoy. */
-  sendDecoyTurns: 3,
+  /**
+   * Turns the decoy is expected to out-smell the player. DERIVED, not free.
+   *
+   * A decoy dominates for as long as `sendScent * decayFactor^n` exceeds the
+   * player's freshest deposit. tests/creatures.test.ts asserts the relationship
+   * holds, so changing sendScent without changing this fails the build rather
+   * than quietly making the GDD's "2-3 turns" a lie.
+   */
+  sendDecoyTurns: 2,
   /** A sent companion NEVER returns. Not a tunable — see CLAUDE.md 3. */
   sendIsPermanent: true,
   /** Oil per turn to keep a skittish companion fed and calm. */
   skittishUpkeepOil: 1,
   lumewingLanternBonus: 1,
   goblinSearchBonus: 2,
+  /** Chance per turn a goblin companion turns up a point of oil. GDD 2.9 */
+  goblinScroungeChance: 0.1,
+  goblinScroungeOil: 1,
   /** Radius at which the grellhound growls — one extra turn of warning. */
   grellhoundWarningRadius: 2,
   /** Multiplier on the player's scent output while the Quiet One follows. */
   quietOneScentMultiplier: 0.5,
+} as const
+
+// ---------------------------------------------------------------------------
+// Encounter outcome bands — GDD 2.9
+// ---------------------------------------------------------------------------
+
+/**
+ * The MECHANICAL consequence of each band. Prose and per-archetype flavour are
+ * data/outcomes.ts (step 1f); these tables say only what changes in the world.
+ *
+ * `extraScent` is added ON TOP of SCENT_BY_ACTION for the action taken, so the
+ * fight/tame asymmetry survives every band: a clean tame is still quieter than
+ * a clean fight, and a botched tame is loud precisely because it stopped being
+ * a tame. Nothing here may invert that ordering (CLAUDE.md 3).
+ */
+export interface TameOutcome {
+  readonly tamed: boolean
+  /** Only a critical success yields a companion brave enough to bait. */
+  readonly brave: boolean
+  /** Mixed success: costs oil to keep, and bolts on damage. */
+  readonly skittish: boolean
+  /** It turns on you and stays in the room. */
+  readonly hostile: boolean
+  /** It leaves the room entirely — the creature is gone from the labyrinth. */
+  readonly bolts: boolean
+  readonly extraScent: number
+  readonly damage: number
+  /** A strong success knows this place: adjacent rooms revealed. */
+  readonly revealsRooms: number
+}
+
+export const TAME_OUTCOMES: Record<OutcomeBand, TameOutcome> = {
+  // It shrieks. 0.5 + 3.5 = 4 — exactly a FIGHT's worth of noise, which is the
+  // point: a tame that fails this badly has become the thing you were avoiding.
+  criticalFailure: { tamed: false, brave: false, skittish: false, hostile: true,  bolts: false, extraScent: 3.5, damage: 1, revealsRooms: 0 },
+  // Bolts noisily. 0.5 + 1.5 = 2, a FLEE's worth. Turn wasted, creature gone.
+  failure:         { tamed: false, brave: false, skittish: false, hostile: false, bolts: true,  extraScent: 1.5, damage: 0, revealsRooms: 0 },
+  mixed:           { tamed: true,  brave: false, skittish: true,  hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
+  success:         { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
+  strongSuccess:   { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 1 },
+  criticalSuccess: { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
+}
+
+export interface FightOutcome {
+  /** The creature is driven off and removed from the labyrinth. */
+  readonly driven: boolean
+  readonly damage: number
+  readonly extraScent: number
+}
+
+export const FIGHT_OUTCOMES: Record<OutcomeBand, FightOutcome> = {
+  // 4 + 2 = 6 — a botched fight is the loudest thing short of taking the Heart.
+  criticalFailure: { driven: false, damage: 2, extraScent: 2 },
+  failure:         { driven: false, damage: 1, extraScent: 0 },
+  // The signature band: you won, and it cost you a point of health.
+  mixed:           { driven: true,  damage: 1, extraScent: 0 },
+  success:         { driven: true,  damage: 0, extraScent: 0 },
+  strongSuccess:   { driven: true,  damage: 0, extraScent: 0 },
+  criticalSuccess: { driven: true,  damage: 0, extraScent: 0 },
+}
+
+export interface SneakOutcome {
+  /** True if the player slips past into the room they were headed for. */
+  readonly passed: boolean
+  readonly damage: number
+  readonly extraScent: number
+}
+
+export const SNEAK_OUTCOMES: Record<OutcomeBand, SneakOutcome> = {
+  criticalFailure: { passed: false, damage: 1, extraScent: 2 },
+  failure:         { passed: false, damage: 0, extraScent: 0.75 },
+  // Through, but not silently — 0.25 + 0.75 = 1, no quieter than walking.
+  mixed:           { passed: true,  damage: 0, extraScent: 0.75 },
+  success:         { passed: true,  damage: 0, extraScent: 0 },
+  strongSuccess:   { passed: true,  damage: 0, extraScent: 0 },
+  criticalSuccess: { passed: true,  damage: 0, extraScent: 0 },
+}
+
+export interface FleeOutcome {
+  /** True if the player retreats to the room they came from. */
+  readonly fled: boolean
+  readonly damage: number
+  readonly extraScent: number
+}
+
+export const FLEE_OUTCOMES: Record<OutcomeBand, FleeOutcome> = {
+  criticalFailure: { fled: false, damage: 1, extraScent: 1 },
+  failure:         { fled: false, damage: 0, extraScent: 1 },
+  mixed:           { fled: true,  damage: 1, extraScent: 0 },
+  success:         { fled: true,  damage: 0, extraScent: 0 },
+  strongSuccess:   { fled: true,  damage: 0, extraScent: 0 },
+  criticalSuccess: { fled: true,  damage: 0, extraScent: 0 },
+}
+
+// ---------------------------------------------------------------------------
+// World drift — GDD 2.9.1
+// ---------------------------------------------------------------------------
+
+/**
+ * WITHIN A RUN, exactly two things move: the creatures, and the Wumpus.
+ *
+ * The terrain does not. Hazards are fixed at generation and stay where they
+ * were put, so a map the player charts stays accurate about the dangerous
+ * rooms for the whole run. That is what makes "return to a labyrinth you
+ * mapped" (GDD 2.11) reward the right thing: you keep the hazards, and what
+ * you lose is the living half — the Wumpus has moved and the creatures have
+ * wandered. Blooms spreading is a BETWEEN-RUNS change, not a per-turn one.
+ *
+ * Drift resolves at step 7 of the turn order — the last thing before the next
+ * turn's tells are read — so a tell can never describe a pre-drift world.
+ *
+ * One placement rule is load-bearing rather than tuning: nothing drifts into
+ * an occupied room. One thing per room is what keeps a doorway's tells
+ * unambiguous, and drift must not undo what generation promises.
+ */
+export const DRIFT = {
+  /**
+   * Chance per untamed creature per turn to step to an adjacent empty room.
+   *
+   * Deliberately low. At a high rate the skittering tell degenerates into
+   * noise — knowing a creature is east is worthless if it will not be east
+   * when you arrive. A quarter means a tell acted on immediately is usually
+   * still true, while a map charted ten turns ago is not.
+   */
+  creatureMoveChance: 0.25,
+  /**
+   * Multiplier on the rate, per difficulty.
+   *
+   * Drowsing is ZERO on purpose. It is the teaching tier (GDD 2.10) and a
+   * player learning what `skittering` means cannot learn it in a world where
+   * the thing has moved by the time they arrive — the tells would read as
+   * arbitrary, which is exactly what "tells never lie" exists to prevent.
+   * A static first difficulty is the tutorial, not a missing feature.
+   */
+  byDifficulty: { drowsing: 0, stirring: 1, hunting: 1, ravening: 1.5 } as Record<Difficulty, number>,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -316,7 +473,8 @@ export const HEART = {
   /**
    * The Heart is LOUD. Carrying it multiplies every scent deposit.
    *
-   * This is the answer to "why not just retrace my steps" (GDD 2.9.1): the way
+   * This is the answer to "why not just retrace my steps" (GDD 2.9.1 — it is
+   * the third world drift, the one that changes you rather than the map): the way
    * out crosses the same rooms but poses a different problem, because you are
    * now laying a hot trail down a corridor the Wumpus is already moving toward.
    */
@@ -358,16 +516,44 @@ export interface DifficultyContract {
   readonly safeRoutes: 0 | 1 | 2
   readonly minSafeDetour: number
   readonly heartDistance: readonly [number, number]
+  /**
+   * Where the Wumpus starts, as a distance band from the entrance — a
+   * GUARANTEE, exactly like heartDistance, not a preference.
+   *
+   * The floor keeps it off the player at turn one. The CEILING is the part that
+   * was missing: with only a floor, a 10x10 grid placed it a mean of 11 rooms
+   * away, and a tier-1 Wumpus covers 6 rooms in 20 turns. It was unreachable in
+   * 83% of Drowsing seeds and 63% of Stirring ones — the teaching tier could not
+   * teach the tell it exists to teach. tests/generate.test.ts now asserts every
+   * ceiling sits inside its tier's reach, so this cannot regress silently.
+   *
+   * The band compensates for tier SPEED so the thing arrives at all; the tier
+   * then decides how bad that is. Drowsing is tighter because tier 1 moves once
+   * every three turns; the other three share a band and escalate purely through
+   * perception and move rate.
+   */
+  readonly wumpusStartDistance: readonly [number, number]
   readonly maxTurns: number
 }
 
 export const DIFFICULTY: Record<Difficulty, DifficultyContract> = {
-  drowsing: { wumpusTier: 1, safeRoutes: 2, minSafeDetour: 2, heartDistance: [5, 6], maxTurns: 20 },
-  stirring: { wumpusTier: 2, safeRoutes: 1, minSafeDetour: 3, heartDistance: [6, 7], maxTurns: 20 },
-  hunting:  { wumpusTier: 3, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], maxTurns: 20 },
+  drowsing: { wumpusTier: 1, safeRoutes: 2, minSafeDetour: 2, heartDistance: [5, 6], wumpusStartDistance: [4, 6], maxTurns: 20 },
+  stirring: { wumpusTier: 2, safeRoutes: 1, minSafeDetour: 3, heartDistance: [6, 7], wumpusStartDistance: [5, 8], maxTurns: 20 },
+  hunting:  { wumpusTier: 3, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 20 },
   // Harder through pressure, not distance: a deeper Heart only adds corridors,
-  // whereas fewer turns bites on every decision in the run at once.
-  ravening: { wumpusTier: 4, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], maxTurns: 18 },
+  // whereas fewer turns bites on every decision in the run at once. The start
+  // band is shared with stirring and hunting on purpose — a tier-4 Wumpus
+  // placed identically is a far worse problem than a tier-2 one.
+  ravening: { wumpusTier: 4, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 18 },
+}
+
+/**
+ * How far the Wumpus can travel inside the turn budget at a given difficulty.
+ * A start band whose ceiling exceeds this places a monster that cannot arrive.
+ */
+export function wumpusReach(difficulty: Difficulty): number {
+  const contract = DIFFICULTY[difficulty]
+  return Math.floor(contract.maxTurns / WUMPUS_TIERS[contract.wumpusTier].moveEveryNTurns)
 }
 
 export const DEFAULT_DIFFICULTY: Difficulty = 'stirring'

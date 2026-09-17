@@ -110,6 +110,8 @@ If a sim run or playtest suggests one of these is broken, report it and propose 
 
 **When you're unsure:** ask. A wrong assumption that survives three phases costs more than a question.
 
+**Concurrent sessions and docs:** a PM session and a code session can be open at the same time, and both write to `docs/GDD.md`, `docs/PHASE-1-PROGRESS.md` and `docs/ROADMAP.md`. Neither merges — the later write wins and silently discards the earlier one, even mid-paragraph, with no error. Before a multi-edit doc-writing sequence on any of those three files, check and set the **Doc lock** line at the top of `docs/PHASE-1-PROGRESS.md` — see that file for the protocol. A one-line update doesn't need it.
+
 ---
 
 ## 6. Things that are not in scope

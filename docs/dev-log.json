@@ -1,11 +1,11 @@
 {
-  "$comment": "Source of truth for the development log. docs/DEV-LOG.md is generated from this by `npm run devlog`; do not hand-edit the table there. Anything git can derive (commits, lines changed, files touched) is left out on purpose \u2014 only enter what git cannot know.",
+  "$comment": "Source of truth for the development log. docs/DEV-LOG.md is generated from this by `npm run devlog`; do not hand-edit the table there. Anything git can derive (commits, lines changed, files touched) is left out on purpose — only enter what git cannot know.",
   "project": "Project Silent Echo",
   "sessions": [
     {
       "id": 1,
       "date": "2026-09-16",
-      "label": "Phase 0 \u2014 scaffold",
+      "label": "Phase 0 — scaffold",
       "hours": null,
       "surface": "cowork",
       "steps": [
@@ -38,7 +38,7 @@
     {
       "id": 2,
       "date": "2026-09-16",
-      "label": "Phase 1a\u20131c",
+      "label": "Phase 1a–1c",
       "hours": null,
       "surface": "cowork",
       "steps": [
@@ -64,10 +64,10 @@
         "81911d0",
         "ef05f90"
       ],
-      "landed": "Tuning constants. Labyrinth generation + ASCII map tool. Rewrite to 10x10 with difficulty contracts and the pit-free invariant; stone-grub retired. Wumpus scent AI, honest tells, hunt visualiser. Turn order corrected, metallic Heart tell. (Token figure covers session 3 as well \u2014 same conversation day.)",
+      "landed": "Tuning constants. Labyrinth generation + ASCII map tool. Rewrite to 10x10 with difficulty contracts and the pit-free invariant; stone-grub retired. Wumpus scent AI, honest tells, hunt visualiser. Turn order corrected, metallic Heart tell. (Token figure covers session 3 as well — same conversation day.)",
       "defects": [
         {
-          "what": "7.1% of seeds placed the Heart too deep to return from \u2014 unwinnable before the first action",
+          "what": "7.1% of seeds placed the Heart too deep to return from — unwinnable before the first action",
           "foundBy": "probe"
         },
         {
@@ -79,7 +79,7 @@
           "foundBy": "visualiser"
         },
         {
-          "what": "Player walked clean through the Wumpus \u2014 one catch check, made after the Wumpus moved",
+          "what": "Player walked clean through the Wumpus — one catch check, made after the Wumpus moved",
           "foundBy": "visualiser"
         },
         {
@@ -121,6 +121,61 @@
       "landed": "GDD 2.17 information model. Phase 1 progress note. Remote branch hygiene; main pushed. Dev log and generator. Token usage is folded into session 2.",
       "defects": [],
       "effectiveTokens": null
+    },
+    {
+      "id": 4,
+      "date": "2026-09-17",
+      "label": "Phase 1d — creatures",
+      "hours": 2,
+      "surface": "cowork",
+      "steps": [
+        "1d",
+        "1b-fix"
+      ],
+      "tests": {
+        "before": 118,
+        "after": 180
+      },
+      "tokens": {
+        "input": 310,
+        "output": 169515,
+        "cacheRead": 41031876,
+        "cacheWrite": 916443
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "Creatures, encounters, taming bands, companion passives, SEND and world drift (src/engine/creatures.ts). GDD 2.9.1 written from scratch — it was referenced in three places and had never existed. scripts/tame.ts visualiser with a SWEEP aggregate mode. Room gained creatureHostile; a critically failed tame now permanently removes TAME from that creature's menu, and drift carries the hostility with the creature. Bloom spreading cut from within-run drift on Gautham's call — inside a visit the labyrinth only stirs, terrain is fixed. Wumpus start distance became a per-difficulty band in generate.ts, fixing a monster that could not reach the player in 83% of Drowsing and 63% of Stirring seeds. Nine invariant assertions mutation-checked. Findings 1 and 2 (SEND reachability and decoy strength) left untuned as design calls; the PM session decided both the same day.",
+      "defects": [
+        {
+          "what": "GDD 2.9.1 (world drift) did not exist — referenced by the turn order, the roadmap and a tuning comment, with nine words of spec anywhere",
+          "foundBy": "eye"
+        },
+        {
+          "what": "Turn order step 7 ran companion passives BEFORE world drift, so a grellhound reported hazards from a labyrinth that no longer existed",
+          "foundBy": "eye"
+        },
+        {
+          "what": "A brave companion is unobtainable at starting stats — P(critical-success tame) is 0% for every creature at INT 8, and 0% for the Quiet One at every stat. SEND fired 0 times in 150 runs",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "SEND's decoy out-smells the player for 1 turn while carrying the Heart, not the 2–3 the GDD promises; COMPANION.sendDecoyTurns = 3 was a number no value of sendScent could honour",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "Wumpus start distance had a floor and no ceiling — mean 11 rooms away on a 10x10 against tier reaches of 6–18, so it was unreachable in 83% of Drowsing and 63% of Stirring seeds",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "The tame sweep's adjacency metric undercounted: runs that ended in a catch broke before closestWumpus was updated, recording Infinity. Spotted because adjacency (40%) came out below the catch rate (47%), which is impossible",
+          "foundBy": "eye"
+        },
+        {
+          "what": "First hostility-travel test asserted the vacated room was calm, which fails legitimately when a second hostile creature moves into it during the same drift pass. The test was wrong, not the code",
+          "foundBy": "tests"
+        }
+      ],
+      "effectiveTokens": 6783958
     }
   ],
   "$tokenNote": "Cowork writes exact per-turn usage to the session transcript; these figures were harvested from it rather than estimated. All three sessions below were ONE continuous Cowork conversation, so the split is by calendar day of that conversation and the session boundaries are editorial. Sessions 2 and 3 fall in the same day bucket and share one figure. No dollar amount exists: usage inside a Pro/Max plan allowance is not metered in dollars, only against plan limits."
