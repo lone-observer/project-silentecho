@@ -15,6 +15,7 @@
     "map": "tsx scripts/map.ts",
     "hunt": "tsx scripts/hunt.ts",
     "tame": "tsx scripts/tame.ts",
+    "turn": "tsx scripts/turn.ts",
     "devlog": "tsx scripts/devlog.ts"
   },
   "dependencies": {

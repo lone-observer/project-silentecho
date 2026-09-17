@@ -10,7 +10,9 @@
  * change the GDD too, or the two drift and the GDD stops being the source of truth.
  */
 
-import type { ActionKind, CreatureKind, Difficulty, HazardKind, OutcomeBand, WumpusTier } from '../types.ts'
+import type {
+  ActionKind, CreatureKind, Difficulty, HazardKind, OutcomeBand, StatKey, StatusEffect, WumpusTier,
+} from '../types.ts'
 import { DC } from '../types.ts'
 
 /**
@@ -153,6 +155,99 @@ export const STATUS = {
 } as const
 
 // ---------------------------------------------------------------------------
+// Hazards, on entry — GDD 2.8
+// ---------------------------------------------------------------------------
+
+/**
+ * The saving throw a hazard demands the moment you walk into its room.
+ *
+ * PORTALS ARE ABSENT ON PURPOSE. Standing in a portal room does nothing to you;
+ * ENTER PORTAL is a choice, and its roll is ACTION_DC.enterPortal. A hazard that
+ * fires on entry is one you can be forced into, which is why the pit-free-route
+ * invariant exists and why a portal — which relocates rather than harms — is not
+ * one of these.
+ */
+export const ENTRY_HAZARDS: readonly HazardKind[] = ['pit', 'sporeBloom', 'snareCarving'] as const
+
+export const HAZARD_DC: Partial<Record<HazardKind, number>> = {
+  // Easy, not Moderate. A pit is the only instant-loss check in the game, a
+  // pit-free route to the Heart is guaranteed at every difficulty, and the draft
+  // tell is honest — so the player who lands in one chose to or explored blind.
+  // At starting stats (AGI 8, mod -1) this still kills 40% of the time. Whether
+  // that is the right BALANCE number is for 1g's sim; it is a defensible
+  // correctness floor until something measures it.
+  pit: DC.easy,
+  sporeBloom: DC.easy,
+  snareCarving: DC.easy,
+}
+
+export const HAZARD_STAT: Partial<Record<HazardKind, StatKey>> = {
+  pit: 'agi', //          dodging the lip
+  sporeBloom: 'agi', //   holding your breath through it
+  snareCarving: 'int', // spotting it before it closes
+}
+
+/**
+ * What a hazard does to you, band by band. Mechanics only — the prose and the
+ * per-archetype flavour are data/outcomes.ts (step 1f).
+ *
+ * `extraTurns` is the snare's currency: it does not hurt you, it EATS THE CLOCK,
+ * which against a 20-turn limit is its own kind of damage and keeps the three
+ * entry hazards mechanically distinct (pit kills, bloom blinds, snare delays).
+ */
+export interface HazardOutcome {
+  /** Ends the run outright. Pits only — see CLAUDE.md 3. */
+  readonly fatal: boolean
+  readonly damage: number
+  readonly oilLoss: number
+  readonly extraTurns: number
+  readonly applies: StatusEffect | null
+}
+
+export const HAZARD_OUTCOMES: Partial<Record<HazardKind, Record<OutcomeBand, HazardOutcome>>> = {
+  pit: {
+    criticalFailure: { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    failure:         { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    // The signature band, at its most literal: you caught the lip. It cost you
+    // a point of health and the lamp gutters.
+    mixed:           { fatal: false, damage: 1, oilLoss: 2, extraTurns: 0, applies: null },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+  },
+  sporeBloom: {
+    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 0, applies: 'confused' },
+    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused' },
+    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+  },
+  snareCarving: {
+    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 2, applies: null },
+    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: null },
+    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Assorted action effects — GDD 2.7, 2.8.1
+// ---------------------------------------------------------------------------
+
+export const REST = {
+  /** Health recovered by a REST that lands mixed-or-better. */
+  healOnSuccess: 1,
+} as const
+
+export const SEARCH = {
+  /** Rooms READ names the hazards of, on a mixed-or-better roll. Radius 1. */
+  readRevealRadius: 1,
+} as const
+
+// ---------------------------------------------------------------------------
 // Difficulty — GDD 2.6
 // ---------------------------------------------------------------------------
 
@@ -177,6 +272,42 @@ export const ACTION_DC: Record<ActionKind, number> = {
   enterPortal: DC.hard,
   rest: DC.trivial,
 }
+
+/**
+ * Which stat each action tests.
+ *
+ * The four encounter options MUST agree with ENCOUNTER_STAT in creatures.ts;
+ * tests/resolve.test.ts asserts they do, because two tables describing one fact
+ * is exactly the drift CLAUDE.md 2.4 warns about — this one exists only because
+ * resolve.ts needs the other nine verbs as well.
+ */
+export const ACTION_STAT: Record<ActionKind, StatKey> = {
+  move: 'agi',
+  listen: 'int',
+  search: 'int',
+  force: 'str',
+  sneak: 'agi',
+  fight: 'str',
+  tame: 'int',
+  flee: 'agi',
+  use: 'agi',
+  send: 'agi',
+  read: 'int',
+  enterPortal: 'int',
+  rest: 'str',
+}
+
+export const PORTAL = {
+  /**
+   * How deep into the NEW labyrinth a portal drops you, at minimum.
+   *
+   * Never the entrance. A portal that could land you on the way out would make
+   * it a free escape rather than a gamble, and the whole point is that you trade
+   * everything you have charted for a fresh, unknown position and a Wumpus that
+   * has lost your scent entirely.
+   */
+  minLandingDistance: 3,
+} as const
 
 // ---------------------------------------------------------------------------
 // The Wumpus — GDD 2.10
@@ -270,32 +401,77 @@ export const TAME_DC: Record<CreatureKind, number> = {
   quietOne: DC.hard,
 }
 
+/**
+ * Which decoy tier a creature falls in. Keyed off TAME_DC rather than listing
+ * creatures, so adding a creature to the bestiary cannot forget to give it a
+ * decoy strength — it inherits one from how hard it is to tame.
+ */
+export type SendTier = 'easyModerate' | 'hard'
+
+export function sendTierFor(creature: CreatureKind): SendTier {
+  return (TAME_DC[creature] as number) <= DC.moderate ? 'easyModerate' : 'hard'
+}
+
+/** Scent a sent companion of this kind drops in the target room. GDD 2.9 */
+export function sendScentFor(creature: CreatureKind): number {
+  return COMPANION.sendScent[sendTierFor(creature)]
+}
+
+/** Turns that decoy is expected to out-smell the player. Derived; see COMPANION. */
+export function sendDecoyTurnsFor(creature: CreatureKind, carryingHeart: boolean): number {
+  const pair = COMPANION.sendDecoyTurns[sendTierFor(creature)]
+  return carryingHeart ? pair.carryingHeart : pair.alone
+}
+
 export const COMPANION = {
   /** Skittish companions bolt when the player TAKES DAMAGE, not on a failed roll. */
   skittishFleesOnDamage: true,
   /** Fortune points spent to keep a bolting skittish companion. GDD 2.9 */
   skittishFortuneSave: 1,
   /**
-   * A sent companion drops this much scent in the target room.
+   * A sent companion drops this much scent in the target room, keyed by how hard
+   * the creature was to tame (see sendTierFor). Read it with sendScentFor().
    *
    * The decoy is PURE SCENT — there is no "the Wumpus is distracted" flag, and
    * there must not be one. The bait works by out-smelling the player's own trail
-   * inside the existing perception model, which means it is tuned by this one
-   * number and stays legible in the hunt/tame visualisers. A special-case lock
-   * would make SEND the only thing in the game the Wumpus AI knows about by name.
+   * inside the existing perception model, which keeps SEND legible in the
+   * hunt/tame visualisers. A special-case lock would make SEND the only thing in
+   * the game the Wumpus AI knows about by name.
    *
-   * Its duration is therefore arithmetic, not a setting: see sendDecoyTurns.
+   * WHY TWO VALUES AND NOT ONE. The flat 5 made the decoy weakest exactly when
+   * it was needed: against a Heart-carrying player (deposit 2, via
+   * HEART.carryScentMultiplier) it dominated for a single turn, against a GDD
+   * that promises 2-3. Solving `sendScent * decayFactor^n > deposit` shows the
+   * achievable pairs do not overlap — 3-turns-without-Heart forces
+   * sendScent in (7.3, 14.6], which forces 2-turns-with-Heart; 1-turn-with-Heart
+   * forces (2.7, 5.4], which caps at 2-turns-without. 3-without / 1-with is
+   * ARITHMETICALLY IMPOSSIBLE under one shared decayFactor, and the factor must
+   * stay shared or the Wumpus would perceive different creatures' trails fading
+   * at different physical rates.
+   *
+   * So the decoy's strength scales with the tame DC instead: the Easy/Moderate
+   * creatures land exactly on the GDD's 3/2, and the Quiet One keeps 5 and its
+   * 2/1. That is not the Quiet One being a worse decoy by design — it is what
+   * the shared decay math produces once "1 turn while carrying" is held fixed.
+   * Decided 17 Sep 2026; GDD 2.9 updated to match.
+   *
+   * Its duration is arithmetic, not a setting: see sendDecoyTurns.
    */
-  sendScent: 5,
+  sendScent: { easyModerate: 10, hard: 5 } as Record<SendTier, number>,
   /**
-   * Turns the decoy is expected to out-smell the player. DERIVED, not free.
+   * Turns the decoy is expected to out-smell the player. DERIVED, not free —
+   * two pairs now, one per tier, each split by whether the player is carrying
+   * the Heart (which doubles their own deposit).
    *
    * A decoy dominates for as long as `sendScent * decayFactor^n` exceeds the
-   * player's freshest deposit. tests/creatures.test.ts asserts the relationship
-   * holds, so changing sendScent without changing this fails the build rather
-   * than quietly making the GDD's "2-3 turns" a lie.
+   * player's freshest deposit. tests/creatures.test.ts asserts all four cases,
+   * so changing sendScent without changing this fails the build rather than
+   * quietly making the GDD's "3 turns for a goblin" a lie.
    */
-  sendDecoyTurns: 2,
+  sendDecoyTurns: {
+    easyModerate: { alone: 3, carryingHeart: 2 },
+    hard: { alone: 2, carryingHeart: 1 },
+  } as Record<SendTier, { readonly alone: number; readonly carryingHeart: number }>,
   /** A sent companion NEVER returns. Not a tunable — see CLAUDE.md 3. */
   sendIsPermanent: true,
   /** Oil per turn to keep a skittish companion fed and calm. */
@@ -326,7 +502,22 @@ export const COMPANION = {
  */
 export interface TameOutcome {
   readonly tamed: boolean
-  /** Only a critical success yields a companion brave enough to bait. */
+  /**
+   * A companion brave enough to be sent as bait. Strong success or better.
+   *
+   * This was criticalSuccess-only until 17 Sep 2026, which made SEND
+   * unreachable: a critical needs margin >= +12, so at starting stats (INT 8,
+   * mod -1) the maximum possible total is 19 and P(brave) was 0% on every
+   * creature — SEND did not fire once in 150 sweep runs, for the beat the GDD
+   * calls "the single most important design beat in the game".
+   *
+   * Widening to strongSuccess gives a progression curve (20% on a goblin at
+   * INT 8, 5% on the Quiet One at INT 18). It is only half the fix: the Quiet
+   * One's Hard DC still rarely clears Strong Success, so resolve.ts also floors
+   * a natural 20 on a successful tame to brave. That half cannot live here —
+   * resolveEncounter only ever receives the resolved band, never the natural
+   * roll. See GDD 2.9.
+   */
   readonly brave: boolean
   /** Mixed success: costs oil to keep, and bolts on damage. */
   readonly skittish: boolean
@@ -348,7 +539,7 @@ export const TAME_OUTCOMES: Record<OutcomeBand, TameOutcome> = {
   failure:         { tamed: false, brave: false, skittish: false, hostile: false, bolts: true,  extraScent: 1.5, damage: 0, revealsRooms: 0 },
   mixed:           { tamed: true,  brave: false, skittish: true,  hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
   success:         { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
-  strongSuccess:   { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 1 },
+  strongSuccess:   { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 1 },
   criticalSuccess: { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
 }
 

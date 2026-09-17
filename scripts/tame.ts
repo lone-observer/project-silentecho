@@ -40,7 +40,7 @@ import type {
 import {
   COMPANION, DIFFICULTY, DRIFT, ENCOUNTER, FIGHT_OUTCOMES, HEART, OIL,
   PLAYER, SCENT, SCENT_BY_ACTION, TAME_DC, TAME_OUTCOMES, WUMPUS_TIERS,
-  oilBandFor, wumpusReach,
+  oilBandFor, sendDecoyTurnsFor, sendScentFor, wumpusReach,
 } from '../src/engine/data/tuning.ts'
 
 const seedArg = Number(process.argv[2] ?? 1)
@@ -114,16 +114,42 @@ function bandDistribution(dc: number, mod: number): Record<OutcomeBand, number> 
   return counts
 }
 
+/**
+ * P(brave) under the CURRENT gate, read off TAME_OUTCOMES rather than hardcoded.
+ *
+ * This used to hardcode `.criticalSuccess` and would therefore have kept
+ * printing the old, broken answer after the 17 Sep fix moved the gate — a
+ * visualiser lying about the exact thing it exists to watch. Deriving the brave
+ * bands from the table means the panel cannot drift from the rule again.
+ *
+ * The natural-20 floor is added on top: it lives in resolve.ts (resolveEncounter
+ * never sees the natural die), and it contributes the 1/20 cases where the
+ * margin alone would not have reached a brave band.
+ */
+function braveChance(dc: number, mod: number): number {
+  const braveBands = BAND_ORDER.filter((b) => TAME_OUTCOMES[b].brave)
+  const dist = bandDistribution(dc, mod)
+  const fromBands = braveBands.reduce((sum, b) => sum + dist[b], 0)
+
+  // What a natural 20 alone lands on, so it is not double-counted.
+  let nat20Band = bandForMargin(20 + mod - dc)
+  if (BAND_ORDER.indexOf(nat20Band) < BAND_ORDER.indexOf('success')) nat20Band = 'success'
+  const nat20AlreadyBrave = TAME_OUTCOMES[nat20Band].brave
+  return fromBands + (nat20AlreadyBrave ? 0 : 1 / 20)
+}
+
 function panelBrave(): void {
   console.log(`\n${rule()}\nPANEL B  — can you ever get a brave companion? (SEND is gated on it)\n${rule()}`)
-  console.log(`  P(critical success) on TAME, by INT. mod = floor((INT-10)/2)\n`)
+  const braveBands = BAND_ORDER.filter((b) => TAME_OUTCOMES[b].brave)
+  console.log(`  P(brave) on TAME, by INT. mod = floor((INT-10)/2)`)
+  console.log(`  gate: ${braveBands.join(' or ')}, OR a natural 20 on any successful tame\n`)
   console.log(`  ${pad('creature', 13)}${pad('DC', 4)}${[8, 10, 12, 14, 16, 18].map((s) => pad(`INT ${s}`, 9)).join('')}`)
   console.log(`  ${rule(70)}`)
 
   for (const creature of BESTIARY) {
     const dc = TAME_DC[creature]
     const cells = [8, 10, 12, 14, 16, 18].map((stat) => {
-      const p = bandDistribution(dc, statModifier(stat)).criticalSuccess
+      const p = braveChance(dc, statModifier(stat))
       return pad(p === 0 ? '  —  ' : `${(p * 100).toFixed(0)}%`, 9)
     })
     console.log(`  ${pad(creature, 13)}${pad(String(dc), 4)}${cells.join('')}`)
@@ -141,8 +167,10 @@ function panelBrave(): void {
     })
     console.log(`  ${pad(creature, 13)}${pad(String(dc), 4)}${cells.join('')}`)
   }
-  console.log(`\n  a dash means UNREACHABLE: max total (20 + mod) cannot clear DC + 12.`)
-  console.log(`  Fortune bumps one band, so strongSuccess -> criticalSuccess is the other route.`)
+  console.log(`\n  no dashes any more, and that is the finding: the natural-20 floor puts a`)
+  console.log(`  5% baseline under every creature at every stat, so no DC can make SEND`)
+  console.log(`  permanently unreachable — which is what the Quiet One's Hard 16 used to do.`)
+  console.log(`  Fortune bumps one band, so success -> strongSuccess is a third route.`)
 }
 
 // ===========================================================================
@@ -216,6 +244,8 @@ interface RunSummary {
   readonly damageTaken: number
   readonly creatureMoves: number
   readonly braveEverSeen: boolean
+  /** Times the scripted player actually spent a brave companion as bait. */
+  readonly sends: number
   /** The stench fired at least once — the Wumpus was actually a presence. */
   readonly adjacentEver: boolean
 }
@@ -249,6 +279,7 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
   let companionsGained = 0, companionsReleased = 0
   let creatureMoves = 0
   let braveEverSeen = false
+  let sends = 0
   let closestWumpus = Infinity
 
   if (verbose) {
@@ -269,6 +300,73 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
     // An encounter in the current room takes priority over walking on: you are
     // standing next to the thing.
     let turnsConsumed = 1
+
+    // SEND, under the one rule a scripted player can defend: the stench is
+    // firing, you have something brave, so you spend it. Before the 17 Sep
+    // fixes this branch was dead code in every run ever swept — a brave
+    // companion was unobtainable at starting stats, so the escape valve the GDD
+    // calls "the single most important design beat in the game" had never once
+    // been exercised by the harness that exists to exercise it.
+    const gapNow = distancesFrom(lab, playerId)[wumpus.roomId] ?? -1
+    if (companion?.brave === true && gapNow === 1) {
+      // Bait it where it already is — the decoy has to out-smell your trail
+      // inside its perception radius, not somewhere it will never look.
+      const nextStep = planStep < plan.length ? plan[planStep] : null
+      const candidates = DIRECTIONS
+        .map((d) => ({ d, to: (lab.rooms[playerId] as Room).exits[d] }))
+        .filter((x): x is { d: Direction; to: RoomId } => x.to !== undefined && x.to !== nextStep)
+      const towardWumpus = candidates.sort(
+        (a, b) =>
+          (distancesFrom(lab, a.to)[wumpus.roomId] ?? 99) - (distancesFrom(lab, b.to)[wumpus.roomId] ?? 99),
+      )[0]
+
+      const player = {
+        roomId: playerId, facing, stats: { str: 8, agi: 8, int: 8, lck: 8 },
+        health, maxHealth: PLAYER.maxHealth, oil, maxOil: OIL.max, fortune,
+        carryingHeart: carrying, companion, inventory: [], statuses: {},
+      } as Player
+      const sent = towardWumpus ? sendCompanion(lab, player, towardWumpus.d) : null
+
+      if (sent) {
+        scent = depositScent(scent, sent.targetRoomId, sent.scent)
+        detail.push(
+          `      SEND the ${sent.sent} ${towardWumpus?.d} into ${sent.targetRoomId}: ` +
+          `${sent.scent} scent, covers ${sendDecoyTurnsFor(sent.sent, carrying)} turn(s)` +
+          `${carrying ? ' (carrying the Heart)' : ''} — IT DOES NOT COME BACK`,
+        )
+        companion = null
+        sends += 1
+        // Spending the turn on bait means not walking this turn; that is the cost.
+        turnsConsumed = 1
+        // Fall through to the wumpus step without moving or encountering.
+        if (hasCaught(wumpus, playerId)) { closestWumpus = 0; outcome = `CAUGHT turn ${turn}`; break }
+        for (let i = 0; i < turnsConsumed; i++) {
+          const r = moveWumpus(lab, wumpus, scent, {
+            carryingHeart: carrying, entranceId: lab.entranceId, revealedPlayerRoom: null,
+          }, rng)
+          wumpus = r.wumpus
+        }
+        if (hasCaught(wumpus, playerId)) { closestWumpus = 0; outcome = `CAUGHT turn ${turn} — it came for you`; break }
+        const drift0 = driftWorld(lab, { playerRoomId: playerId, wumpusRoomId: wumpus.roomId }, rng)
+        lab = drift0.labyrinth
+        creatureMoves += drift0.movedCreatures.length
+        const gap0 = distancesFrom(lab, playerId)[wumpus.roomId] ?? -1
+        if (gap0 >= 0) closestWumpus = Math.min(closestWumpus, gap0)
+        if (verbose) {
+          console.log(render(lab, playerId, wumpus.roomId, scent, carrying))
+          console.log(
+            `turn ${String(turn).padStart(2)}  oil ${String(oil).padStart(2)}  hp ${health}  ` +
+            `player ${playerId}  wumpus ${wumpus.roomId}  gap ${gap0}  companion —`,
+          )
+          for (const dline of detail) console.log(dline)
+          console.log('')
+        }
+        scent = decayScent(scent)
+        if (turn % OIL.burnEveryNTurns === 0) oil = Math.max(0, oil - 1)
+        continue
+      }
+    }
+
     if (here.creature !== null && policy !== 'flee') {
       encounters += 1
       const creature = here.creature
@@ -425,7 +523,7 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
     policy, outcome, turnsUsed, encounters, totalScent, peakScent,
     closestWumpus: closestWumpus === Infinity ? -1 : closestWumpus,
     companionsGained, companionsReleased, damageTaken,
-    creatureMoves, braveEverSeen,
+    creatureMoves, braveEverSeen, sends,
     adjacentEver: closestWumpus <= 1,
   }
 }
@@ -489,25 +587,47 @@ function panelSend(): void {
     scent = decayScent(scent)
   }
 
-  console.log(
-    `\n  COMPANION.sendScent=${COMPANION.sendScent}, decay ${SCENT.decayFactor}/turn, ` +
-    `sendDecoyTurns claims ${COMPANION.sendDecoyTurns}.`,
-  )
-  let n = 0
-  for (let k = 0; ; k++) {
-    if (COMPANION.sendScent * SCENT.decayFactor ** k <= SCENT_BY_ACTION.move) break
-    n = k + 1
-    if (k > 20) break
-  }
-  console.log(`  arithmetic: the decoy out-smells a walking player for ${n} turn(s); ${n * 2} at half rate.`)
+  // The decoy's strength is keyed to the tame DC, so the duration is now a
+  // TABLE rather than a number. Measured against the arithmetic, per creature,
+  // per Heart state — the claim and the observation side by side, which is the
+  // only form in which a derived constant is worth printing.
   const carried = SCENT_BY_ACTION.move * HEART.carryScentMultiplier
-  let m = 0
-  for (let k = 0; ; k++) {
-    if (COMPANION.sendScent * SCENT.decayFactor ** k <= carried) break
-    m = k + 1
-    if (k > 20) break
+  const dominatesFor = (decoy: number, deposit: number): number => {
+    let n = 0
+    for (let k = 0; k <= 20; k++) {
+      if (decoy * SCENT.decayFactor ** k <= deposit) break
+      n = k + 1
+    }
+    return n
   }
-  console.log(`  while CARRYING THE HEART (deposit ${carried}) it lasts ${m} turn(s) — the moment you most need it.`)
+
+  console.log(`\n  decay ${SCENT.decayFactor}/turn. walking deposits ${SCENT_BY_ACTION.move}, carrying the Heart ${carried}.\n`)
+  console.log(
+    `  ${pad('creature', 13)}${pad('DC', 5)}${pad('sendScent', 11)}` +
+    `${pad('alone', 16)}${pad('with Heart', 16)}`,
+  )
+  console.log(`  ${rule(70)}`)
+  for (const creature of BESTIARY) {
+    const decoy = sendScentFor(creature)
+    const alone = dominatesFor(decoy, SCENT_BY_ACTION.move)
+    const withHeart = dominatesFor(decoy, carried)
+    const claimAlone = sendDecoyTurnsFor(creature, false)
+    const claimHeart = sendDecoyTurnsFor(creature, true)
+    const cell = (measured: number, claimed: number): string =>
+      `${measured}t ${measured === claimed ? '✓' : `✗ claims ${claimed}`}`
+    console.log(
+      `  ${pad(creature, 13)}${pad(String(TAME_DC[creature]), 5)}${pad(String(decoy), 11)}` +
+      `${pad(cell(alone, claimAlone), 16)}${pad(cell(withHeart, claimHeart), 16)}`,
+    )
+  }
+  console.log(
+    `\n  a ✗ means COMPANION.sendDecoyTurns and the decay arithmetic disagree — the GDD's`,
+  )
+  console.log(`  promise would be a lie. tests/creatures.test.ts asserts all four of these.`)
+  console.log(
+    `  3-without / 1-with is ARITHMETICALLY IMPOSSIBLE under one shared decayFactor,`,
+  )
+  console.log(`  which is why the Quiet One keeps 2/1 rather than matching the others.`)
 }
 
 // ===========================================================================
@@ -522,15 +642,20 @@ function sweep(count: number): void {
   const agg: Record<EncounterAction, {
     wins: number; runs: number; turns: number; scent: number; peak: number
     damage: number; closest: number; companions: number; brave: number; encounters: number
-    adjacent: number
+    adjacent: number; sends: number
   }> = {
-    fight: { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0 },
-    tame:  { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0 },
-    sneak: { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0 },
-    flee:  { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0 },
+    fight: { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0, sends: 0 },
+    tame:  { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0, sends: 0 },
+    sneak: { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0, sends: 0 },
+    flee:  { wins: 0, runs: 0, turns: 0, scent: 0, peak: 0, damage: 0, closest: 0, companions: 0, brave: 0, encounters: 0, adjacent: 0, sends: 0 },
   }
   const startGaps: number[] = []
   const outcomes: Record<string, number> = {}
+  // Seeds worth going back and WATCHING. An aggregate tells you a rate; it
+  // cannot show you the beat. SEND is rare enough now that without this you
+  // would have to guess which of 300 seeds to open.
+  const sendSeeds: number[] = []
+  const braveSeeds: number[] = []
 
   const baseSeed = seed
   for (let i = 0; i < count; i++) {
@@ -551,7 +676,9 @@ function sweep(count: number): void {
       a.closest += s.closestWumpus < 0 ? 99 : s.closestWumpus
       a.companions += s.companionsGained
       a.encounters += s.encounters
-      if (s.braveEverSeen) a.brave += 1
+      a.sends += s.sends
+      if (s.braveEverSeen) { a.brave += 1; if (!braveSeeds.includes(seedOverride)) braveSeeds.push(seedOverride) }
+      if (s.sends > 0 && !sendSeeds.includes(seedOverride)) sendSeeds.push(seedOverride)
       if (s.adjacentEver) a.adjacent += 1
       if (s.outcome.startsWith('ESCAPED')) a.wins += 1
       const key = `${p}:${s.outcome.split(' turn')[0]}`
@@ -573,10 +700,21 @@ function sweep(count: number): void {
     ['runs the stench fired in', (a) => `${((a.adjacent / a.runs) * 100).toFixed(0)}%  (${a.adjacent}/${a.runs})`],
     ['mean companions gained', (a) => (a.companions / a.runs).toFixed(2)],
     ['runs with a BRAVE one', (a) => `${a.brave}/${a.runs}`],
+    // The number finding #1 existed to move. It was 0 across 150 runs.
+    ['SEND fired', (a) => `${a.sends} in ${a.runs} runs`],
   ]
   for (const [label, get] of cmp) {
-    console.log(`  ${pad(label, 26)}${pad(get(agg.fight), 14)}${get(agg.tame)}`)
+    console.log(`  ${pad(label, 26)}${pad(get(agg.fight), 16)}${get(agg.tame)}`)
   }
+
+  if (braveSeeds.length > 0) {
+    console.log(`\n  seeds that produced a BRAVE companion: ${braveSeeds.join(', ')}`)
+  }
+  console.log(
+    sendSeeds.length > 0
+      ? `  seeds where SEND actually fired:       ${sendSeeds.join(', ')}  <- run these verbose`
+      : `  SEND never fired in this sweep.`,
+  )
 
   console.log(`\n  outcome distribution:`)
   for (const key of Object.keys(outcomes).sort()) {
@@ -635,6 +773,7 @@ const rows: readonly [string, (s: RunSummary) => string][] = [
   ['companions gained', (s) => String(s.companionsGained)],
   ['companions released', (s) => String(s.companionsReleased)],
   ['brave ever obtained', (s) => (s.braveEverSeen ? 'yes' : 'NO')],
+  ['SEND fired', (s) => String(s.sends)],
   ['creature drift moves', (s) => String(s.creatureMoves)],
 ]
 for (const [label, get] of rows) {

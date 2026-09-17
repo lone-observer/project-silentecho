@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 17 Sep 2026, end of step 1d (creatures, plus the Wumpus start-distance fix in `generate.ts`). Sessions are now one per step — see below.
+**Last updated:** 17 Sep 2026, end of step 1e (`resolve.ts`, plus both SEND fixes from the 1d findings). Sessions are now one per step — see below.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -14,11 +14,11 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1b · labyrinth generation | **done** | `src/engine/generate.ts`, `scripts/map.ts`, difficulty contracts. Wumpus start became a per-difficulty band in the 1d session — see finding 3 |
 | 1c · the Wumpus | **done** | `src/engine/wumpus.ts`, `scripts/hunt.ts` |
 | 1d · creatures | **done** | `src/engine/creatures.ts`, `scripts/tame.ts`, GDD §2.9.1 written |
-| 1e · resolve | **next** | the reducer — turn order is already specified in GDD §2.2.2 |
-| 1f · outcomes table | pending | `(archetype × action × band)`, with a coverage test |
+| 1e · resolve | **done** | `src/engine/resolve.ts`, `scripts/turn.ts`, both SEND fixes implemented |
+| 1f · outcomes table | **next** | `(archetype × action × band)`, with a coverage test |
 | 1g · text renderer + agent harness | pending | built to `docs/EVALS.md` requirements |
 
-180 tests. `npm test`, `npm run typecheck`, both clean.
+217 tests. `npm test`, `npm run typecheck`, both clean.
 
 ## One session per step
 
@@ -27,6 +27,15 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 This is measured, not a preference. The first long session covering Phase 0 through 1c ran 438 turns and 36.2M effective tokens, of which **79% was re-reading the growing conversation and 0.1% was every tool result put together**. Context per turn grew from 87k to 678k; the last quarter cost nearly four times the first for the same number of turns. A new session starts at ~87k, so a step-sized session runs roughly 8x cheaper per turn.
 
 **Second measurement, from this session.** Step 1d ran 155 assistant turns and **6.78M effective tokens — 43.8k per turn**, against the 678k/turn the long session had climbed to by its end. That is roughly 15x cheaper per turn, and the whole step cost less than a quarter of what the Phase 0–1c session did. The split was 60.5% cache reads, 27% cache writes, 12.5% output; raw input was 310 tokens, which is to say essentially all of the cost is carrying context, not receiving instructions. The claim above is now measured twice rather than once.
+
+**Third measurement, from the 1e session — and it breaks the trend.** Step 1e ran 205 assistant turns and **55.4M effective tokens: 270k per turn**, roughly 6x what 1d cost per turn and 8x the whole-step total. Peak context was 384k. The split was 98.0% cache reads, 1.5% cache writes, 0.5% output, 410 raw input tokens.
+
+Two causes, and only one of them is avoidable:
+
+1. **`resolve.ts` is the module that touches every other module.** Writing it meant holding `types.ts`, `tuning.ts`, `creatures.ts`, `wumpus.ts`, `generate.ts`, `dice.ts` and the whole GDD in context at once — about 190k of source and spec before any work started. 1d could be written against `tuning.ts` and a hand-built band. A reducer cannot. Some steps are simply wider than others, and 1f (one big data table) should be narrow again.
+2. **Avoidable: editing files with shell heredocs instead of the editing tool.** Several `python3 - <<'PY'` patches to `tame.ts`, `turn.ts` and `resolve.ts` caused the harness to re-inject the *entire* changed file into the conversation as a change notice — 600 to 1200 lines each, which then rode along in every subsequent turn's cache read. Use the editing tool for edits; reach for a shell patch only for genuinely mechanical multi-site rewrites, and expect to pay for it when you do.
+
+So: **the per-step-session claim holds, but "a step" is not a fixed unit of cost.** Do not read 43.8k/turn as the expected rate; read it as what a narrow step costs. Budget by how much of the engine a step has to hold at once.
 
 Starting fresh is only cheap because this repo can orient a session that knows nothing. That is what `CLAUDE.md`, `docs/GDD.md` and this file are for — keep them current, and the cost of closing a session stays near zero.
 
@@ -65,7 +74,9 @@ Neither is a toy. Each caught a real defect that tests did not.
 
 **`npm run hunt -- <seed> <tier> [difficulty]`** — a scripted player walks to the Heart and back while the scent field decays and the Wumpus closes. Cells are `[what is there][how it smells]`.
 
-**`npm run tame -- <seed> [difficulty] [tier] [policy]`** — runs the identical seed twice, once fighting everything and once taming everything, and puts the two columns side by side. `SWEEP=n npm run tame -- <seed> …` aggregates over `n` seeds instead of printing runs. Panels A and B are static tables (the band-by-band cost of each option; the exact d20 probability of each tame band per creature per INT) and cost nothing to read.
+**`npm run tame -- <seed> [difficulty] [tier] [policy]`** — runs the identical seed twice, once fighting everything and once taming everything, and puts the two columns side by side. `SWEEP=n npm run tame -- <seed> …` aggregates over `n` seeds instead of printing runs. Panels A and B are static tables (the band-by-band cost of each option; the exact d20 probability of each tame band per creature per INT) and cost nothing to read. Since 1e the sweep also prints **which seeds produced a brave companion and which fired `SEND`** — an aggregate gives you a rate, but only a seed number lets you go and watch the beat, and `SEND` is now rare enough that guessing which of 300 seeds to open is hopeless.
+
+**`npm run turn -- <seed> [difficulty] [policy]`** — a whole run driven through `applyAction`, with every turn broken back out into the eight steps of GDD §2.2.2. `SWEEP=n` aggregates. The panel that earns its keep is the one printing each event's **step number**: they must ascend within a turn, so a reducer that ever emits out of order shows it on every turn you look at rather than only in the cases a test enumerated. It also splits "caught" into **which** catch check fired, re-checks replay determinism and JSON round-tripping on every run it prints, and compares a tell-ignoring policy against a fifty-character one that refuses to step toward a draft or a stench.
 
 What they found:
 - **Generation produced unwinnable seeds.** No cap on Heart distance meant 7.1% of maps needed a round trip longer than the turn limit. Fixed with a distance *band*; there is now a test named "never generates an arithmetically unwinnable run".
@@ -75,6 +86,8 @@ What they found:
 - **A brave companion is unobtainable at starting stats, so `SEND` has never once fired.** See the 1d findings below.
 - **The Wumpus started too far away to reach you** in 83% of Drowsing seeds and 63% of Stirring ones — a start distance with a floor and no ceiling. Fixed with a per-difficulty band; the numbers are below.
 - **Retreating the way you came is worse than ignoring the stench.** Measured, not assumed. The braid loops are the counterplay.
+- **A hazard save was being reported to the player as a MOVE roll.** `scripts/turn.ts`, first run. Entering a snare room rolled INT against DC 8 and emitted it as `roll move` — text parity means the event stream is the source of truth, and it was telling the player something untrue about why they had just lost a point of health. `GameEvent.roll` gained an optional `hazard` field.
+- **Panel B of `tame.ts` would have kept printing the old, broken brave odds.** It hardcoded `.criticalSuccess`, so the moment 1e moved the gate the visualiser would have gone on reporting 0% for the exact thing the session had just fixed. It now derives the brave bands from `TAME_OUTCOMES`. Worth generalising: **a visualiser that hardcodes the rule it is watching is a visualiser that lies on the day the rule changes**, which is the only day you are looking at it.
 
 Build the equivalent tool for each remaining step. It has paid for itself every time.
 
@@ -90,19 +103,39 @@ Build the equivalent tool for each remaining step. It has paid for itself every 
 ### Decisions taken in 1d, all reversible
 
 - **A creature may wander onto the player; it does not trigger an encounter.** The encounter stays bound to *entering* a room. By step 7 the player's turn has already resolved, so a forced encounter would spend a turn they never took.
-- **Within a run, only creatures move. The terrain is fixed.** Hazards stay where generation put them, so a charted map keeps telling the truth about where the pits are; what decays is the living half. Blooms spreading is the *between-runs* half of the §2.11 promise, not a per-turn one. A test asserts the whole hazard layout is byte-identical after 60 drift passes at every difficulty, which subsumes the pit-free invariant — drift cannot create a pit because it cannot create any hazard.
+- **Within a run, only creatures move. The terrain is fixed.** Hazards stay where generation put them, so a charted map keeps telling the truth about where the pits are; what decays is the living half. Blooms spreading is the *between-runs* half of the §2.11 promise, not a per-turn one. A test asserts the whole hazard layout is byte-identical after 60 drift passes at every difficulty, which subsumes the pit-free invariant — drift cannot create a pit because it cannot create any hazard. **This was a scope call under deadline, not a verdict — see "Not yet decided" below and `docs/GDD.md` §2.9.1. Gautham wants within-run bloom spread reconsidered once 1g/playtest data exists; it's flagged as potentially tenet-breaking against the drift-invariant test just described, so it isn't a quiet flip back.**
 - **Drowsing does not drift at all**, and draws no randomness doing it. It is the teaching tier; a world that moves while you are learning what a tell means makes the lesson unlearnable.
 - **Step 7 is reordered: drift first, then companion passives.** A grellhound resolving before a creature wandered in would report a labyrinth that no longer exists — a companion whose whole job is honest information, lying. GDD §2.2.2 updated.
 - **Informational passives are queries, not stored effects** (grellhound reveal and growl, lumewing radius). This satisfies §2.9's "must land before the player chooses" by construction rather than by an ordering rule. It does split §2.9's "one rule for all five creatures" — flagged, not hidden.
 - **Hostility is persistent, and it travels with the creature.** A critically failed tame sets `Room.creatureHostile`, and `encounterOptions()` then drops `TAME` from the menu — fight it, slip past it, or run. `driftWorld` carries the flag along when the creature wanders; a hostile flag stranded in a vacated room would be a bug, and there is a test that follows one angry goblin around the map asserting exactly one room is ever flagged. This is the only band that leaves a live, untamed creature standing in front of you: plain `failure` bolts it, `mixed` and up tame it, and every `FIGHT` at mixed-or-better drives it off.
 
+## What 1e landed
+
+- **`src/engine/resolve.ts`** — `applyAction(state, action, rng)`, the eight steps of GDD §2.2.2 numbered in the code exactly as the GDD numbers them. Plus `createRun`, `legalActions`, `replayRun` and `tellsFor`, because a reducer with nothing to reduce and no way to replay is half a deliverable.
+- **`scripts/turn.ts`** — the visualiser, with a `SWEEP=n` mode. See "the two tools" above; it is four now.
+- **`tests/resolve.test.ts`** — 37 tests, taking the suite from 180 to 217. Six invariant assertions were mutation-checked and all fail when the code is deliberately broken: the step-2 catch check, the corridor swap case, a two-turn tame costing two Wumpus moves, the natural-20 brave override, the `creatureHostile` write-back, and `legalActions` deferring to `encounterOptions`. Two more mutations were checked against `tuning.ts` — reverting the brave band and flattening `sendScent` — and both fail as they should.
+- **Both SEND fixes**, under findings 1 and 2 above, with their measured results.
+- **Type changes, all three of them.** `GameState` gained `encounterRoomId`. `Player.statuses` went from `StatusEffect[]` to `Partial<Record<StatusEffect, number>>` so a status carries its own clock, rather than a list plus a parallel duration table that can disagree. `GameEvent.roll` gained an optional `hazard`, because a hazard save was being reported to the player as a MOVE roll.
+- **`tuning.ts` gained** `ACTION_STAT`, `HAZARD_DC`/`HAZARD_STAT`/`HAZARD_OUTCOMES`/`ENTRY_HAZARDS`, `PORTAL`, `REST`, and the `sendScent` lookup. The mechanical consequence of a hazard band lives there; 1f layers prose on top, exactly as 1d did for encounters.
+
+### Decisions taken in 1e, all reversible
+
+- **Step 7 runs once per consumed turn, not once per action.** Drift, scent decay, companion upkeep and the oil schedule all scale with `turnCost`, so a two-turn tame drifts the world twice and feeds a skittish companion twice. The carried-forward note from 1d only specified the Wumpus moving twice; extending it to the rest of step 7 is the consistent reading, but it does make a tame slightly more expensive than 1d costed it. **`scripts/tame.ts` still drifts once per action**, so its sweep numbers and the reducer's differ a little. 1g's sim uses the reducer and is the one that counts.
+- **Leaving by the entrance ends the run**, and it is evaluated *before* the turn limit so a run that walks out on its last turn escapes rather than timing out on the doorstep. There is no explicit `leave` verb — moving into the entrance is the choice. Starting there does not trigger it, because nothing moved.
+- **A failed MOVE still moves you.** GDD §2.7 asks for "stumble loudly *or* take a wrong turn", and pinning the player in place would make the turn limit punish a die roll they cannot influence. The band's consequence is noise: `SCENT.criticalFailureBonus` already existed and now applies to every action's critical failure, which meant no new `MOVE_OUTCOMES` table.
+- **Hazard saves are a separate roll from the action that triggered them.** The move's band says how loudly you arrived; the hazard's says whether you survive it. Folding them would make a clean move a free pass over a pit.
+- **`FORCE` is not offered by `legalActions`.** It is in GDD §2.7's verb list, but `Room.exits` has no closed-door state and inventing one would mean geometry changing mid-run, which §2.9.1 forbids. This is a real GDD-vs-code gap and is flagged below rather than papered over — a test asserts FORCE is never offered, so if someone adds door state they have to say so.
+- **Fortune is not spent by the reducer.** `rerollWithFortune` and `bumpBandWithFortune` exist in `dice.ts`, but spending happens *after seeing a roll* (GDD §2.5), which is a two-phase interaction and therefore a renderer concern. The reducer never spends it for the player, including to save a bolting skittish companion. Carried forward to 1g.
+- **`ENTER PORTAL` regenerates the labyrinth**, clears the scent field entirely, and lands you at least `PORTAL.minLandingDistance` from the new entrance — never on it, or a portal would be a free ride home. The INT band decides how deep you surface, never whether you arrive; a portal that could strand you would be a second instant-loss check and the design has room for one.
+- **Prose lives in a `NARRATION` table** at the top of `resolve.ts` rather than inline, per CLAUDE.md §2.4. It is small and 1f absorbs it by moving one object. `scripts/turn.ts` keys off those constants to work out which catch check fired, so improving the wording cannot silently break the panel.
+
 ## 1d findings — three real defects, none of them in 1d's own code
 
-Finding 3 is fixed (in `generate.ts`, where it belonged). Findings 1 and 2 are now decided (17 Sep) but not yet implemented — see below for the exact code changes a 1d-fix or 1e session needs to make.
+**All three are now fixed.** Finding 3 landed in `generate.ts` during the 1d session; findings 1 and 2 were decided by the PM session on 17 Sep and implemented in the 1e session the same day. What follows is kept as the reasoning, with the measured after-numbers appended to each.
 
 Numbers are from `SWEEP=60 npm run tame`, scripted shortest-route player, starting stats.
 
-**1. `SEND` has never fired. Not once, in 150 runs.** *(Decided 17 Sep 2026 — see below. Not yet implemented.)*
+**1. `SEND` has never fired. Not once, in 150 runs.** *(Decided 17 Sep 2026; IMPLEMENTED in 1e — see "what actually changed" below.)*
 
 A brave companion requires a critical-success tame — margin ≥ +12. At starting stats (INT 8, mod −1) the maximum possible total is 19, so:
 
@@ -126,9 +159,24 @@ Two levers were costed. **(a)** move brave down to `strongSuccess` or better —
 
 **Why this rides along with 1e instead of a separate 1d-fix session:** the `TAME_OUTCOMES` flip is one line either way, but the nat-20 piece structurally requires the roll→band→`resolveEncounter` wiring that 1e is building anyway — spinning up a fresh session just to add three lines next to code 1e is about to touch is more overhead than it saves. Fold both SEND fixes into 1e's own deliverables.
 
+**What actually changed, and what it bought.** Both levers landed: `TAME_OUTCOMES.strongSuccess.brave` is now `true`, and `resolve.ts` floors a natural 20 on any successful tame to brave. P(brave) at starting stats went from a flat **0% on every creature** to 25% on a goblin, 5% on the other three, with a 5% floor that no DC can take away — the Quiet One is sendable at last.
+
+The measured result, `SWEEP=300 npm run tame -- 1`, scripted shortest-route player, starting stats:
+
+| | before | after |
+|---|---|---|
+| runs producing a brave companion (stirring) | 0/300 | **10/300** |
+| runs producing a brave companion (ravening) | 0/300 | **8/300** |
+| runs where `SEND` fired (stirring) | 0/300 | 1/300 |
+| runs where `SEND` fired (ravening) | 0/300 | 2/300 |
+
+**Read that second pair honestly: the gate is fixed and `SEND` is still nearly never used.** It was structurally impossible before and is merely rare now, which is a real change — but the bottleneck has moved rather than gone, and it has moved onto something already on this list. The chain is `encounter → tame → brave → stench fires while you still hold it`, and the first link is the weak one: `tame.ts` measures **0.6 encounters per run**, so ~10% of runs ever produce a brave companion and only a tenth of those get to spend it. That is the "the encounter fires about once per run" observation two sections down, now load-bearing for a second system. Fixing `SEND` usage properly means fixing encounter density; nothing further in the band tables will move it.
+
+For what it is worth the reducer's own sweep is kinder — `SWEEP=60 npm run turn -- 1` fires `SEND` once per policy in 60 seeds, against 0 in 60 for `tame.ts` — because `turn.ts` walks a full route through `applyAction` and meets slightly more creatures. Both are the same finding at different sample sizes.
+
 Settled separately: `SEND` is *not* a tutorial mechanic. At Drowsing the Wumpus moves once every three turns and starts ~10 rooms away, so there is nothing to bait, and teaching the irreversible button in a context where it accomplishes nothing trains players to read it as routine. Fix reachability globally, not for Drowsing.
 
-**2. `SEND` is weakest exactly when it is needed.** *(Decided 17 Sep 2026 — see below. Not yet implemented.)*
+**2. `SEND` is weakest exactly when it is needed.** *(Decided 17 Sep 2026; IMPLEMENTED in 1e.)*
 
 The decoy is pure scent (deliberately — no "distracted" flag on the Wumpus). `COMPANION.sendScent = 5` against `SCENT.decayFactor = 0.37`:
 
@@ -152,6 +200,17 @@ Solving `sendScent × decayFactorⁿ > deposit` for the turn counts wanted shows
 - `src/engine/data/tuning.ts`: replace `COMPANION.sendScent = 5` with a lookup off `TAME_DC` (e.g. `sendScent: (dc: number) => dc <= DC.moderate ? 10 : 5`, or an explicit per-creature table). `sendCompanion` in `creatures.ts` already has `context.creature`/`companion.kind` in scope, so threading the lookup through is a small change, not a signature rework.
 - `COMPANION.sendDecoyTurns` (currently one derived constant, 2) becomes two derived pairs, one per tier — update its doc comment and whatever test asserts the single value.
 - `tests/creatures.test.ts`: extend the sendScent/sendDecoyTurns consistency check to cover both tiers and both Heart states (4 cases instead of 1).
+
+**Implemented, and the table verifies itself now.** `COMPANION.sendScent` is a two-value record keyed by `sendTierFor(creature)`, which reads off `TAME_DC` rather than listing creature names — a fifth creature inherits a decoy strength instead of forgetting one. `sendDecoyTurns` became two derived pairs. `npm run tame` prints the claim and the decay arithmetic side by side with a ✓ or ✗ per cell, and `tests/creatures.test.ts` asserts all four:
+
+| creature | DC | `sendScent` | alone | with Heart |
+|---|---|---|---|---|
+| goblin | 8 | 10 | 3t ✓ | 2t ✓ |
+| lumewing | 12 | 10 | 3t ✓ | 2t ✓ |
+| grellhound | 12 | 10 | 3t ✓ | 2t ✓ |
+| quietOne | 16 | 5 | 2t ✓ | 1t ✓ |
+
+Exactly the table this finding specified.
 
 **3. The Wumpus usually could not reach you at the lower tiers.** *(FIXED.)*
 
@@ -201,24 +260,29 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **Terrain never drifts.** Within a run hazards are exactly where generation put them. If a future change makes the world grow mid-run, the "NEVER changes the terrain" test is the one that will stop it.
 - **Hostility lives with the creature, not the room**, so drift carries it.
 
-## Carried forward into 1e
+## Carried forward into 1f
 
-- **`resolve.ts` owns the encounter flag.** `creatures.ts` deliberately does not touch `GameState`. The reducer needs somewhere to record "an encounter is live in this room", set when the player *enters* a creature room and cleared when it resolves or they leave. Drift putting a creature on the player must not set it.
-- **`legalActions` must call `encounterOptions(room)`**, not build its own list. GDD §2.17 requires the filtering to happen in the engine, and the hostile gate lives there.
-- **Writing `creatureHostile` back is the reducer's job.** `EncounterResult.hostile` says it happened; nothing in `creatures.ts` mutates the room.
-- **A tame consumes two turns, so the Wumpus moves twice.** `EncounterResult.turnCost` carries this; `scripts/tame.ts` shows the shape (`moveWumpus` in a loop with a decay between steps).
-- **The Heart-carrying multiplier is applied at step 4**, not in the drift pass.
-- **`companionUpkeep` and the goblin scrounge are the only step-7 companion effects.** Everything else is a query or a roll-time modifier.
-- **Both `SEND` fixes ride along with 1e** — the `TAME_OUTCOMES.strongSuccess.brave` flip, the natural-20 override that structurally needs `resolve.ts`, and the `sendScent` lookup. The exact changes are written out under findings 1 and 2 above; they were decided by the PM session on 17 Sep and are not yet implemented in code.
-- **The fight-vs-tame comparison is stale.** The Wumpus start band changed the RNG stream and the lethality; the last sweep read 48% vs 47% escape, which says the placement now dominates the encounter choice entirely. Do not carry the older 80/68 or 75/72 figures forward — re-measure with 1g's heuristic policy.
-- **`scripts/tame.ts` reports the adjacency metric** (`runs the stench fired in`). That is the number that says whether the Wumpus was a presence; `mean closest wumpus` alone hid a 63%-unreachable bug for three steps.
+All of 1d's carried-forward list is now implemented in `resolve.ts` — the encounter flag, `legalActions` calling `encounterOptions`, the `creatureHostile` write-back, the two-turn tame, the Heart multiplier at step 4, the step-7 companion effects, and both SEND fixes. What 1f inherits instead:
+
+- **`NARRATION` in `resolve.ts` is 1f's, and it is deliberately minimal.** Sixteen lines covering endings, oil and a few discoveries. 1f's `(archetype × action × band)` table should absorb it wholesale; every one of those strings wants an archetype-aware variant, and GDD §2.8.1 additionally asks for a **dark variant of every tell and outcome** — the prose shifts modality while the information stays identical. That is two strings per cell, not one, and it is free atmosphere if written at the same time and expensive to retrofit.
+- **Every ending needs a beat, including retreat** (GDD §2.17). `NARRATION.retreated` is a placeholder line, not a written one.
+- **`HAZARD_OUTCOMES` is mechanics with no prose.** Same shape as 1d's `TAME_OUTCOMES`: 1f layers the writing on top.
+- **The hazard DCs are correctness floors, not balance numbers.** Pit at Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it. 1g's sim, not 1f.
+- **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If 1g's sim contradicts a 1d sweep number, this is the first place to look.
+- **The fight-vs-tame comparison is still stale**, for the reason 1d gave plus a new one: the reducer's step-7 accounting differs. Re-measure with 1g's heuristic policy, not with either visualiser.
+- **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so 1g's adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls.
 
 ## Not yet decided
 
-- Findings 1 and 2 are decided but unimplemented (see above); finding 3 is fixed and closed.
+- All three 1d findings are now fixed and closed.
+- **`FORCE` is in GDD §2.7 and has nothing to act on.** `Room.exits` models a wall as a missing key; there is no closed-door state to force. 1e chose not to invent one, because door state that changes mid-run collides with "terrain never drifts" (§2.9.1). Three ways out: give the generator a `blockedExits` set that FORCE clears (geometry the player *opens* is arguably not geometry that *drifts*, but it needs deciding, not assuming); repurpose FORCE as a STR alternative to SNEAK past a creature; or cut it from §2.7. **This is a PM call, not a code one** — flagging, not deciding.
+- **Whether `SEND` being used in ~0.5% of runs is acceptable.** The gate is fixed; the rate is now bound by encounter density (0.6 encounters per run), not by anything in the band tables. Raising it means raising encounter frequency, which is the entry two bullets below. Worth settling together: they are the same number.
+- Whether a skittish companion should charge upkeep on the very turn you tame it. It does, twice, because a tame consumes two turns and 1e made step 7 scale with `turnCost`. Defensible, slightly mean, and a one-line change either way.
+- Whether the reducer should spend Fortune at all, or whether every Fortune decision belongs to the renderer (1e assumed the latter; see the 1e decisions).
 - Whether `RUN.maxHeartDistance = 7` is the right *balance* number. It is currently a correctness floor. The sim in 1g answers this.
 - Whether Confused suppressing tells plays tame. The spicier scrambled-tells version is held in reserve (GDD §2.8.2).
 - Whether the Tier 4 turn budget of 18 is enough of a difference from 20.
 - Whether `DRIFT.creatureMoveChance = 0.25` reads as a living world or as churn. It produces ~1.5–1.9 creature moves per turn across the whole map, but the player only ever sees four rooms. 1g should measure how often an *adjacent* creature moves, which is the only rate that matters.
 - Whether a hostile creature should also *attack* each turn the player stays in the room. Currently it just sits there, un-tameable. Considered and deferred — it would add a damage source outside the encounter system.
 - Whether the post-fix catch rates are right. A naive route-walker is now caught 48% of the time at Stirring and 67% at Ravening. Those are the tell-ignored floor, not the expectation — a one-line sidestep rule drops them to 35% and 43% — but nobody has yet seen what a competent player scores. 1g's heuristic bot is the arbiter.
+- **Whether within-run bloom spread should come back.** Cut in 1d for schedule reasons, not because the concept is wrong — Gautham wants it reconsidered once there's real data: 1g's sim read, and playtest telemetry after the week-6 launch. Not before. Flagged as potentially tenet-breaking: `tests/creatures.test.ts` now asserts the whole hazard layout is byte-identical after 60 drift passes at every difficulty, so "terrain never drifts within a run" is a real, tested invariant today, even though it's deliberately not yet promoted into `CLAUDE.md` §3's canonical table while this stays open. Reopening this means a deliberate revision of that invariant or an explicit, narrow carve-out for blooms — not a quiet flip of one constant. Full reasoning in `claude/design-decisions.md` (project); spec-level note in `docs/GDD.md` §2.9.1.

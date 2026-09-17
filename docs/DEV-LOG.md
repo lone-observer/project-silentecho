@@ -53,8 +53,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 1 | 2026-09-16 | Phase 0 — scaffold | — | 0 | 0 → 44 (+44) | +2118 / −9 | — | 1 |
 | 2 | 2026-09-16 | Phase 1a–1c | — | 1a, 1b, 1b-fix, 1c | 44 → 118 (+74) | +1731 / −31 | — | 7 |
 | 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | — | — | — |
-| 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | — | — | 7 |
-| | | **Total** | **2.0 h** | | **180** | **+3,849 / −40** | **—** | **15** |
+| 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | +2631 / −59 | — | 7 |
+| | | **Total** | **2.0 h** | | **180** | **+6,480 / −99** | **—** | **15** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 

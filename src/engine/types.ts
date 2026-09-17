@@ -180,7 +180,12 @@ export type CreatureKind =
 
 export interface Companion {
   readonly kind: CreatureKind
-  /** Only a critical-success tame yields a companion brave enough to bait. GDD 2.9 */
+  /**
+   * Brave enough to be sent as bait (GDD 2.9). Two routes get you one: a tame
+   * at strongSuccess or better, or a natural 20 on any successful tame. The
+   * second is what keeps SEND reachable on the Quiet One, whose Hard DC rarely
+   * clears Strong Success even at INT 18.
+   */
   readonly brave: boolean
   /** Mixed-success tames are skittish: they flee if the player takes damage. */
   readonly skittish: boolean
@@ -230,7 +235,14 @@ export interface Player {
   readonly carryingHeart: boolean
   readonly companion: Companion | null
   readonly inventory: readonly string[]
-  readonly statuses: readonly StatusEffect[]
+  /**
+   * Active status effects and the turns each has left, counted down at step 7.
+   *
+   * A record rather than a list plus a parallel duration table: one source of
+   * truth, so a status can never be present with no clock or clocked with no
+   * presence. Absent key means not active; `statusTurnsLeft` reads it.
+   */
+  readonly statuses: Readonly<Partial<Record<StatusEffect, number>>>
 }
 
 export type Action =
@@ -271,6 +283,17 @@ export interface GameState {
   readonly turn: number
   readonly maxTurns: number
   readonly outcome: RunOutcome
+  /**
+   * The room a live encounter is bound to, or null.
+   *
+   * resolve.ts owns this flag; creatures.ts deliberately never touches GameState
+   * (GDD 2.9.1). It is set when the player ENTERS a room holding a creature and
+   * cleared when the encounter resolves or the player leaves. A creature that
+   * merely wanders onto the player during drift does NOT set it: by step 7 the
+   * player's turn has already resolved, so a forced encounter would spend a turn
+   * they never took. It is an intrusion, not an ambush.
+   */
+  readonly encounterRoomId: RoomId | null
   /** Every action taken, in order. With the seed, this replays the run exactly. */
   readonly actionLog: readonly Action[]
 }
@@ -281,7 +304,18 @@ export interface GameState {
 
 export type GameEvent =
   | { readonly kind: 'narration'; readonly text: string }
-  | { readonly kind: 'roll'; readonly action: ActionKind; readonly result: RollResult }
+  /**
+   * A roll happened. `hazard` is set when this is a hazard's saving throw
+   * rather than the action's own roll — the two are separate rolls in the same
+   * step, and a snare save reported as a MOVE roll is the renderer telling the
+   * player something untrue about why they just lost a point of health.
+   */
+  | {
+      readonly kind: 'roll'
+      readonly action: ActionKind
+      readonly result: RollResult
+      readonly hazard?: HazardKind
+    }
   | { readonly kind: 'moved'; readonly from: RoomId; readonly to: RoomId; readonly direction: Direction }
   | { readonly kind: 'tell'; readonly tell: Tell; readonly text: string }
   | { readonly kind: 'damage'; readonly amount: number; readonly cause: string }
@@ -291,6 +325,7 @@ export type GameEvent =
   | { readonly kind: 'creatureEncounter'; readonly creature: CreatureKind }
   | { readonly kind: 'companionGained'; readonly companion: Companion }
   | { readonly kind: 'companionLost'; readonly kind_: CreatureKind; readonly reason: string }
+  | { readonly kind: 'statusChanged'; readonly status: StatusEffect; readonly turns: number }
   | { readonly kind: 'heartTaken' }
   | { readonly kind: 'graveFound'; readonly epitaph: Epitaph }
   | { readonly kind: 'runEnded'; readonly outcome: RunOutcome }

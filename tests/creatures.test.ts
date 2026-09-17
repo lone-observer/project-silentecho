@@ -34,7 +34,7 @@ import type {
 } from '../src/engine/types.ts'
 import {
   COMPANION, DRIFT, ENCOUNTER, FIGHT_OUTCOMES, HEART,
-  SCENT, SCENT_BY_ACTION, TAME_DC, TAME_OUTCOMES,
+  SCENT, SCENT_BY_ACTION, sendDecoyTurnsFor, sendScentFor, TAME_DC, TAME_OUTCOMES,
 } from '../src/engine/data/tuning.ts'
 
 const ALL_CREATURES: readonly CreatureKind[] = ['goblin', 'lumewing', 'grellhound', 'quietOne']
@@ -133,13 +133,22 @@ describe('taming', () => {
     }
   })
 
-  it('only a critical success yields a BRAVE companion — SEND is gated on this band alone', () => {
+  it('a STRONG success or better yields a BRAVE companion — SEND is gated on this band', () => {
+    // MUTATION-CHECKED. This is the band gate SEND hangs off, and it moved on
+    // 17 Sep 2026: criticalSuccess-only needed margin >= +12, which at starting
+    // stats (INT 8, mod -1, max total 19) was 0% on every creature in the
+    // bestiary — SEND did not fire once in 150 sweep runs. Widening to
+    // strongSuccess is what puts a progression curve under it.
+    //
+    // The OTHER half of that fix — a natural 20 always brave — is not testable
+    // here and deliberately so: resolveEncounter only ever receives the resolved
+    // band, never the natural die, so it cannot be the thing under test. That
+    // case lives in tests/resolve.test.ts.
     const l = lab(1)
+    const braveBands: OutcomeBand[] = ['strongSuccess', 'criticalSuccess']
     for (const band of BAND_ORDER) {
       const r = resolveEncounter('tame', band, ctx(l), createRng(1))
-      expect(r.companionGained?.brave ?? false, `${band} must not yield brave`).toBe(
-        band === 'criticalSuccess',
-      )
+      expect(r.companionGained?.brave ?? false, `${band} brave gate`).toBe(braveBands.includes(band))
     }
   })
 
@@ -409,7 +418,7 @@ describe('SEND', () => {
     roomId: l.entranceId, facing: null,
     stats: { str: 8, agi: 8, int: 8, lck: 8 },
     health: 3, maxHealth: 3, oil: 12, maxOil: 12, fortune: 2,
-    carryingHeart: false, companion: c, inventory: [], statuses: [],
+    carryingHeart: false, companion: c, inventory: [], statuses: {},
   })
 
   it('needs a BRAVE companion — a plain or skittish one cannot be sent', () => {
@@ -441,7 +450,21 @@ describe('SEND', () => {
     expect(result).not.toBeNull()
     expect(result?.targetRoomId).toBe((l.rooms[l.entranceId] as Room).exits[dir])
     expect(result?.targetRoomId).not.toBe(l.entranceId)
-    expect(result?.scent).toBe(COMPANION.sendScent)
+    expect(result?.scent).toBe(sendScentFor('goblin'))
+  })
+
+  it('scales the decoy with the tame DC — the Quiet One is the quiet one', () => {
+    const l = lab(1)
+    const dir = DIRECTIONS.find((d) => (l.rooms[l.entranceId] as Room).exits[d] !== undefined)
+    if (!dir) return
+    for (const kind of ALL_CREATURES) {
+      const result = sendCompanion(l, player(l, companion({ kind, brave: true })), dir)
+      expect(result?.scent, `${kind} decoy strength`).toBe(sendScentFor(kind))
+    }
+    // The split is keyed off TAME_DC, not off a hand-written creature list, so
+    // a fifth creature inherits a decoy strength instead of forgetting one.
+    expect(sendScentFor('goblin')).toBe(sendScentFor('grellhound'))
+    expect(sendScentFor('quietOne')).toBeLessThan(sendScentFor('goblin'))
   })
 
   it('returns no path home — the companion does not come back (CLAUDE.md 3)', () => {
@@ -457,21 +480,51 @@ describe('SEND', () => {
 
   it('is louder than anything the player can do short of taking the Heart', () => {
     const loudestPlayerAction = Math.max(...Object.values(SCENT_BY_ACTION))
-    expect(COMPANION.sendScent).toBeGreaterThan(loudestPlayerAction)
-    expect(COMPANION.sendScent).toBeLessThan(SCENT.heartTaken + COMPANION.sendScent)
+    for (const kind of ALL_CREATURES) {
+      expect(sendScentFor(kind), `${kind} decoy vs loudest player action`).toBeGreaterThan(
+        loudestPlayerAction,
+      )
+      expect(sendScentFor(kind)).toBeLessThan(SCENT.heartTaken + sendScentFor(kind))
+    }
   })
 
-  it('out-smells a walking player for exactly sendDecoyTurns turns', () => {
+  it('out-smells the player for exactly sendDecoyTurns turns — both tiers, both Heart states', () => {
     // sendDecoyTurns is DERIVED from sendScent and the decay factor, not a free
     // setting. Changing sendScent without changing it fails here rather than
     // quietly making the GDD's promise a lie.
+    //
+    // Four cases now, not one. The flat sendScent = 5 made the decoy weakest
+    // exactly when it was needed — one turn against a Heart-carrying player,
+    // against a GDD promising 2-3 — so the strength is keyed to the tame DC.
+    // A shared decayFactor makes 3-without / 1-with arithmetically impossible,
+    // which is why the two tiers land on 3/2 and 2/1 rather than both on 3/1.
     const walking = SCENT_BY_ACTION.move
-    let turns = 0
-    for (let k = 0; k < 30; k++) {
-      if (COMPANION.sendScent * SCENT.decayFactor ** k <= walking) break
-      turns = k + 1
+    const carrying = SCENT_BY_ACTION.move * HEART.carryScentMultiplier
+
+    const dominatesFor = (decoy: number, deposit: number): number => {
+      let turns = 0
+      for (let k = 0; k < 30; k++) {
+        if (decoy * SCENT.decayFactor ** k <= deposit) break
+        turns = k + 1
+      }
+      return turns
     }
-    expect(turns).toBe(COMPANION.sendDecoyTurns)
+
+    for (const kind of ALL_CREATURES) {
+      const decoy = sendScentFor(kind)
+      expect(dominatesFor(decoy, walking), `${kind}, walking`).toBe(
+        sendDecoyTurnsFor(kind, false),
+      )
+      expect(dominatesFor(decoy, carrying), `${kind}, carrying the Heart`).toBe(
+        sendDecoyTurnsFor(kind, true),
+      )
+    }
+
+    // And the shape the design asked for: carrying the Heart always costs you a
+    // turn of cover, never more and never none.
+    for (const kind of ALL_CREATURES) {
+      expect(sendDecoyTurnsFor(kind, true)).toBe(sendDecoyTurnsFor(kind, false) - 1)
+    }
   })
 })
 

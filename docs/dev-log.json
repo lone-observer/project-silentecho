@@ -143,7 +143,9 @@
         "cacheWrite": 916443
       },
       "costUsd": null,
-      "commits": [],
+      "commits": [
+        "d4aaa7b"
+      ],
       "landed": "Creatures, encounters, taming bands, companion passives, SEND and world drift (src/engine/creatures.ts). GDD 2.9.1 written from scratch — it was referenced in three places and had never existed. scripts/tame.ts visualiser with a SWEEP aggregate mode. Room gained creatureHostile; a critically failed tame now permanently removes TAME from that creature's menu, and drift carries the hostility with the creature. Bloom spreading cut from within-run drift on Gautham's call — inside a visit the labyrinth only stirs, terrain is fixed. Wumpus start distance became a per-difficulty band in generate.ts, fixing a monster that could not reach the player in 83% of Drowsing and 63% of Stirring seeds. Nine invariant assertions mutation-checked. Findings 1 and 2 (SEND reachability and decoy strength) left untuned as design calls; the PM session decided both the same day.",
       "defects": [
         {
@@ -176,6 +178,62 @@
         }
       ],
       "effectiveTokens": 6783958
+    },
+    {
+      "id": 5,
+      "date": "2026-09-17",
+      "label": "Phase 1e — resolve",
+      "hours": 2,
+      "surface": "cowork",
+      "steps": [
+        "1e",
+        "1d-fix"
+      ],
+      "tests": {
+        "before": 180,
+        "after": 217
+      },
+      "tokens": {
+        "input": 410,
+        "output": 283851,
+        "cacheRead": 54282781,
+        "cacheWrite": 848611
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "src/engine/resolve.ts — the reducer, implementing GDD 2.2.2's eight-step turn order including both catch checks. createRun, legalActions (deferring to encounterOptions, so the hostile gate has one implementation), replayRun and tellsFor alongside it. scripts/turn.ts visualiser with a SWEEP mode: it tags every event with its GDD step so out-of-order emission is visible on any turn you look at, splits 'caught' into which of the two catch checks fired, and re-checks replay determinism and JSON round-tripping on every run it prints. Both SEND fixes from the 1d findings implemented: TAME_OUTCOMES.strongSuccess.brave flipped to true, a natural-20 brave override added in resolve.ts (it cannot live in creatures.ts — resolveEncounter only ever receives the resolved band), and COMPANION.sendScent became a two-value lookup keyed off TAME_DC with sendDecoyTurns as two derived pairs. Brave companions went from 0/300 sweep runs to 10/300; SEND fires for the first time, though rarely. Three type changes: GameState.encounterRoomId, Player.statuses became a record carrying each effect's own clock, and GameEvent.roll gained an optional hazard field. tuning.ts gained ACTION_STAT, the hazard entry tables, PORTAL and REST. Six reducer invariants mutation-checked plus two against tuning.ts; all eight fail when broken.",
+      "defects": [
+        {
+          "what": "A hazard saving throw was emitted to the player as a MOVE roll — entering a snare room rolled INT vs DC 8 and reported 'roll move', telling the player something untrue about why they lost health. Breaks text parity, which is a claim about the event stream and nothing else",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "scripts/tame.ts Panel B hardcoded .criticalSuccess as P(brave), so it would have gone on printing 0% for the exact gate this session moved — a visualiser lying about the one thing it exists to watch, on the only day anyone would check",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "First version of the two-turn-tame test ran at stirring, where the Wumpus moves every other turn, so a one-turn fight and a two-turn tame could both show one move. The mutation (collapsing the step-5 loop to a single move) walked straight through it; rerun at hunting it fails as it should",
+          "foundBy": "mutation check"
+        },
+        {
+          "what": "First oil-schedule test netted the passive burn against skittish-companion upkeep and expected 1 where the answer was 3. The test was wrong, not the code — it now measures the burn events rather than the net delta",
+          "foundBy": "tests"
+        },
+        {
+          "what": "Claimed the determinism test was mutation-checked against an unsorted status iteration; it is not, because `confused` is the only status and a one-key object has no order to get wrong. Claim corrected in the test comment and re-verified against a real mutation (dropping the carried RNG position)",
+          "foundBy": "mutation check"
+        },
+        {
+          "what": "SEND's usage rate is still ~0.5% of runs after the fix. The band gate was the blocker and is gone, but the binding constraint is now encounter density (0.6 per run) — the same number already flagged as making the creature system 'one dilemma per run'",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "FORCE is in GDD 2.7 and has nothing in the world model to act on: Room.exits models a wall as a missing key, with no closed-door state. Not offered by legalActions, with a test asserting so, and flagged to the PM rather than invented",
+          "foundBy": "eye"
+        }
+      ],
+      "effectiveTokens": 55415653,
+      "$comment": "commits: fill in the SHA after committing, then run `npm run devlog` on a machine that has git — the 1e session had no shell on the linked computer, so the churn columns could not be derived there."
     }
   ],
   "$tokenNote": "Cowork writes exact per-turn usage to the session transcript; these figures were harvested from it rather than estimated. All three sessions below were ONE continuous Cowork conversation, so the split is by calendar day of that conversation and the session boundaries are editorial. Sessions 2 and 3 fall in the same day bucket and share one figure. No dollar amount exists: usage inside a Pro/Max plan allowance is not metered in dollars, only against plan limits."

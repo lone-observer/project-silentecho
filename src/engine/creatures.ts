@@ -45,6 +45,7 @@ import {
   FLEE_OUTCOMES,
   SCENT_BY_ACTION,
   SNEAK_OUTCOMES,
+  sendScentFor,
   TAME_DC,
   TAME_OUTCOMES,
 } from './data/tuning.ts'
@@ -459,6 +460,12 @@ export function canSend(labyrinth: Labyrinth, player: Player, direction: Directi
  *
  * Note it is deliberately NOT multiplied by the Quiet One's damping — a
  * sent companion makes its own noise, not yours.
+ *
+ * How loud that noise is depends on WHICH creature you are giving up: the
+ * decoy's strength is keyed to the tame DC (sendScentFor). That is not a
+ * per-creature special case bolted on, it is the only way to hold the GDD's
+ * "1 turn while carrying the Heart" fixed for a Hard-DC creature while still
+ * giving the Easy/Moderate ones the promised 3 — see COMPANION.sendScent.
  */
 export function sendCompanion(labyrinth: Labyrinth, player: Player, direction: Direction): SendResult | null {
   if (!canSend(labyrinth, player, direction)) return null
@@ -467,7 +474,7 @@ export function sendCompanion(labyrinth: Labyrinth, player: Player, direction: D
   const targetRoomId = (roomAt(labyrinth, player.roomId)?.exits ?? {})[direction]
   if (targetRoomId === undefined) return null
 
-  return { sent: companion.kind, targetRoomId, scent: COMPANION.sendScent }
+  return { sent: companion.kind, targetRoomId, scent: sendScentFor(companion.kind) }
 }
 
 // ---------------------------------------------------------------------------
