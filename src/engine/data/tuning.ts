@@ -188,8 +188,10 @@ export const HAZARD_STAT: Partial<Record<HazardKind, StatKey>> = {
 }
 
 /**
- * What a hazard does to you, band by band. Mechanics only — the prose and the
- * per-archetype flavour are data/outcomes.ts (step 1f).
+ * What a hazard does to you, band by band. MECHANICS ONLY — the prose lives in
+ * data/outcomes.ts (`HAZARD_NARRATION`), keyed by the same bands. The two
+ * tables must agree: a pit at `failure` is fatal here, so the failure line
+ * there has to end the run.
  *
  * `extraTurns` is the snare's currency: it does not hurt you, it EATS THE CLOCK,
  * which against a 20-turn limit is its own kind of damage and keeps the three
@@ -252,8 +254,9 @@ export const SEARCH = {
 // ---------------------------------------------------------------------------
 
 /**
- * Base DC per action. Room archetype and hazard context override these in
- * data/outcomes.ts. Routine actions sit at Trivial/Easy on purpose: a fresh
+ * Base DC per action. (Room archetype and hazard context were once meant to
+ * override these from data/outcomes.ts; as of 1f that file carries PROSE only,
+ * and no DC is read from it. If per-archetype DCs are wanted, they belong here.) Routine actions sit at Trivial/Easy on purpose: a fresh
  * character (mod -1) only reaches Mixed-or-better 40% of the time against a
  * Moderate 12, so Moderate is reserved for genuine risk.
  */
@@ -492,8 +495,10 @@ export const COMPANION = {
 // ---------------------------------------------------------------------------
 
 /**
- * The MECHANICAL consequence of each band. Prose and per-archetype flavour are
- * data/outcomes.ts (step 1f); these tables say only what changes in the world.
+ * The MECHANICAL consequence of each band. Prose is data/outcomes.ts; these
+ * tables say only what changes in the world. The four encounter verbs are
+ * SUBJECT-LED over there — the creature is what the sentence is about, so they
+ * get band-only prose and no archetype axis.
  *
  * `extraScent` is added ON TOP of SCENT_BY_ACTION for the action taken, so the
  * fight/tame asymmetry survives every band: a clean tame is still quieter than

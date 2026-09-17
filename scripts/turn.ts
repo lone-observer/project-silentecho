@@ -34,7 +34,7 @@ import { rngFromState } from '../src/engine/rng.ts'
 import { roomIdAt } from '../src/engine/generate.ts'
 import { scentAt } from '../src/engine/wumpus.ts'
 import {
-  applyAction, createRun, legalActions, NARRATION, replayRun, tellsFor,
+  applyAction, createRun, legalActions, replayRun, tellsFor,
 } from '../src/engine/resolve.ts'
 import type { LegalAction } from '../src/engine/resolve.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
@@ -77,31 +77,65 @@ function stepOf(event: GameEvent): number {
     case 'statusChanged': return event.turns > 0 ? 3 : 7
     case 'heartTaken': return 3
     case 'wumpusTierChanged': return 3
-    case 'companionLost': return 3
+    // Losing a companion happens at three different steps depending on WHY, and
+    // the typed reason is the only thing that says which. Released and sent are
+    // the player's own action resolving; bolted is the step-3 damage effect;
+    // starved is the step-7 upkeep.
+    case 'companionLost':
+      return event.reason === 'starved' ? 7 : event.reason === 'bolted' ? 3 : 1
     case 'wumpusMoved': return 5
     case 'tell': return 8
     case 'runEnded': return 8
     // The oil table is the one place two different steps share an event kind:
     // a flask, a gutter or a pit's cost lands at step 3, the passive burn and
-    // the companion's upkeep at step 7. Keyed off the prose constants rather
-    // than guessed at, so improving the wording cannot silently mislabel it.
+    // the companion's upkeep at step 7.
+    //
+    // This used to compare `event.text` against prose constants. Step 1f gave
+    // every beat a lit and a dark variant, which broke that outright — the
+    // panel would have gone on reporting until the player's lamp got low and
+    // then quietly started mislabelling every oil event in the run. It keys off
+    // `event.beat` now, which is what that field exists for. Same lesson as
+    // Panel B of tame.ts in 1e: a visualiser that identifies the thing it is
+    // watching by its appearance is a visualiser that lies the day the
+    // appearance changes.
     case 'oilChanged':
-      return event.text === NARRATION.lampBurnsDown ||
-        event.text === NARRATION.goblinScrounges ||
-        event.text === NARRATION.skittishUpkeep
+      return event.beat === 'lampBurnsDown' ||
+        event.beat === 'goblinScrounges' ||
+        event.beat === 'skittishUpkeep'
         ? 7
         : 3
     case 'narration':
-      if (event.text === NARRATION.caughtWalkedInto) return 2
-      if (event.text === NARRATION.caughtCameForYou) return 6
-      if (
-        event.text === NARRATION.escaped ||
-        event.text === NARRATION.retreated ||
-        event.text === NARRATION.outOfTurns ||
-        event.text === NARRATION.killedByHazard ||
-        event.text === NARRATION.killedByDamage
-      ) return 8
-      return 7
+      switch (event.beat) {
+        case 'actionOutcome':
+        case 'hazardOutcome':
+        case 'braveOverride':
+        case 'foundFlask':
+        case 'caughtBreath':
+        case 'carvingsWarn':
+        case 'companionReveals':
+        case 'creatureFound':
+        case 'portalCrossed':
+        case 'actionUnavailable':
+          return 1
+        case 'caughtWalkedInto':
+          return 2
+        // The Heart, its escalation and a bloom's Confused are all step-3
+        // effects — they are what the action DID, not the action itself.
+        case 'heartTaken':
+        case 'wumpusEscalates':
+        case 'confusedSettles':
+          return 3
+        case 'caughtCameForYou':
+          return 6
+        case 'creatureWanders':
+        case 'grellhoundGrowls':
+        case 'grellhoundReveals':
+        case 'confusedLifts':
+          return 7
+        default:
+          // Every remaining beat is an ending, and endings are step 8.
+          return 8
+      }
     default: return 8
   }
 }
@@ -321,11 +355,12 @@ function playRun(seed: number, policy: PolicyName): RunSummary {
     const result = applyAction(state, action, rngFromState(state.rng))
     if (result.events.some((e) => e.kind === 'creatureEncounter')) encounters += 1
 
-    // WHICH catch check. The two narrations are the only thing that
+    // WHICH catch check. The two ending beats are the only thing that
     // distinguishes them, which is itself worth knowing.
     for (const e of result.events) {
-      if (e.kind === 'narration' && e.text === NARRATION.caughtWalkedInto) caughtAtStep = 2
-      if (e.kind === 'narration' && e.text === NARRATION.caughtCameForYou) caughtAtStep = 6
+      if (e.kind !== 'narration') continue
+      if (e.beat === 'caughtWalkedInto') caughtAtStep = 2
+      if (e.beat === 'caughtCameForYou') caughtAtStep = 6
     }
 
     traces.push({ turn, action, events: result.events, menuSize: menu.length })

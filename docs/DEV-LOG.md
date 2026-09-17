@@ -54,7 +54,9 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 2 | 2026-09-16 | Phase 1a–1c | — | 1a, 1b, 1b-fix, 1c | 44 → 118 (+74) | +1731 / −31 | — | 7 |
 | 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | — | — | — |
 | 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | +2631 / −59 | — | 7 |
-| | | **Total** | **2.0 h** | | **180** | **+6,480 / −99** | **—** | **15** |
+| 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
+| 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | — | — | 6 |
+| | | **Total** | **6.0 h** | | **239** | **+9,617 / −185** | **—** | **28** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -62,11 +64,12 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| visualiser | 5 | 33% |
-| eye | 5 | 33% |
-| probe | 2 | 13% |
-| tests | 2 | 13% |
-| tooling | 1 | 7% |
+| visualiser | 10 | 36% |
+| eye | 8 | 29% |
+| tests | 4 | 14% |
+| mutation check | 3 | 11% |
+| probe | 2 | 7% |
+| tooling | 1 | 4% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -85,6 +88,19 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-17 | Wumpus start distance had a floor and no ceiling — mean 11 rooms away on a 10x10 against tier reaches of 6–18, so it was unreachable in 83% of Drowsing and 63% of Stirring seeds | visualiser |
 | 2026-09-17 | The tame sweep's adjacency metric undercounted: runs that ended in a catch broke before closestWumpus was updated, recording Infinity. Spotted because adjacency (40%) came out below the catch rate (47%), which is impossible | eye |
 | 2026-09-17 | First hostility-travel test asserted the vacated room was calm, which fails legitimately when a second hostile creature moves into it during the same drift pass. The test was wrong, not the code | tests |
+| 2026-09-17 | A hazard saving throw was emitted to the player as a MOVE roll — entering a snare room rolled INT vs DC 8 and reported 'roll move', telling the player something untrue about why they lost health. Breaks text parity, which is a claim about the event stream and nothing else | visualiser |
+| 2026-09-17 | scripts/tame.ts Panel B hardcoded .criticalSuccess as P(brave), so it would have gone on printing 0% for the exact gate this session moved — a visualiser lying about the one thing it exists to watch, on the only day anyone would check | visualiser |
+| 2026-09-17 | First version of the two-turn-tame test ran at stirring, where the Wumpus moves every other turn, so a one-turn fight and a two-turn tame could both show one move. The mutation (collapsing the step-5 loop to a single move) walked straight through it; rerun at hunting it fails as it should | mutation check |
+| 2026-09-17 | First oil-schedule test netted the passive burn against skittish-companion upkeep and expected 1 where the answer was 3. The test was wrong, not the code — it now measures the burn events rather than the net delta | tests |
+| 2026-09-17 | Claimed the determinism test was mutation-checked against an unsorted status iteration; it is not, because `confused` is the only status and a one-key object has no order to get wrong. Claim corrected in the test comment and re-verified against a real mutation (dropping the carried RNG position) | mutation check |
+| 2026-09-17 | SEND's usage rate is still ~0.5% of runs after the fix. The band gate was the blocker and is gone, but the binding constraint is now encounter density (0.6 per run) — the same number already flagged as making the creature system 'one dilemma per run' | visualiser |
+| 2026-09-17 | FORCE is in GDD 2.7 and has nothing in the world model to act on: Room.exits models a wall as a missing key, with no closed-door state. Not offered by legalActions, with a test asserting so, and flagged to the PM rather than invented | eye |
+| 2026-09-17 | Three events the player could not be told about: creatureEncounter, heartTaken and statusChanged carried no text at all — the reducer emitted a bare event and left the renderer to invent the sentence. Taking the Heart is the loudest moment in the game and it said nothing. A text-parity failure in the direction nobody checks: not a renderer hiding a fact, but the event stream unable to express one | visualiser |
+| 2026-09-17 | scripts/turn.ts identified oil events and both catch checks by comparing event.text against prose constants. Giving every beat a second variant broke that silently AND conditionally — it would have kept working at full oil and started mislabelling every oil event once the lamp got low, which is exactly when the panel gets read | eye |
+| 2026-09-17 | A mutation check PASSED: replacing the grellhound's growl with a raw string literal did not trip the source-of-truth assertion, because 160 runs of a doorway-cycling policy never had a grellhound companion within radius 2 of the Wumpus. Adding a Heart-seeking policy then revealed that heartTaken, wumpusEscalates and the entire escaped ending were also unverified by a test whose whole claim is that the reducer only speaks from the table | mutation check |
+| 2026-09-17 | Five verbs roll a d20 whose band changes almost nothing: MOVE and LISTEN only at the critical-failure noise bonus, USE and SEND not at all, SEARCH/READ/REST two-valued. GDD 2.6 promises a gift at Strong Success and none is implemented, which constrained the prose — the top bands differ in texture and never in claim, because implying a find that did not happen would be the engine lying | eye |
+| 2026-09-17 | The lint panel caught three vision words in dark variants in freshly written prose (two 'looking', one 'see'), which is the defect the dark-variant rule exists to prevent and which no human would reliably catch across 532 strings | visualiser |
+| 2026-09-17 | The source-of-truth test's own sweep callback used `return` where it meant `continue`, so it inspected exactly one event per turn and counted zero spoken lines. Caught only by the vacuity guard asserting the sweep had said more than 2000 things | tests |
 
 <!-- devlog:end -->
 

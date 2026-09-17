@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 17 Sep 2026, end of step 1e (`resolve.ts`, plus both SEND fixes from the 1d findings). Sessions are now one per step — see below.
+**Last updated:** 17 Sep 2026, end of step 1f (the outcomes table). Sessions are now one per step — see below.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -15,10 +15,10 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1c · the Wumpus | **done** | `src/engine/wumpus.ts`, `scripts/hunt.ts` |
 | 1d · creatures | **done** | `src/engine/creatures.ts`, `scripts/tame.ts`, GDD §2.9.1 written |
 | 1e · resolve | **done** | `src/engine/resolve.ts`, `scripts/turn.ts`, both SEND fixes implemented |
-| 1f · outcomes table | **next** | `(archetype × action × band)`, with a coverage test |
-| 1g · text renderer + agent harness | pending | built to `docs/EVALS.md` requirements |
+| 1f · outcomes table | **done** | `src/engine/data/outcomes.ts`, `scripts/prose.ts`, `tests/outcomes.test.ts` |
+| 1g · text renderer + agent harness | **next** | built to `docs/EVALS.md` requirements |
 
-217 tests. `npm test`, `npm run typecheck`, both clean.
+239 tests. `npm test`, `npm run typecheck`, both clean.
 
 ## One session per step
 
@@ -36,6 +36,14 @@ Two causes, and only one of them is avoidable:
 2. **Avoidable: editing files with shell heredocs instead of the editing tool.** Several `python3 - <<'PY'` patches to `tame.ts`, `turn.ts` and `resolve.ts` caused the harness to re-inject the *entire* changed file into the conversation as a change notice — 600 to 1200 lines each, which then rode along in every subsequent turn's cache read. Use the editing tool for edits; reach for a shell patch only for genuinely mechanical multi-site rewrites, and expect to pay for it when you do.
 
 So: **the per-step-session claim holds, but "a step" is not a fixed unit of cost.** Do not read 43.8k/turn as the expected rate; read it as what a narrow step costs. Budget by how much of the engine a step has to hold at once.
+
+**Fourth measurement, from 1f — and it settles which of the two causes above was the real one.** Step 1f ran 193 assistant turns and **54.7M effective tokens: 283k per turn**, against 1e's 270k. Peak context 388k. The split was 97.8% cache reads, 1.7% cache writes, 0.5% output, 386 raw input tokens.
+
+The prediction one paragraph up — "1f (one big data table) should be narrow again" — **was wrong, and wrong by 6x.** 1f wrote almost no logic: one data module, a lookup function, a visualiser, and about thirty lines of change inside `resolve.ts`. It still cost what writing the reducer cost.
+
+The reason is the part worth keeping. Cost tracks **how much of the engine a step has to hold in context**, not how much code it produces. Writing prose that must agree with the mechanics means holding the mechanics: `tuning.ts`'s five band tables to know what each band actually does, `resolve.ts` to know where each line is emitted and in what order, `types.ts`, the whole GDD for §2.6's band meanings and §2.8.1's dark-variant rule and §2.17's ending rule, and this file. That is the same ~190k of source and spec 1e needed, for the same reason. Cause 1 from the 1e session ("`resolve.ts` is the module that touches every other module") generalises: **any step whose output must be consistent with the whole engine pays the whole engine's context cost, whether or not it writes code.** Cause 2 (shell heredocs re-injecting whole files) was avoided this session and did not recur; the 6x gap between 1d and 1e was therefore mostly cause 1, not cause 2.
+
+Practical rule for 1g and beyond: **estimate a step's cost from the number of modules its output has to be correct against, not from the number of files it creates.** By that measure 1g — text renderer plus agent harness, both of which read the whole event stream and every one of these tables — should be budgeted like 1e and 1f, not like 1d.
 
 Starting fresh is only cheap because this repo can orient a session that knows nothing. That is what `CLAUDE.md`, `docs/GDD.md` and this file are for — keep them current, and the cost of closing a session stays near zero.
 
@@ -76,6 +84,8 @@ Neither is a toy. Each caught a real defect that tests did not.
 
 **`npm run tame -- <seed> [difficulty] [tier] [policy]`** — runs the identical seed twice, once fighting everything and once taming everything, and puts the two columns side by side. `SWEEP=n npm run tame -- <seed> …` aggregates over `n` seeds instead of printing runs. Panels A and B are static tables (the band-by-band cost of each option; the exact d20 probability of each tame band per creature per INT) and cost nothing to read. Since 1e the sweep also prints **which seeds produced a brave companion and which fired `SEND`** — an aggregate gives you a rate, but only a seed number lets you go and watch the beat, and `SEND` is now rare enough that guessing which of 300 seeds to open is hopeless.
 
+**`npm run prose -- [mode]`** — the outcomes table. Four panels. **A** is the coverage matrix and is the cheap one. **B** prints one `(action × archetype)` as six bands with lit above dark, which is the only way to see that six bands read as one sentence rewritten six times — the specific failure mode of authoring 222 cells in a sitting, and one no coverage test can detect. **C** drives a real run and prints every line the engine emitted, in order, tagged with its beat id; ordering defects are invisible in the table and obvious in a transcript. **D** is the lint, and it shares its rules with `tests/outcomes.test.ts` rather than restating them.
+
 **`npm run turn -- <seed> [difficulty] [policy]`** — a whole run driven through `applyAction`, with every turn broken back out into the eight steps of GDD §2.2.2. `SWEEP=n` aggregates. The panel that earns its keep is the one printing each event's **step number**: they must ascend within a turn, so a reducer that ever emits out of order shows it on every turn you look at rather than only in the cases a test enumerated. It also splits "caught" into **which** catch check fired, re-checks replay determinism and JSON round-tripping on every run it prints, and compares a tell-ignoring policy against a fifty-character one that refuses to step toward a draft or a stench.
 
 What they found:
@@ -88,6 +98,8 @@ What they found:
 - **Retreating the way you came is worse than ignoring the stench.** Measured, not assumed. The braid loops are the counterplay.
 - **A hazard save was being reported to the player as a MOVE roll.** `scripts/turn.ts`, first run. Entering a snare room rolled INT against DC 8 and emitted it as `roll move` — text parity means the event stream is the source of truth, and it was telling the player something untrue about why they had just lost a point of health. `GameEvent.roll` gained an optional `hazard` field.
 - **Panel B of `tame.ts` would have kept printing the old, broken brave odds.** It hardcoded `.criticalSuccess`, so the moment 1e moved the gate the visualiser would have gone on reporting 0% for the exact thing the session had just fixed. It now derives the brave bands from `TAME_OUTCOMES`. Worth generalising: **a visualiser that hardcodes the rule it is watching is a visualiser that lies on the day the rule changes**, which is the only day you are looking at it.
+- **Three events the player could not be told about.** `creatureEncounter`, `heartTaken` and `statusChanged` carried no text at all — the reducer emitted a bare event and left the renderer to invent the sentence. That is a text-parity failure (`CLAUDE.md` §2.3) in the direction nobody checks: not a renderer hiding a fact, but the event stream being unable to express one. Taking the Heart is the loudest moment in the game and it said nothing. Found by reading Panel C of `prose.ts`, not by any test — every test passed before and after.
+- **`scripts/turn.ts` identified oil events and catch checks by comparing prose.** It worked until 1f gave every beat a second variant, at which point it would have kept working in the lamplight and silently started mislabelling every oil event in the run the moment the player's lamp got low. Same lesson as Panel B above, one layer down: identity belongs on an id, not on an appearance. Events now carry `NarrationBeat`.
 
 Build the equivalent tool for each remaining step. It has paid for itself every time.
 
@@ -128,6 +140,59 @@ Build the equivalent tool for each remaining step. It has paid for itself every 
 - **Fortune is not spent by the reducer.** `rerollWithFortune` and `bumpBandWithFortune` exist in `dice.ts`, but spending happens *after seeing a roll* (GDD §2.5), which is a two-phase interaction and therefore a renderer concern. The reducer never spends it for the player, including to save a bolting skittish companion. Carried forward to 1g.
 - **`ENTER PORTAL` regenerates the labyrinth**, clears the scent field entirely, and lands you at least `PORTAL.minLandingDistance` from the new entrance — never on it, or a portal would be a free ride home. The INT band decides how deep you surface, never whether you arrive; a portal that could strand you would be a second instant-loss check and the design has room for one.
 - **Prose lives in a `NARRATION` table** at the top of `resolve.ts` rather than inline, per CLAUDE.md §2.4. It is small and 1f absorbs it by moving one object. `scripts/turn.ts` keys off those constants to work out which catch check fired, so improving the wording cannot silently break the panel.
+
+## What 1f landed
+
+- **`src/engine/data/outcomes.ts`** — every line of prose the engine can emit. 266 beats, 532 strings. `resolve.ts`'s `NARRATION` object is gone, absorbed wholesale, along with every template literal that was scattered through its switch statements. There is no prose left in the reducer and a test fails the build if any comes back.
+- **`scripts/prose.ts`** — the visualiser, four panels. See "the two tools" above; it is five now.
+- **`tests/outcomes.test.ts`** — 22 tests, taking the suite from 217 to 239. Seven assertions mutation-checked.
+- **`GameEvent` changes, three of them.** `narration` and `oilChanged` gained a required `beat: NarrationBeat`. `companionLost` gained `text` and its `reason` became a typed `CompanionLossReason` instead of a free string.
+
+### The table's shape, and why it is layered rather than a full grid
+
+A literal 6 × 12 × 6 grid is 432 cells and 864 strings, and most of them would be padding — a FIGHT reads the same whether the floor is wet or carved, because the creature is the subject of the sentence and the room is backdrop. So the verbs are split by **what the sentence is about**:
+
+| | verbs | cells |
+|---|---|---|
+| **room-led** | MOVE, LISTEN, SEARCH, READ, REST | 6 archetypes × 5 × 6 bands = 180 |
+| **subject-led** | SNEAK, FIGHT, TAME, FLEE, USE, SEND, ENTER PORTAL | 7 × 6 = 42 |
+| hazards | pit, spore bloom, snare-carving | 3 × 6 = 18 |
+| endings + notes + companion loss | | 26 |
+
+The lookup is **total over all 432 triples** either way — subject-led verbs answer the same line for every archetype, which is the layering, not a gap. The coverage test asserts both halves: that every triple resolves, *and* that every room-led verb has all six archetypes genuinely filled, so the layering cannot quietly rot into half-written tables.
+
+**FORCE is deliberately unwritten** and is not a hole. `DEFERRED_ACTIONS` names it, and a test asserts `NARRATED ∪ DEFERRED` covers every `ActionKind` — so when the hazard-verb step adds ENDURE, AVOID and DODGE, the build fails until someone has either written their prose or written down why they have not. A second test drives 100 runs and asserts no deferred verb is ever offered, which is what makes deferring it defensible rather than a gap.
+
+### Decisions taken in 1f, all reversible
+
+- **The dark-variant threshold is Ember, not Dark.** `isDarkProse` reads `OIL_BANDS[].tellRange === 'facing'` rather than defining a constant, so the prose register changes exactly where GDD §2.8.1 already puts the range restriction and its stated reason ("the first oil threshold stays purely arithmetic so the deep one lands as a genuine change of state") covers both. The practical consequence is that this is not a rare state written for flavour: oil starts at 12 and burns 1 every 2 turns, so **a clean 20-turn run ends at Ember**, and the last turns of a good run read in the dark register. One line to change if playtesting says it should wait for Dark.
+- **A cell whose lit variant is already non-visual may share its string with dark.** GDD §2.8.1's own argument is that only one tell in the game is genuinely vision-dependent; most of this writing already reaches the player by sound, smell and touch. So the enforceable invariant is not "lit ≠ dark" — which would force gratuitous rewording — but the pair the tests actually assert: no dark variant may contain a vision word, and any lit variant that *does* contain one must have a different dark variant. That pair caught three defects in the prose as it was being written.
+- **Slots are a closed, typed set of five nouns** (`creature`, `companion`, `direction`, `hazard`, `item`) and `fill` throws rather than shipping a brace. `CLAUDE.md` §6 rules out "procedural prose generation at runtime" and this is deliberately not that: nothing is assembled, no clause is chosen, a written sentence names one of five things it cannot know at authoring time. The set is closed so it cannot grow into a generator by accident.
+- **Endings are not archetype-keyed**, and this is a scope line rather than a judgement. A death beat that knows which room it happened in is exactly the writing GDD §2.17 argues for — but endings are not in the `(archetype × action × band)` product this step is gated on, and the epitaph (§2.16), which §2.17 calls the literal last thing a failed run produces, is not built either. Do the two together. Carried forward.
+- **Hazard prose is keyed by hazard and band, not archetype.** Generation already biases each hazard toward its thematic archetype (`ARCHETYPE_FOR_HAZARD`), so an archetype axis here would mostly restate the hazard.
+- **`companionLost` carries its own text instead of being paired with a narration event.** The four reasons resolve at three different steps of the turn order — released and sent at step 1, bolted at step 3, starved at step 7 — so a narration emitted alongside would have to be attributed to whichever step its partner landed in, and `scripts/turn.ts`'s step-ordering panel would have started reporting false out-of-order emissions.
+
+### 1f findings
+
+**1. Three events had no prose at all, and taking the Heart was one of them.** `creatureEncounter`, `heartTaken` and `statusChanged` emitted bare events. Found by reading Panel C. All three now have beats; `confusedSettles` and `confusedLifts` matter beyond atmosphere, because GDD §2.8.2 is explicit that Confused is suppression *the player knows about*, and a status that expired in silence left them unable to tell "the doorways said nothing" from "I still cannot hear the doorways".
+
+**2. Five verbs roll a d20 whose band changes almost nothing.** Measured against `resolve.ts`, not assumed:
+
+| verb | what the band actually does |
+|---|---|
+| MOVE | nothing, except `SCENT.criticalFailureBonus` at the bottom |
+| LISTEN | nothing, except the same critical-failure noise |
+| USE | **nothing at all** — the item is consumed and its effect applied regardless |
+| SEND | **nothing at all** — `resolveSend` never reads the band |
+| SEARCH / READ / REST | two-valued: `isSuccess(band)` or not |
+
+GDD §2.6 describes Strong Success as "success plus a small gift: a glimpse of the map, a trinket, the Wumpus loses your scent" — and for all five of these there is no gift implemented. **This constrained the prose:** the top bands had to differ in texture and never in claim, because a strong SEARCH implying a second find would be the engine lying about a mechanic (`CLAUDE.md` §2.3 runs in this direction too). It is a real design gap and 1f is the wrong place to close it — adding gifts is mechanics, not content. **For 1g's sim: either the top bands earn something, or the widest good band is doing all the work and four verbs could stop rolling.** A verb whose roll cannot matter probably should not roll.
+
+**3. A mutation check passed, and that was the interesting result.** Replacing the grellhound's growl with a raw string literal did *not* trip the source-of-truth assertion. The test was fine; the mutation was unreachable — 160 runs of a doorway-cycling policy never once had a grellhound companion standing within radius 2 of the Wumpus. Fixing it meant adding a second policy that walks to the Heart and back, which then revealed that **`heartTaken`, `wumpusEscalates` and the entire `escaped` ending had also been going unverified** by a test whose whole claim is that the reducer only speaks from the table. The test now records which beats its sweeps reach and asserts the six it does not, so the gap is a ledger rather than an assumption.
+
+**Four of those six need a companion.** Neither policy ever tames anything, which makes the companion system the least-exercised part of the reducer. That is the same encounter-density number from the 1d findings (0.6 per run) turning up for a third time, now as a *test coverage* problem rather than a design one. 1g's heuristic policy should tame deliberately, or a whole subsystem stays unexercised by anything but its own unit tests.
+
+**4. The step-ordering panel was two changes away from lying.** `scripts/turn.ts` identified oil events and catch checks by comparing `event.text` against prose constants. Adding a second variant per beat broke that silently and conditionally — it would have kept working at full oil and started mislabelling every oil event once the lamp got low, which is precisely when you are reading the panel. Events now carry a `NarrationBeat` id and the panel keys off that.
 
 ## 1d findings — three real defects, none of them in 1d's own code
 
@@ -260,25 +325,33 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **Terrain never drifts.** Within a run hazards are exactly where generation put them. If a future change makes the world grow mid-run, the "NEVER changes the terrain" test is the one that will stop it.
 - **Hostility lives with the creature, not the room**, so drift carries it.
 
-## Carried forward into 1f
+## Carried forward into 1g
 
-All of 1d's carried-forward list is now implemented in `resolve.ts` — the encounter flag, `legalActions` calling `encounterOptions`, the `creatureHostile` write-back, the two-turn tame, the Heart multiplier at step 4, the step-7 companion effects, and both SEND fixes. What 1f inherits instead:
+1f's own inherited list is done: `NARRATION` is absorbed, `HAZARD_OUTCOMES` has prose, retreat is written rather than placeheld, and every cell has a dark variant. What 1g inherits:
 
-- **`NARRATION` in `resolve.ts` is 1f's, and it is deliberately minimal.** Sixteen lines covering endings, oil and a few discoveries. 1f's `(archetype × action × band)` table should absorb it wholesale; every one of those strings wants an archetype-aware variant, and GDD §2.8.1 additionally asks for a **dark variant of every tell and outcome** — the prose shifts modality while the information stays identical. That is two strings per cell, not one, and it is free atmosphere if written at the same time and expensive to retrofit.
-- **Every ending needs a beat, including retreat** (GDD §2.17). `NARRATION.retreated` is a placeholder line, not a written one.
-- **`HAZARD_OUTCOMES` is mechanics with no prose.** Same shape as 1d's `TAME_OUTCOMES`: 1f layers the writing on top.
-- **The hazard DCs are correctness floors, not balance numbers.** Pit at Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it. 1g's sim, not 1f.
-- **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If 1g's sim contradicts a 1d sweep number, this is the first place to look.
-- **The fight-vs-tame comparison is still stale**, for the reason 1d gave plus a new one: the reducer's step-7 accounting differs. Re-measure with 1g's heuristic policy, not with either visualiser.
-- **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so 1g's adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls.
+- **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so 1g's adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls. **1f makes `AgentView.log` nearly free:** every narration now carries a `NarrationBeat`, so the log is a typed stream rather than strings to be reassembled, and the text renderer and the agent view read the same beats.
+- **The text renderer must not write prose.** Everything it needs is in `data/outcomes.ts`, and `tests/outcomes.test.ts` fails the build if a sentence appears in the engine. The same rule should hold for the renderer: if a line is missing, add a beat, do not inline a string.
+- **Five verbs roll for nothing** — see 1f finding 2. Either the top bands earn a gift or four verbs stop rolling. This is a sim question and it is 1g's.
+- **The hazard DCs are correctness floors, not balance numbers.** Pit at Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it.
+- **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If a 1g sim number contradicts a 1d sweep number, this is the first place to look.
+- **The fight-vs-tame comparison is still stale**, for the reason 1d gave plus the reducer's differing step-7 accounting. Re-measure with 1g's heuristic policy, not with either visualiser.
+- **1g's heuristic policy should tame deliberately.** Four of the six beats no test sweep reaches need a companion, because neither 1f policy ever tames. The companion system is the least-exercised part of the reducer.
+- **Archetype-specific death beats, together with the epitaph.** GDD §2.17 argues the last line of a run carries more weight than any line inside it, and §2.16's epitaph is the literal last thing a failed run produces. Neither exists yet. Scope them as one piece of work, not two.
 
 ## Not yet decided
 
 - All three 1d findings are now fixed and closed.
-- **`FORCE` is in GDD §2.7 and has nothing to act on.** `Room.exits` models a wall as a missing key; there is no closed-door state to force. 1e chose not to invent one, because door state that changes mid-run collides with "terrain never drifts" (§2.9.1). Three ways out: give the generator a `blockedExits` set that FORCE clears (geometry the player *opens* is arguably not geometry that *drifts*, but it needs deciding, not assuming); repurpose FORCE as a STR alternative to SNEAK past a creature; or cut it from §2.7. **This is a PM call, not a code one** — flagging, not deciding.
-- **Whether `SEND` being used in ~0.5% of runs is acceptable.** The gate is fixed; the rate is now bound by encounter density (0.6 encounters per run), not by anything in the band tables. Raising it means raising encounter frequency, which is the entry two bullets below. Worth settling together: they are the same number.
+- **Whether the top three bands should earn anything for MOVE, LISTEN, SEARCH, READ, REST, USE and SEND.** GDD §2.6 promises "a small gift" at Strong Success and none of these implement one; USE and SEND do not read the band at all. 1f wrote the prose honestly around this (texture, never claim) rather than papering it. 1g's sim decides whether to add the gifts or stop rolling. See 1f finding 2.
+- **Whether the prose register should shift at Ember or at Dark.** 1f chose Ember, deriving it from `OIL_BANDS[].tellRange` so it moves with the range restriction. The consequence is that a clean 20-turn run ends in the dark register, which reads as the right shape but has not been played.
+- **Whether endings should be archetype-aware**, decided together with the epitaph (GDD §2.16, §2.17).
+- **`FORCE` is resolved — decided in shape, not yet built.** 17 Sep PM session: `FORCE` was never meant for doors or walls, only for bypassing a spore bloom. Bloom and Snare both move from auto-resolving `ENTRY_HAZARDS` to a verb choice, mirroring the Creature encounter — `FORCE`(STR)/`ENDURE`(INT) on blooms, `AVOID`(INT)/`DODGE`(AGI) on snares — deliberately built so every stat has exactly one hazard type it can't touch. See `claude/design-decisions.md`, 17 Sep, for the full reasoning, the Endure-cost-model decision, and the oil-reward addition that rides along with it. **This is a new mechanic, not content — it is not part of 1f.** It needs its own step, scheduled after 1f, not yet slotted into the roadmap.
+- **Whether `SEND` being used in ~0.5% of runs is acceptable.** Unchanged by the above — this is encounter density, not hazard mechanics. The gate is fixed; the rate is now bound by encounter density (0.6 encounters per run), not by anything in the band tables. Raising it means raising encounter frequency, which is the entry two bullets below. Worth settling together: they are the same number.
 - Whether a skittish companion should charge upkeep on the very turn you tame it. It does, twice, because a tame consumes two turns and 1e made step 7 scale with `turnCost`. Defensible, slightly mean, and a one-line change either way.
 - Whether the reducer should spend Fortune at all, or whether every Fortune decision belongs to the renderer (1e assumed the latter; see the 1e decisions).
+- **The hazard-success oil reward's magnitude.** Gated on the 1g sim's oil-burn baseline, same posture as the hazard DCs. When set, converge toward reward-smaller-than-failure-cost so hazards stay net-negative in expectation.
+- **Ambient oil-flask counts (`POPULATION.oilFlasks`), reconsidered alongside the reward above.** Gautham wants the economy leaning more on earning oil through risk than finding it in the open — size the two together, not as separate numbers.
+- **A genuinely INT-weak trap** (a mimic or fake-treasure-room — forceable by STR, dodgeable by AGI, a real cost for an INT build trusting its read of the room), to fully close the per-stat coverage matrix the hazard redesign above sets up. New content, deferred alongside creature difficulty tiers — not part of the hazard-verb step.
+- **The stone-grub's chew/dig-through-terrain mechanic**, retired from v1 but slated to return. Separate from `FORCE`. Whenever it's built, it will hit the same "terrain never drifts within a run" tension the bloom-spread question above is already parked against — decide the two together, not separately.
 - Whether `RUN.maxHeartDistance = 7` is the right *balance* number. It is currently a correctness floor. The sim in 1g answers this.
 - Whether Confused suppressing tells plays tame. The spicier scrambled-tells version is held in reserve (GDD §2.8.2).
 - Whether the Tier 4 turn budget of 18 is enough of a difference from 20.

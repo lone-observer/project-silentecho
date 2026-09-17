@@ -19,7 +19,6 @@ import {
   createRun,
   hasStatus,
   legalActions,
-  NARRATION,
   replayRun,
   tellsFor,
 } from '../src/engine/resolve.ts'
@@ -126,8 +125,8 @@ describe('turn order (GDD 2.2.2)', () => {
     const { state: after, events } = act(state, { kind: 'move', direction: dir })
 
     expect(after.outcome).toBe('caught')
-    expect(events.some((e) => e.kind === 'narration' && e.text === NARRATION.caughtWalkedInto)).toBe(true)
-    expect(events.some((e) => e.kind === 'narration' && e.text === NARRATION.caughtCameForYou)).toBe(false)
+    expect(events.some((e) => e.kind === 'narration' && e.beat === 'caughtWalkedInto')).toBe(true)
+    expect(events.some((e) => e.kind === 'narration' && e.beat === 'caughtCameForYou')).toBe(false)
     // It never got to move. Being caught at step 2 means the turn stopped there.
     expect(after.wumpus.roomId).toBe(target)
     expect(events.some((e) => e.kind === 'wumpusMoved')).toBe(false)
@@ -172,7 +171,7 @@ describe('turn order (GDD 2.2.2)', () => {
       const { state: after, events } = act(state, { kind: 'listen' })
       if (after.outcome !== 'caught') continue
       caughtAtSix += 1
-      expect(events.some((e) => e.kind === 'narration' && e.text === NARRATION.caughtCameForYou)).toBe(true)
+      expect(events.some((e) => e.kind === 'narration' && e.beat === 'caughtCameForYou')).toBe(true)
       expect(after.wumpus.roomId).toBe(after.player.roomId)
     }
     // If this is ever 0, the step-6 check has stopped firing entirely.
@@ -294,7 +293,7 @@ describe('turn order (GDD 2.2.2)', () => {
       if (t % OIL.burnEveryNTurns === 0) expected += 1
     }
     const burned = events
-      .filter((e) => e.kind === 'oilChanged' && e.text === NARRATION.lampBurnsDown)
+      .filter((e) => e.kind === 'oilChanged' && e.beat === 'lampBurnsDown')
       .reduce((sum, e) => sum + (e.kind === 'oilChanged' ? -e.delta : 0), 0)
     expect(burned).toBe(expected)
   })
@@ -311,7 +310,7 @@ describe('turn order (GDD 2.2.2)', () => {
     const gained = events.find((e) => e.kind === 'companionGained')
     if (gained?.kind !== 'companionGained' || !gained.companion.skittish) return
     const upkeep = events.filter(
-      (e) => e.kind === 'oilChanged' && e.text === NARRATION.skittishUpkeep,
+      (e) => e.kind === 'oilChanged' && e.beat === 'skittishUpkeep',
     ).length
     expect(upkeep).toBe(ENCOUNTER.tameTurnCost)
     expect(after.player.companion?.skittish).toBe(true)
@@ -640,7 +639,7 @@ describe('endings', () => {
     const { state: after, events } = act(safe, { kind: 'move', direction: back })
     if (after.outcome === 'caught') return // the Wumpus got there first; fine
     expect(after.outcome).toBe('retreated')
-    expect(events.some((e) => e.kind === 'narration' && e.text === NARRATION.retreated)).toBe(true)
+    expect(events.some((e) => e.kind === 'narration' && e.beat === 'retreated')).toBe(true)
   })
 
   it('starting in the entrance does not end the run before it begins', () => {

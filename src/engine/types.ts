@@ -302,8 +302,68 @@ export interface GameState {
 // Events — the engine's output channel and the source of truth for all renderers
 // ---------------------------------------------------------------------------
 
+/**
+ * A stable identifier for a line of prose, carried alongside the prose itself.
+ *
+ * WHY THIS EXISTS. Until step 1f every beat had exactly one string, so a
+ * consumer could identify it by comparing text against a constant — which is
+ * what `scripts/turn.ts` did to work out which of the two catch checks fired.
+ * GDD 2.8.1 requires a dark variant of every outcome, so every beat now has
+ * TWO strings and text comparison is broken by construction: matching one
+ * variant silently stops reporting the moment the player's lamp goes out.
+ *
+ * So identity moved off the prose and onto this union. Renderers, the agent
+ * view and the visualisers key off `beat`; only humans read `text`. Adding a
+ * beat means adding a member here, which is a compile error everywhere the
+ * tables are declared — the same shape as `GameEvent.roll.hazard` in 1e.
+ */
+export type NarrationBeat =
+  // Endings — GDD 2.17. Every one of these is the last line of a run.
+  | 'caughtWalkedInto'
+  | 'caughtCameForYou'
+  | 'killedByHazard'
+  | 'killedByDamage'
+  | 'outOfTurns'
+  | 'escaped'
+  | 'retreated'
+  // The (archetype x action x band) and (hazard x band) tables.
+  | 'actionOutcome'
+  | 'hazardOutcome'
+  // Everything else the reducer says.
+  | 'lampBurnsDown'
+  | 'lampBrightens'
+  | 'lampGutters'
+  | 'goblinScrounges'
+  | 'skittishUpkeep'
+  | 'foundFlask'
+  | 'caughtBreath'
+  | 'grellhoundGrowls'
+  | 'grellhoundReveals'
+  | 'carvingsWarn'
+  | 'companionReveals'
+  | 'braveOverride'
+  | 'creatureWanders'
+  | 'creatureFound'
+  | 'heartTaken'
+  | 'wumpusEscalates'
+  | 'confusedSettles'
+  | 'confusedLifts'
+  | 'portalCrossed'
+  | 'actionUnavailable'
+
+/**
+ * Why a companion is no longer with you.
+ *
+ * A typed reason rather than the free prose string this field carried through
+ * 1e, for the same reason `NarrationBeat` exists: the engine reports what
+ * happened and the renderer chooses the words. `sent` is the one that matters —
+ * `CLAUDE.md` 3 forbids a sent companion ever returning, and a reason the
+ * renderer can switch on is what lets the text layer give that its own weight.
+ */
+export type CompanionLossReason = 'bolted' | 'released' | 'sent' | 'starved'
+
 export type GameEvent =
-  | { readonly kind: 'narration'; readonly text: string }
+  | { readonly kind: 'narration'; readonly text: string; readonly beat: NarrationBeat }
   /**
    * A roll happened. `hazard` is set when this is a hazard's saving throw
    * rather than the action's own roll — the two are separate rolls in the same
@@ -319,12 +379,30 @@ export type GameEvent =
   | { readonly kind: 'moved'; readonly from: RoomId; readonly to: RoomId; readonly direction: Direction }
   | { readonly kind: 'tell'; readonly tell: Tell; readonly text: string }
   | { readonly kind: 'damage'; readonly amount: number; readonly cause: string }
-  | { readonly kind: 'oilChanged'; readonly delta: number; readonly text: string }
+  | {
+      readonly kind: 'oilChanged'
+      readonly delta: number
+      readonly text: string
+      readonly beat: NarrationBeat
+    }
   | { readonly kind: 'wumpusMoved'; readonly to: RoomId }
   | { readonly kind: 'wumpusTierChanged'; readonly tier: WumpusTier }
   | { readonly kind: 'creatureEncounter'; readonly creature: CreatureKind }
   | { readonly kind: 'companionGained'; readonly companion: Companion }
-  | { readonly kind: 'companionLost'; readonly kind_: CreatureKind; readonly reason: string }
+  /**
+   * A companion is gone. Carries its own prose rather than being paired with a
+   * separate narration event, because the four reasons resolve at three
+   * DIFFERENT steps of the turn order — released and sent at step 1, bolted at
+   * step 3, starved at step 7 — and a narration emitted alongside would have to
+   * be attributed to whichever step its partner landed in. One event, one
+   * reason, one line.
+   */
+  | {
+      readonly kind: 'companionLost'
+      readonly kind_: CreatureKind
+      readonly reason: CompanionLossReason
+      readonly text: string
+    }
   | { readonly kind: 'statusChanged'; readonly status: StatusEffect; readonly turns: number }
   | { readonly kind: 'heartTaken' }
   | { readonly kind: 'graveFound'; readonly epitaph: Epitaph }

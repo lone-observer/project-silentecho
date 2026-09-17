@@ -41,6 +41,8 @@ import type {
   Action,
   ActionKind,
   Companion,
+  CompanionLossReason,
+  CreatureKind,
   Difficulty,
   Direction,
   Epitaph,
@@ -112,6 +114,15 @@ import {
   SCENT_BY_ACTION,
   STATUS,
 } from './data/tuning.ts'
+import type { EndingBeat, NoteBeat, Slots } from './data/outcomes.ts'
+import {
+  companionLossText,
+  endingText,
+  hazardText,
+  isDarkProse,
+  noteText,
+  outcomeText,
+} from './data/outcomes.ts'
 
 // ---------------------------------------------------------------------------
 // Public shape
@@ -137,41 +148,77 @@ export interface CreateRunOptions {
 /** GameState schema version. Bump when a field changes meaning, not shape. */
 export const STATE_VERSION = 1
 
+// ---------------------------------------------------------------------------
+// Narration — every line comes from data/outcomes.ts, none from here
+//
+// Step 1f moved the sixteen-line NARRATION table that lived at the top of this
+// file, plus every template literal scattered through the switch statements,
+// into `data/outcomes.ts`. CLAUDE.md 2.4: prose lives in data, never in code.
+// If you are about to type a sentence into this file, don't.
+//
+// Every narration and oilChanged event now carries a `NarrationBeat` alongside
+// its text. That is not decoration: GDD 2.8.1 gives every beat a lit and a dark
+// variant, so identifying a line by comparing its text against a constant —
+// which is what `scripts/turn.ts` did to tell the two catch checks apart — is
+// broken by construction. Match on `beat`.
+// ---------------------------------------------------------------------------
+
 /**
- * Every line of prose this reducer emits, in one table.
+ * Which register the prose is in right now.
  *
- * CLAUDE.md 2.4 is explicit that prose lives in data and never inline in code,
- * and step 1f builds the real `(archetype x action x band)` outcomes table that
- * this becomes a small corner of. Until then it lives here rather than scattered
- * through the switch statements, for two reasons beyond tidiness:
- *
- *   - Step 1f can absorb it by moving one object, instead of hunting string
- *     literals through 600 lines of reducer.
- *   - `scripts/turn.ts` keys off these constants to work out which of the two
- *     catch checks fired. A visualiser that matched on a prose literal would
- *     silently stop reporting the moment someone improved the wording, and the
- *     whole point of that panel is to notice when a step stops doing anything.
+ * Read from the CURRENT draft oil rather than the oil the turn started with, so
+ * a line spoken after the lamp changed is spoken in the register the player is
+ * actually in. See `isDarkProse` for why the threshold is Ember and not Dark.
  */
-export const NARRATION = {
-  caughtWalkedInto: 'It was already in there. You walked into it.',
-  caughtCameForYou: 'It came for you.',
-  killedByHazard: 'The dark takes you.',
-  killedByDamage: 'You do not get up.',
-  outOfTurns: 'The dark closes over the way you came.',
-  escaped: 'Daylight, and the weight of it in your arms.',
-  // Retreat is the second-best outcome in the game and GDD 2.17 calls it out as
-  // needing a real beat rather than the run appearing to simply stop.
-  retreated: 'Daylight. You did not get it. You know the way now.',
-  lampBurnsDown: 'The lamp burns down.',
-  lampBrightens: 'The lamp brightens.',
-  lampGutters: 'The lamp gutters.',
-  goblinScrounges: 'The goblin turns up a little oil.',
-  skittishUpkeep: 'Keeping it calm costs oil.',
-  foundFlask: 'An oil flask, half full, wedged under the stone.',
-  caughtBreath: 'You catch your breath.',
-  grellhoundGrowls: 'The grellhound growls, low and steady.',
-  portal: 'The hum swallows you, and lets you out somewhere that is not where you were.',
-} as const
+function dark(d: Draft): boolean {
+  return isDarkProse(d.oil)
+}
+
+function note(d: Draft, beat: NoteBeat, slots: Slots = {}): void {
+  d.events.push({ kind: 'narration', text: noteText(beat, dark(d), slots), beat })
+}
+
+/**
+ * The `(archetype x action x band)` line for what just happened.
+ *
+ * `archetypeRoomId` is the room the sentence is ABOUT, which for MOVE is the
+ * room you arrived in and not the one you left. Subject-led verbs ignore it.
+ * Returns silently for a verb with no prose — today only FORCE, which
+ * `legalActions` never offers.
+ */
+function narrateOutcome(
+  d: Draft,
+  action: ActionKind,
+  band: OutcomeBand,
+  archetypeRoomId: RoomId,
+  slots: Slots = {},
+): void {
+  const archetype = roomOf(d.labyrinth, archetypeRoomId).archetype
+  const text = outcomeText(archetype, action, band, dark(d), slots)
+  if (text === null) return
+  d.events.push({ kind: 'narration', text, beat: 'actionOutcome' })
+}
+
+/**
+ * A companion leaves. One helper for all four ways it can happen, so the prose,
+ * the typed reason and the cleared slot can never disagree — and one event, so
+ * the line cannot end up attributed to a different turn step than the loss it
+ * describes. `sent` is the one CLAUDE.md 3 says must land: no chance of return,
+ * no rescue, no un-choosing it.
+ */
+function lostCompanion(
+  d: Draft,
+  kind: CreatureKind,
+  reason: CompanionLossReason,
+  slots: Slots = {},
+): void {
+  d.events.push({
+    kind: 'companionLost',
+    kind_: kind,
+    reason,
+    text: companionLossText(reason, dark(d), { companion: kind, ...slots }),
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -436,7 +483,13 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     // silently-consumed turn would corrupt the replay. GDD 2.17.
     return {
       state,
-      events: [{ kind: 'narration', text: `${describe(action)} is not available right now.` }],
+      events: [
+        {
+          kind: 'narration',
+          text: noteText('actionUnavailable', isDarkProse(state.player.oil)),
+          beat: 'actionUnavailable',
+        },
+      ],
     }
   }
 
@@ -483,19 +536,16 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   // 2. CATCH CHECK — the Wumpus is in the room you just entered
   // =========================================================================
   if (hasCaught(wumpus, d.playerRoomId)) {
-    return finish(state, d, wumpus, 'caught', NARRATION.caughtWalkedInto)
+    return finish(state, d, wumpus, 'caught', 'caughtWalkedInto')
   }
 
   // =========================================================================
   // 3. Effects: damage, oil, status, Heart pickup and its escalation
   // =========================================================================
   if (d.oilDelta !== 0) {
+    const beat: NoteBeat = d.oilDelta > 0 ? 'lampBrightens' : 'lampGutters'
     d.oil = Math.max(0, Math.min(OIL.max, d.oil + d.oilDelta))
-    d.events.push({
-      kind: 'oilChanged',
-      delta: d.oilDelta,
-      text: d.oilDelta > 0 ? NARRATION.lampBrightens : NARRATION.lampGutters,
-    })
+    d.events.push({ kind: 'oilChanged', delta: d.oilDelta, text: noteText(beat, dark(d)), beat })
   }
 
   if (d.damage > 0) {
@@ -506,7 +556,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     // worthless (GDD 2.9). Fortune could save it; spending is a renderer
     // decision the reducer does not make for the player.
     if (skittishBolts(d.companion, d.damage, false) && d.companion !== null) {
-      d.events.push({ kind: 'companionLost', kind_: d.companion.kind, reason: 'bolted' })
+      lostCompanion(d, d.companion.kind, 'bolted')
       d.companion = null
     }
   }
@@ -514,6 +564,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   if (d.applyStatus !== null) {
     const turns = STATUS.confusedTurns
     d.statuses = { ...d.statuses, [d.applyStatus]: turns }
+    note(d, 'confusedSettles')
     d.events.push({ kind: 'statusChanged', status: d.applyStatus, turns })
   }
 
@@ -527,12 +578,16 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     // did not smell for itself.
     d.pendingScent.push({ roomId: d.playerRoomId, amount: SCENT.heartTaken, fromPlayer: false })
     revealedPlayerRoom = d.playerRoomId
+    note(d, 'heartTaken')
     d.events.push({ kind: 'heartTaken' })
-    if (wumpus.tier !== before) d.events.push({ kind: 'wumpusTierChanged', tier: wumpus.tier })
+    if (wumpus.tier !== before) {
+      note(d, 'wumpusEscalates')
+      d.events.push({ kind: 'wumpusTierChanged', tier: wumpus.tier })
+    }
   }
 
-  if (d.fatal) return finish(state, d, wumpus, 'killed', NARRATION.killedByHazard)
-  if (d.health <= 0) return finish(state, d, wumpus, 'killed', NARRATION.killedByDamage)
+  if (d.fatal) return finish(state, d, wumpus, 'killed', 'killedByHazard')
+  if (d.health <= 0) return finish(state, d, wumpus, 'killed', 'killedByDamage')
 
   // =========================================================================
   // 4. Scent deposited for the action taken
@@ -577,7 +632,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   // 6. CATCH CHECK — it entered your room
   // =========================================================================
   if (hasCaught(wumpus, d.playerRoomId)) {
-    return finish(state, d, wumpus, 'caught', NARRATION.caughtCameForYou)
+    return finish(state, d, wumpus, 'caught', 'caughtCameForYou')
   }
 
   // =========================================================================
@@ -599,20 +654,15 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
         // It walked in on you. GDD 2.9.1: an intrusion, not an ambush — the
         // encounter flag is NOT set, because your turn has already resolved and
         // a forced choice here would spend a turn you never took.
-        d.events.push({ kind: 'narration', text: `A ${m.kind} wanders into the room.` })
+        note(d, 'creatureWanders', { creature: m.kind })
       }
     }
   }
 
   const senses = companionSenses(d.labyrinth, d.companion, d.playerRoomId, wumpus.roomId)
-  if (senses.wumpusGrowl) {
-    d.events.push({ kind: 'narration', text: NARRATION.grellhoundGrowls })
-  }
+  if (senses.wumpusGrowl) note(d, 'grellhoundGrowls')
   for (const hazard of senses.revealedHazards) {
-    d.events.push({
-      kind: 'narration',
-      text: `The grellhound smells a ${hazard.hazard} to the ${hazard.direction}.`,
-    })
+    note(d, 'grellhoundReveals', { hazard: hazard.hazard, direction: hazard.direction })
   }
 
   // The only companion passives that are genuine step-7 EFFECTS: they change
@@ -620,15 +670,17 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   for (let step = 0; step < d.turnCost; step++) {
     const upkeep = companionUpkeep(d.companion, d.oil, rng)
     if (upkeep.oilDelta !== 0) {
+      const beat: NoteBeat = upkeep.scrounged ? 'goblinScrounges' : 'skittishUpkeep'
       d.oil = Math.max(0, Math.min(OIL.max, d.oil + upkeep.oilDelta))
       d.events.push({
         kind: 'oilChanged',
         delta: upkeep.oilDelta,
-        text: upkeep.scrounged ? NARRATION.goblinScrounges : NARRATION.skittishUpkeep,
+        text: noteText(beat, dark(d)),
+        beat,
       })
     }
     if (upkeep.starved && d.companion !== null) {
-      d.events.push({ kind: 'companionLost', kind_: d.companion.kind, reason: 'the lamp ran dry' })
+      lostCompanion(d, d.companion.kind, 'starved')
       d.companion = null
     }
   }
@@ -644,12 +696,19 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   if (burned > 0) {
     const before = d.oil
     d.oil = Math.max(0, d.oil - burned)
-    if (d.oil !== before) d.events.push({ kind: 'oilChanged', delta: d.oil - before, text: NARRATION.lampBurnsDown })
+    if (d.oil !== before) {
+      d.events.push({
+        kind: 'oilChanged',
+        delta: d.oil - before,
+        text: noteText('lampBurnsDown', dark(d)),
+        beat: 'lampBurnsDown',
+      })
+    }
   }
 
   // Statuses tick here, at the end of the turn, so a status applied this turn
   // is still in force for the tells the player reads before choosing next.
-  d.statuses = tickStatuses(d.statuses, d.turnCost, d.events)
+  d.statuses = tickStatuses(d, d.statuses, d.turnCost, d.events)
 
   // An encounter survives only while the creature is still standing in the room
   // you are standing in. Drift moving it away ends it; so does leaving.
@@ -680,21 +739,20 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
       d,
       wumpus,
       d.carryingHeart ? 'escaped' : 'retreated',
-      d.carryingHeart
-        ? NARRATION.escaped
-        : NARRATION.retreated,
+      d.carryingHeart ? 'escaped' : 'retreated',
       nextTurn,
     )
   }
 
   if (nextTurn > state.maxTurns) {
-    return finish(state, d, wumpus, 'outOfTurns', NARRATION.outOfTurns, nextTurn)
+    return finish(state, d, wumpus, 'outOfTurns', 'outOfTurns', nextTurn)
   }
 
   return commit(state, d, wumpus, outcome, nextTurn, listening, action, rng)
 }
 
 function tickStatuses(
+  d: Draft,
   statuses: Partial<Record<StatusEffect, number>>,
   turns: number,
   events: GameEvent[],
@@ -703,7 +761,13 @@ function tickStatuses(
   for (const key of Object.keys(statuses).sort() as StatusEffect[]) {
     const left = (statuses[key] ?? 0) - turns
     if (left > 0) next[key] = left
-    else events.push({ kind: 'statusChanged', status: key, turns: 0 })
+    else {
+      // GDD 2.8.2: the player knows they are Confused and knows when it ends.
+      // A status that expired in silence would leave them unable to tell "the
+      // doorways said nothing" from "I still cannot hear the doorways".
+      note(d, 'confusedLifts')
+      events.push({ kind: 'statusChanged', status: key, turns: 0 })
+    }
   }
   return next
 }
@@ -773,7 +837,15 @@ function applyActionOutcome(
     case 'sneak': {
       const to = here.exits[action.direction]
       if (to === undefined) return
-      enterRoom(d, action.direction, to, rng)
+      // MOVE is room-led and the room it is about is the one you ARRIVE in, so
+      // the line is emitted inside enterRoom — after `moved`, before the hazard
+      // save. "You come through the doorway badly" then "there is no floor" is
+      // the order those two things happen in.
+      //
+      // A bare SNEAK outside an encounter has no creature to be about, so it
+      // narrates as a MOVE. Inside an encounter it never reaches here:
+      // resolveEncounterAction owns it.
+      enterRoom(d, action.direction, to, rng, band)
       // A critical failure is loud whatever you were doing (SCENT.criticalFailureBonus).
       // Movement itself is never gated on the roll: a failed MOVE stumbles you
       // noisily into the room, it does not pin you in place. Pinning would make
@@ -787,6 +859,10 @@ function applyActionOutcome(
     case 'search':
     case 'read':
     case 'rest': {
+      // Room-led, and the room is the one you are standing in. The line comes
+      // first; anything the action turned up (a flask, a breath, a carving) is
+      // its own beat after it.
+      narrateOutcome(d, action.kind, band, d.playerRoomId)
       applyQuietAction(d, action.kind, band)
       pushPlayerScent(d, action.kind, band)
       return
@@ -794,6 +870,7 @@ function applyActionOutcome(
 
     case 'use': {
       const at = d.inventory.indexOf(action.item)
+      narrateOutcome(d, 'use', band, d.playerRoomId, { item: action.item })
       if (at >= 0) {
         d.inventory = [...d.inventory.slice(0, at), ...d.inventory.slice(at + 1)]
         if (action.item === 'oilFlask') d.oilDelta += OIL.flaskValue
@@ -803,7 +880,7 @@ function applyActionOutcome(
     }
 
     case 'send': {
-      resolveSend(d, action.direction)
+      resolveSend(d, action.direction, band)
       // SCENT_BY_ACTION.send is 0: the marker lands in the TARGET room, and it
       // is the companion's noise, not yours — so neither the Quiet One's damping
       // nor the Heart multiplier touches it.
@@ -827,8 +904,23 @@ function applyActionOutcome(
   }
 }
 
-/** Moving into a room: the hazard save, the Heart, the grave, the encounter flag. */
-function enterRoom(d: Draft, direction: Direction, to: RoomId, rng: Rng): void {
+/**
+ * Moving into a room: the arrival line, the hazard save, the Heart, the grave,
+ * the encounter flag.
+ *
+ * `arrivalBand` is the MOVE band to narrate the arrival with, or null when the
+ * caller has already said how the player got here in its own words — SNEAK and
+ * FLEE out of an encounter, and coming up out of a portal. Those are
+ * subject-led beats and a MOVE line on top of them would narrate the same step
+ * twice.
+ */
+function enterRoom(
+  d: Draft,
+  direction: Direction,
+  to: RoomId,
+  rng: Rng,
+  arrivalBand: OutcomeBand | null,
+): void {
   const from = d.playerRoomId
   d.playerRoomId = to
   d.facing = direction
@@ -837,6 +929,8 @@ function enterRoom(d: Draft, direction: Direction, to: RoomId, rng: Rng): void {
   d.labyrinth = withRoom(d.labyrinth, to, { visited: true })
   const arrived = roomOf(d.labyrinth, to)
 
+  if (arrivalBand !== null) narrateOutcome(d, 'move', arrivalBand, to)
+
   if (arrived.grave) d.events.push({ kind: 'graveFound', epitaph: arrived.grave })
   if (arrived.hasHeart && !d.carryingHeart) d.takesHeart = true
 
@@ -844,6 +938,7 @@ function enterRoom(d: Draft, direction: Direction, to: RoomId, rng: Rng): void {
   // ever set (GDD 2.9.1) — drift moving a creature onto the player must not.
   d.encounterRoomId = arrived.creature !== null ? to : null
   if (arrived.creature !== null) {
+    note(d, 'creatureFound', { creature: arrived.creature })
     d.events.push({ kind: 'creatureEncounter', creature: arrived.creature })
   }
 
@@ -872,6 +967,13 @@ function resolveHazard(d: Draft, hazard: HazardKind, rng: Rng): void {
   const result = roll(rng, { dc, modifiers })
   d.events.push({ kind: 'roll', action: 'move', result, hazard })
 
+  // The hazard's own beat, keyed by the hazard's own band — NOT the move's.
+  // 1e made these separate rolls precisely so the move's band says how loudly
+  // you arrived and the hazard's says whether you survived it; narrating them
+  // from one band would undo that.
+  const text = hazardText(hazard, result.band, dark(d))
+  if (text !== null) d.events.push({ kind: 'narration', text, beat: 'hazardOutcome' })
+
   const out = table[result.band]
   if (out.fatal) {
     d.fatal = true
@@ -892,7 +994,7 @@ function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
     if (here.oilFlask) {
       d.labyrinth = withRoom(d.labyrinth, d.playerRoomId, { oilFlask: false })
       d.inventory = [...d.inventory, 'oilFlask']
-      d.events.push({ kind: 'narration', text: NARRATION.foundFlask })
+      note(d, 'foundFlask')
     }
   }
 
@@ -904,9 +1006,7 @@ function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
       const id = here.exits[direction]
       if (id === undefined) continue
       const hazard = roomOf(d.labyrinth, id).hazard
-      if (hazard) {
-        d.events.push({ kind: 'narration', text: `The carvings warn of a ${hazard} to the ${direction}.` })
-      }
+      if (hazard) note(d, 'carvingsWarn', { hazard, direction })
     }
   }
 
@@ -914,7 +1014,7 @@ function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
     const healed = Math.min(REST.healOnSuccess, PLAYER.maxHealth - d.health)
     if (healed > 0) {
       d.health += healed
-      d.events.push({ kind: 'narration', text: NARRATION.caughtBreath })
+      note(d, 'caughtBreath')
     }
   }
 }
@@ -954,6 +1054,12 @@ function resolveEncounterAction(
   d.damage += result.damage
   d.pendingScent.push({ roomId, amount: result.scent, fromPlayer: true })
 
+  // Subject-led: the creature is what the sentence is about, so the archetype
+  // is ignored by the lookup and `roomId` is passed only to satisfy it. The
+  // line goes here, before the world is written back, so the player reads what
+  // happened before they read its consequences.
+  narrateOutcome(d, kind, band, roomId, { creature })
+
   // ---- the natural-20 brave override -------------------------------------
   //
   // THIS CANNOT LIVE IN creatures.ts. resolveEncounter only ever receives the
@@ -971,12 +1077,12 @@ function resolveEncounterAction(
   let companionGained = result.companionGained
   if (rollResult?.natural === 20 && companionGained !== null && !companionGained.brave) {
     companionGained = { ...companionGained, brave: true }
-    d.events.push({ kind: 'narration', text: `The ${creature} looks at you and does not flinch.` })
+    note(d, 'braveOverride', { creature })
   }
 
   if (companionGained !== null) {
     if (result.companionReleased !== null) {
-      d.events.push({ kind: 'companionLost', kind_: result.companionReleased, reason: 'released' })
+      lostCompanion(d, result.companionReleased, 'released')
     }
     d.companion = companionGained
     d.events.push({ kind: 'companionGained', companion: companionGained })
@@ -984,7 +1090,11 @@ function resolveEncounterAction(
 
   for (const revealed of result.revealedRooms) {
     d.labyrinth = withRoom(d.labyrinth, revealed, { visited: true })
-    d.events.push({ kind: 'narration', text: `It shows you the room to the ${describeRoom(d, revealed)}.` })
+    const direction = directionTo(d.labyrinth, d.playerRoomId, revealed)
+    // A reveal the player cannot be told the DIRECTION of is not a reveal — GDD
+    // 2.4 keys every piece of spatial information to a doorway. creatures.ts
+    // only ever reveals adjacent rooms, so this is a guard, not a branch.
+    if (direction !== null) note(d, 'companionReveals', { direction })
   }
 
   // ---- writing the world back --------------------------------------------
@@ -1001,8 +1111,10 @@ function resolveEncounterAction(
     if (direction !== null) {
       // SNEAK and FLEE both end in a different room, and arriving there is a
       // real arrival: the hazard fires, the Heart lifts, a new creature starts
-      // a new encounter.
-      enterRoom(d, direction, result.movedTo, rng)
+      // a new encounter. No arrival band — the SNEAK or FLEE line above has
+      // already said how the player left, and a MOVE line here would narrate
+      // one step twice.
+      enterRoom(d, direction, result.movedTo, rng, null)
       return
     }
   }
@@ -1012,12 +1124,7 @@ function resolveEncounterAction(
   d.encounterRoomId = roomOf(d.labyrinth, roomId).creature !== null ? roomId : null
 }
 
-function describeRoom(d: Draft, id: RoomId): string {
-  const direction = directionTo(d.labyrinth, d.playerRoomId, id)
-  return direction ?? id
-}
-
-function resolveSend(d: Draft, direction: Direction): void {
+function resolveSend(d: Draft, direction: Direction, band: OutcomeBand): void {
   const player: Player = {
     roomId: d.playerRoomId,
     facing: d.facing,
@@ -1037,15 +1144,16 @@ function resolveSend(d: Draft, direction: Direction): void {
 
   d.pendingScent.push({ roomId: sent.targetRoomId, amount: sent.scent, fromPlayer: false })
 
+  // The band line first — how it went — then the loss. SEND's band is
+  // mechanically inert (see the SEND note in data/outcomes.ts), so these lines
+  // describe the MANNER of the going and never a difference in the decoy.
+  narrateOutcome(d, 'send', band, d.playerRoomId, { companion: sent.sent, direction })
+
   // THE COMPANION DOES NOT COME BACK. No chance, no rescue, no un-choosing it
   // (CLAUDE.md 3). The slot is cleared unconditionally, here, and there is
   // nowhere else in the codebase that could put it back.
   d.companion = null
-  d.events.push({ kind: 'companionLost', kind_: sent.sent, reason: 'sent' })
-  d.events.push({
-    kind: 'narration',
-    text: `The ${sent.sent} goes ${direction} because you asked it to, and makes a great deal of noise.`,
-  })
+  lostCompanion(d, sent.sent, 'sent', { direction })
 }
 
 /**
@@ -1085,16 +1193,18 @@ function resolvePortal(d: Draft, band: OutcomeBand, rng: Rng): void {
   d.scent = emptyScent()
   d.pendingScent = []
   d.encounterRoomId = null
-  d.events.push({
-    kind: 'narration',
-    text: NARRATION.portal,
-  })
+  // The band line says how well you read it and therefore how deep you
+  // surfaced; the note says what a portal is. Both, in that order, because the
+  // reading happened before the arriving.
+  narrateOutcome(d, 'enterPortal', band, landing)
+  note(d, 'portalCrossed')
 
   const arrived = roomOf(next, landing)
   if (arrived.creature !== null) {
     // A new room is a new arrival, and arriving on a creature is an encounter
     // wherever you arrived from.
     d.encounterRoomId = landing
+    note(d, 'creatureFound', { creature: arrived.creature })
     d.events.push({ kind: 'creatureEncounter', creature: arrived.creature })
   }
   if (arrived.hazard !== null && ENTRY_HAZARDS.includes(arrived.hazard)) {
@@ -1119,10 +1229,13 @@ function finish(
   d: Draft,
   wumpus: GameState['wumpus'],
   outcome: GameState['outcome'],
-  text: string,
+  beat: EndingBeat,
   turn = state.turn + d.turnCost,
 ): ApplyResult {
-  d.events.push({ kind: 'narration', text })
+  // GDD 2.17: every ending needs a beat, including the quiet ones. The ending
+  // line is the last thing the player reads, so it is the last thing pushed
+  // before `runEnded` and there is no path out of a run that skips it.
+  d.events.push({ kind: 'narration', text: endingText(beat, dark(d)), beat })
   d.events.push({ kind: 'runEnded', outcome })
   return commit(state, d, wumpus, outcome, turn, false, d.action, d.rng)
 }
@@ -1208,12 +1321,6 @@ const TELL_TEXT: Record<Tell['kind'], string> = {
 
 function tellText(tell: Tell): string {
   return `${tell.direction}: ${TELL_TEXT[tell.kind]}.`
-}
-
-function describe(action: Action): string {
-  if ('direction' in action) return `${ACTION_LABEL[action.kind]} ${action.direction}`
-  if ('item' in action) return `${ACTION_LABEL[action.kind]} ${action.item}`
-  return ACTION_LABEL[action.kind]
 }
 
 /** Distance from the player to a room, for renderers and the sim. */

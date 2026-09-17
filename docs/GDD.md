@@ -166,19 +166,34 @@ Sanity-check the starting math before you trust it: a fresh character (stat 8, m
 
 ## 2.7 Actions
 
-`MOVE <direction>` · `LISTEN` · `SEARCH` · `FORCE` · `SNEAK` · `FIGHT` · `TAME` · `FLEE` · `USE <item>` · `SEND <companion> <direction>` · `READ` · `ENTER PORTAL` · `REST`
+`MOVE <direction>` · `LISTEN` · `SEARCH` · `FORCE` · `ENDURE` · `SNEAK` · `AVOID` · `DODGE` · `FIGHT` · `TAME` · `FLEE` · `USE <item>` · `SEND <companion> <direction>` · `READ` · `ENTER PORTAL` · `REST`
 
 Every action is a roll, including `MOVE` — a bad move roll means you stumble loudly or take a wrong turn. The verbs stay fixed; the *outcomes* get authored per room type. Make outcomes data, not code (§4).
 
+`ENDURE`, `AVOID` and `DODGE` are **planned, not yet built** — see 2.8's bloom and snare rows below and `claude/design-decisions.md`, 17 Sep 2026, for the full reasoning. They are not part of Phase 1f; they are their own step, scheduled separately.
+
+**What `FORCE` is and isn't for.** `FORCE` bypasses a spore bloom outright — it was never meant to open a wall or a door. `Room.exits` has no closed-door state, and inventing one for `FORCE` to clear would mean geometry that changes mid-run, which collides with "terrain never drifts" (§2.9.1). A creature that can chew or dig through terrain (the stone-grub, retired from v1 but slated to return) is a separate, later mechanic — and when it's built, it will face the same terrain-never-drifts tension the within-run bloom-spread question already sits against (see `claude/design-decisions.md`). Decide the two together, not separately.
+
 ## 2.8 Hazards
+
+Every hazard but the pit now offers a choice of verb, the same shape as the Creature encounter below (§2.9) — deliberately built so every stat has exactly one hazard type it's weak against, and none is a free pass through all of them:
+
+| Hazard | Weak stat | Options |
+|---|---|---|
+| Creature | — (all three covered) | `FIGHT` (STR) · `TAME` (INT) · `SNEAK` (AGI) |
+| Spore bloom | AGI | `FORCE` (STR) · `ENDURE` (INT) |
+| Snare-carving | STR | `AVOID` (INT) · `DODGE` (AGI) |
+| Pit | all (absolute, by design) | none |
 
 | Hazard | Behavior |
 |---|---|
-| **Pits** | Tell: draft. AGI save on entry. Failure ends the run; mixed success costs health and the lamp gutters. |
-| **Spore blooms** | Tell: sweetness. INT to recognize, AGI to pass. Failure applies *Confused* — see below. |
-| **Snare-carvings** | Tell: fresh chisel. INT to spot, STR to break free. |
+| **Pits** | Tell: draft. AGI save on entry. Failure ends the run; mixed success costs health and the lamp gutters. No verb options — absolute, by design, at least for now. |
+| **Spore blooms** | Tell: sweetness. Two ways through, both **planned, not yet built**: `FORCE` (STR) cuts through — margin sets how many turns it costs (2, or 1 on a strong success), but *Confused* always applies regardless of the roll. `ENDURE` (INT) stands through it instead — turn cost is flat, but margin shortens how long *Confused* lasts. Neither ever fully substitutes for the other; AGI has no option against a bloom. *(Decided 17 Sep 2026 — see `claude/design-decisions.md`.)* |
+| **Snare-carvings** | Tell: fresh chisel. Two ways through, both **planned, not yet built**: `AVOID` (INT) reads the mechanism before it triggers; `DODGE` (AGI) wriggles free after it does. STR has no answer to a snare, by design. *(Decided 17 Sep 2026 — see `claude/design-decisions.md`.)* |
 | **Portals** | Tell: hum. Entering shuffles you into a *different* labyrinth — map knowledge resets, but you may land closer to a Heart, and the Wumpus loses your scent entirely. INT to read where it goes. |
 | **Lamp oil** | An action budget rather than a second clock. Low oil applies a labelled penalty to every roll **and visibly shrinks the lantern radius** — the screen closes in on you. See below. |
+
+**Success will reward oil — magnitude not yet set.** A cleared hazard (`FORCE`, `ENDURE`, `AVOID`, `DODGE`, and a successful `FIGHT`) is planned to pay out an oil flask, the same way a successful `TAME` already pays out a companion. The amount is a correctness-floor-style placeholder until the 1g sim establishes the actual oil-burn baseline to size it against — see `claude/design-decisions.md`, 17 Sep 2026. No health resource exists to trade against instead: oil is the only resource the player manages, and any future hazard cost stays on the oil/turns axis.
 
 ### 2.8.1 Oil — the light budget
 

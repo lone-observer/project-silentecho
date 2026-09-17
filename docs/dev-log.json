@@ -1,11 +1,11 @@
 {
-  "$comment": "Source of truth for the development log. docs/DEV-LOG.md is generated from this by `npm run devlog`; do not hand-edit the table there. Anything git can derive (commits, lines changed, files touched) is left out on purpose — only enter what git cannot know.",
+  "$comment": "Source of truth for the development log. docs/DEV-LOG.md is generated from this by `npm run devlog`; do not hand-edit the table there. Anything git can derive (commits, lines changed, files touched) is left out on purpose \u2014 only enter what git cannot know.",
   "project": "Project Silent Echo",
   "sessions": [
     {
       "id": 1,
       "date": "2026-09-16",
-      "label": "Phase 0 — scaffold",
+      "label": "Phase 0 \u2014 scaffold",
       "hours": null,
       "surface": "cowork",
       "steps": [
@@ -38,7 +38,7 @@
     {
       "id": 2,
       "date": "2026-09-16",
-      "label": "Phase 1a–1c",
+      "label": "Phase 1a\u20131c",
       "hours": null,
       "surface": "cowork",
       "steps": [
@@ -64,10 +64,10 @@
         "81911d0",
         "ef05f90"
       ],
-      "landed": "Tuning constants. Labyrinth generation + ASCII map tool. Rewrite to 10x10 with difficulty contracts and the pit-free invariant; stone-grub retired. Wumpus scent AI, honest tells, hunt visualiser. Turn order corrected, metallic Heart tell. (Token figure covers session 3 as well — same conversation day.)",
+      "landed": "Tuning constants. Labyrinth generation + ASCII map tool. Rewrite to 10x10 with difficulty contracts and the pit-free invariant; stone-grub retired. Wumpus scent AI, honest tells, hunt visualiser. Turn order corrected, metallic Heart tell. (Token figure covers session 3 as well \u2014 same conversation day.)",
       "defects": [
         {
-          "what": "7.1% of seeds placed the Heart too deep to return from — unwinnable before the first action",
+          "what": "7.1% of seeds placed the Heart too deep to return from \u2014 unwinnable before the first action",
           "foundBy": "probe"
         },
         {
@@ -79,7 +79,7 @@
           "foundBy": "visualiser"
         },
         {
-          "what": "Player walked clean through the Wumpus — one catch check, made after the Wumpus moved",
+          "what": "Player walked clean through the Wumpus \u2014 one catch check, made after the Wumpus moved",
           "foundBy": "visualiser"
         },
         {
@@ -125,7 +125,7 @@
     {
       "id": 4,
       "date": "2026-09-17",
-      "label": "Phase 1d — creatures",
+      "label": "Phase 1d \u2014 creatures",
       "hours": 2,
       "surface": "cowork",
       "steps": [
@@ -146,10 +146,10 @@
       "commits": [
         "d4aaa7b"
       ],
-      "landed": "Creatures, encounters, taming bands, companion passives, SEND and world drift (src/engine/creatures.ts). GDD 2.9.1 written from scratch — it was referenced in three places and had never existed. scripts/tame.ts visualiser with a SWEEP aggregate mode. Room gained creatureHostile; a critically failed tame now permanently removes TAME from that creature's menu, and drift carries the hostility with the creature. Bloom spreading cut from within-run drift on Gautham's call — inside a visit the labyrinth only stirs, terrain is fixed. Wumpus start distance became a per-difficulty band in generate.ts, fixing a monster that could not reach the player in 83% of Drowsing and 63% of Stirring seeds. Nine invariant assertions mutation-checked. Findings 1 and 2 (SEND reachability and decoy strength) left untuned as design calls; the PM session decided both the same day.",
+      "landed": "Creatures, encounters, taming bands, companion passives, SEND and world drift (src/engine/creatures.ts). GDD 2.9.1 written from scratch \u2014 it was referenced in three places and had never existed. scripts/tame.ts visualiser with a SWEEP aggregate mode. Room gained creatureHostile; a critically failed tame now permanently removes TAME from that creature's menu, and drift carries the hostility with the creature. Bloom spreading cut from within-run drift on Gautham's call \u2014 inside a visit the labyrinth only stirs, terrain is fixed. Wumpus start distance became a per-difficulty band in generate.ts, fixing a monster that could not reach the player in 83% of Drowsing and 63% of Stirring seeds. Nine invariant assertions mutation-checked. Findings 1 and 2 (SEND reachability and decoy strength) left untuned as design calls; the PM session decided both the same day.",
       "defects": [
         {
-          "what": "GDD 2.9.1 (world drift) did not exist — referenced by the turn order, the roadmap and a tuning comment, with nine words of spec anywhere",
+          "what": "GDD 2.9.1 (world drift) did not exist \u2014 referenced by the turn order, the roadmap and a tuning comment, with nine words of spec anywhere",
           "foundBy": "eye"
         },
         {
@@ -157,15 +157,15 @@
           "foundBy": "eye"
         },
         {
-          "what": "A brave companion is unobtainable at starting stats — P(critical-success tame) is 0% for every creature at INT 8, and 0% for the Quiet One at every stat. SEND fired 0 times in 150 runs",
+          "what": "A brave companion is unobtainable at starting stats \u2014 P(critical-success tame) is 0% for every creature at INT 8, and 0% for the Quiet One at every stat. SEND fired 0 times in 150 runs",
           "foundBy": "visualiser"
         },
         {
-          "what": "SEND's decoy out-smells the player for 1 turn while carrying the Heart, not the 2–3 the GDD promises; COMPANION.sendDecoyTurns = 3 was a number no value of sendScent could honour",
+          "what": "SEND's decoy out-smells the player for 1 turn while carrying the Heart, not the 2\u20133 the GDD promises; COMPANION.sendDecoyTurns = 3 was a number no value of sendScent could honour",
           "foundBy": "visualiser"
         },
         {
-          "what": "Wumpus start distance had a floor and no ceiling — mean 11 rooms away on a 10x10 against tier reaches of 6–18, so it was unreachable in 83% of Drowsing and 63% of Stirring seeds",
+          "what": "Wumpus start distance had a floor and no ceiling \u2014 mean 11 rooms away on a 10x10 against tier reaches of 6\u201318, so it was unreachable in 83% of Drowsing and 63% of Stirring seeds",
           "foundBy": "visualiser"
         },
         {
@@ -182,7 +182,7 @@
     {
       "id": 5,
       "date": "2026-09-17",
-      "label": "Phase 1e — resolve",
+      "label": "Phase 1e \u2014 resolve",
       "hours": 2,
       "surface": "cowork",
       "steps": [
@@ -200,15 +200,17 @@
         "cacheWrite": 848611
       },
       "costUsd": null,
-      "commits": [],
-      "landed": "src/engine/resolve.ts — the reducer, implementing GDD 2.2.2's eight-step turn order including both catch checks. createRun, legalActions (deferring to encounterOptions, so the hostile gate has one implementation), replayRun and tellsFor alongside it. scripts/turn.ts visualiser with a SWEEP mode: it tags every event with its GDD step so out-of-order emission is visible on any turn you look at, splits 'caught' into which of the two catch checks fired, and re-checks replay determinism and JSON round-tripping on every run it prints. Both SEND fixes from the 1d findings implemented: TAME_OUTCOMES.strongSuccess.brave flipped to true, a natural-20 brave override added in resolve.ts (it cannot live in creatures.ts — resolveEncounter only ever receives the resolved band), and COMPANION.sendScent became a two-value lookup keyed off TAME_DC with sendDecoyTurns as two derived pairs. Brave companions went from 0/300 sweep runs to 10/300; SEND fires for the first time, though rarely. Three type changes: GameState.encounterRoomId, Player.statuses became a record carrying each effect's own clock, and GameEvent.roll gained an optional hazard field. tuning.ts gained ACTION_STAT, the hazard entry tables, PORTAL and REST. Six reducer invariants mutation-checked plus two against tuning.ts; all eight fail when broken.",
+      "commits": [
+        "16168b90"
+      ],
+      "landed": "src/engine/resolve.ts \u2014 the reducer, implementing GDD 2.2.2's eight-step turn order including both catch checks. createRun, legalActions (deferring to encounterOptions, so the hostile gate has one implementation), replayRun and tellsFor alongside it. scripts/turn.ts visualiser with a SWEEP mode: it tags every event with its GDD step so out-of-order emission is visible on any turn you look at, splits 'caught' into which of the two catch checks fired, and re-checks replay determinism and JSON round-tripping on every run it prints. Both SEND fixes from the 1d findings implemented: TAME_OUTCOMES.strongSuccess.brave flipped to true, a natural-20 brave override added in resolve.ts (it cannot live in creatures.ts \u2014 resolveEncounter only ever receives the resolved band), and COMPANION.sendScent became a two-value lookup keyed off TAME_DC with sendDecoyTurns as two derived pairs. Brave companions went from 0/300 sweep runs to 10/300; SEND fires for the first time, though rarely. Three type changes: GameState.encounterRoomId, Player.statuses became a record carrying each effect's own clock, and GameEvent.roll gained an optional hazard field. tuning.ts gained ACTION_STAT, the hazard entry tables, PORTAL and REST. Six reducer invariants mutation-checked plus two against tuning.ts; all eight fail when broken.",
       "defects": [
         {
-          "what": "A hazard saving throw was emitted to the player as a MOVE roll — entering a snare room rolled INT vs DC 8 and reported 'roll move', telling the player something untrue about why they lost health. Breaks text parity, which is a claim about the event stream and nothing else",
+          "what": "A hazard saving throw was emitted to the player as a MOVE roll \u2014 entering a snare room rolled INT vs DC 8 and reported 'roll move', telling the player something untrue about why they lost health. Breaks text parity, which is a claim about the event stream and nothing else",
           "foundBy": "visualiser"
         },
         {
-          "what": "scripts/tame.ts Panel B hardcoded .criticalSuccess as P(brave), so it would have gone on printing 0% for the exact gate this session moved — a visualiser lying about the one thing it exists to watch, on the only day anyone would check",
+          "what": "scripts/tame.ts Panel B hardcoded .criticalSuccess as P(brave), so it would have gone on printing 0% for the exact gate this session moved \u2014 a visualiser lying about the one thing it exists to watch, on the only day anyone would check",
           "foundBy": "visualiser"
         },
         {
@@ -216,7 +218,7 @@
           "foundBy": "mutation check"
         },
         {
-          "what": "First oil-schedule test netted the passive burn against skittish-companion upkeep and expected 1 where the answer was 3. The test was wrong, not the code — it now measures the burn events rather than the net delta",
+          "what": "First oil-schedule test netted the passive burn against skittish-companion upkeep and expected 1 where the answer was 3. The test was wrong, not the code \u2014 it now measures the burn events rather than the net delta",
           "foundBy": "tests"
         },
         {
@@ -224,7 +226,7 @@
           "foundBy": "mutation check"
         },
         {
-          "what": "SEND's usage rate is still ~0.5% of runs after the fix. The band gate was the blocker and is gone, but the binding constraint is now encounter density (0.6 per run) — the same number already flagged as making the creature system 'one dilemma per run'",
+          "what": "SEND's usage rate is still ~0.5% of runs after the fix. The band gate was the blocker and is gone, but the binding constraint is now encounter density (0.6 per run) \u2014 the same number already flagged as making the creature system 'one dilemma per run'",
           "foundBy": "visualiser"
         },
         {
@@ -232,8 +234,57 @@
           "foundBy": "eye"
         }
       ],
-      "effectiveTokens": 55415653,
-      "$comment": "commits: fill in the SHA after committing, then run `npm run devlog` on a machine that has git — the 1e session had no shell on the linked computer, so the churn columns could not be derived there."
+      "effectiveTokens": 55415653
+    },
+    {
+      "id": 6,
+      "date": "2026-09-17",
+      "label": "Phase 1f \u2014 outcomes table",
+      "hours": 2,
+      "surface": "cowork",
+      "steps": [
+        "1f"
+      ],
+      "tests": {
+        "before": 217,
+        "after": 239
+      },
+      "tokens": {
+        "input": 386,
+        "output": 286447,
+        "cacheRead": 53504457,
+        "cacheWrite": 914536
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "src/engine/data/outcomes.ts \u2014 every line of prose the engine can emit, 266 beats and 532 strings, each with a lit and a dark variant per GDD 2.8.1. resolve.ts's NARRATION object and every template literal in its switch statements are absorbed; no prose remains in the reducer and a test fails the build if any returns. The table is layered rather than a full 6x12x6 grid: MOVE, LISTEN, SEARCH, READ and REST are room-led and get full archetype x band prose (180 cells); the seven creature/object verbs are subject-led and get band-only prose (42), because the creature is the subject of the sentence and the room is backdrop. The lookup is total over all 432 triples either way. FORCE is named in DEFERRED_ACTIONS with a test asserting NARRATED + DEFERRED covers every ActionKind, so the hazard-verb step cannot add ENDURE/AVOID/DODGE without either writing prose or writing down why not. scripts/prose.ts visualiser, four panels: coverage matrix, lit-above-dark prose, a whole run narrated in emission order, and a lint that shares its rules with the tests. Three GameEvent changes: narration and oilChanged gained a required NarrationBeat id, companionLost gained its own text and a typed CompanionLossReason. Retreat is written rather than placeheld (GDD 2.17). Seven assertions mutation-checked.",
+      "defects": [
+        {
+          "what": "Three events the player could not be told about: creatureEncounter, heartTaken and statusChanged carried no text at all \u2014 the reducer emitted a bare event and left the renderer to invent the sentence. Taking the Heart is the loudest moment in the game and it said nothing. A text-parity failure in the direction nobody checks: not a renderer hiding a fact, but the event stream unable to express one",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "scripts/turn.ts identified oil events and both catch checks by comparing event.text against prose constants. Giving every beat a second variant broke that silently AND conditionally \u2014 it would have kept working at full oil and started mislabelling every oil event once the lamp got low, which is exactly when the panel gets read",
+          "foundBy": "eye"
+        },
+        {
+          "what": "A mutation check PASSED: replacing the grellhound's growl with a raw string literal did not trip the source-of-truth assertion, because 160 runs of a doorway-cycling policy never had a grellhound companion within radius 2 of the Wumpus. Adding a Heart-seeking policy then revealed that heartTaken, wumpusEscalates and the entire escaped ending were also unverified by a test whose whole claim is that the reducer only speaks from the table",
+          "foundBy": "mutation check"
+        },
+        {
+          "what": "Five verbs roll a d20 whose band changes almost nothing: MOVE and LISTEN only at the critical-failure noise bonus, USE and SEND not at all, SEARCH/READ/REST two-valued. GDD 2.6 promises a gift at Strong Success and none is implemented, which constrained the prose \u2014 the top bands differ in texture and never in claim, because implying a find that did not happen would be the engine lying",
+          "foundBy": "eye"
+        },
+        {
+          "what": "The lint panel caught three vision words in dark variants in freshly written prose (two 'looking', one 'see'), which is the defect the dark-variant rule exists to prevent and which no human would reliably catch across 532 strings",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "The source-of-truth test's own sweep callback used `return` where it meant `continue`, so it inspected exactly one event per turn and counted zero spoken lines. Caught only by the vacuity guard asserting the sweep had said more than 2000 things",
+          "foundBy": "tests"
+        }
+      ],
+      "effectiveTokens": 54705826
     }
   ],
   "$tokenNote": "Cowork writes exact per-turn usage to the session transcript; these figures were harvested from it rather than estimated. All three sessions below were ONE continuous Cowork conversation, so the split is by calendar day of that conversation and the session boundaries are editorial. Sessions 2 and 3 fall in the same day bucket and share one figure. No dollar amount exists: usage inside a Pro/Max plan allowance is not metered in dollars, only against plan limits."

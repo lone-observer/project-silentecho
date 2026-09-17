@@ -41,6 +41,8 @@ In rough order of how much it should change the game:
 | Is turn 20 the right number? | Distribution of turns-at-escape for winners. If winners cluster at 11–13, the limit is too generous. |
 | Are the tells working? | Rate of walking into a hazard whose tell was displayed on the previous turn. **This is the fairness metric** — if it's high, either the tells aren't legible or players don't trust them. |
 
+**Not yet defined: a "lostness" metric.** Nothing above measures whether a player is wandering without making progress — e.g. a revisit-to-already-visited-rooms rate, or rooms explored per net step of Heart-distance closed. This matters for one specific decision: a known-path map render is deliberately deferred (`docs/PHASE-1-PROGRESS.md`, 17 Sep) and is only worth building if data shows players or bots actually getting lost. Until this metric exists, that decision has nothing to be gated on.
+
 ## Privacy model
 
 Small game, no accounts, no reason to collect anything personal. The design is deliberately boring:
