@@ -20,7 +20,8 @@ After a session, add one object to `dev-log.json` and run `npm run devlog`. It s
 | Field | Where it comes from |
 |---|---|
 | `hours` | You. Wall clock, honestly — including the reading and deciding |
-| `costUsd`, `tokens` | `/usage` in Claude Code; Cowork and chat are account-level only — see below |
+| `tokens` | `/usage` in Claude Code; in Cowork, harvested from the session transcript — see below |
+| `costUsd` | Usually null. Plan usage is not dollar-metered — see below |
 | `tests` | `npm test` before and after |
 | `commits` | `git log --oneline` — short SHAs |
 | `defects` | Anything real that turned up, and **what found it** |
@@ -35,9 +36,13 @@ Lines changed and totals are derived from the commits. Lockfiles are excluded so
 The two surfaces do not report the same way, and this shapes the habit:
 
 - **Claude Code** — `/usage` gives a per-session breakdown: tokens per model, a cost estimate, prompt-cache stats, and attribution by skill, subagent, plugin and MCP server. Read it **before closing the session**; the Session block resets on `/clear`. These figures are local to the machine.
-- **Cowork and claude.ai chat** — [claude.ai/settings/usage](https://claude.ai/settings/usage) is account-level: credit balance, month-to-date spend, spend limit. **There is no per-session figure.** A Cowork session's cost can only be recovered as the delta in month-to-date spend across it, which means reading the number at the start and again at the end.
+- **Cowork and claude.ai chat** — [claude.ai/settings/usage](https://claude.ai/settings/usage) is account-level only: credit balance, month-to-date spend, spend limit. No per-session view in the UI — but the session transcript has exact per-turn counts. See the workaround below.
 
-So: for Cowork sessions, note month-to-date spend when you begin and when you stop, and log the difference. For anything logged after the fact with no reading, leave `costUsd` null rather than guessing — a null is honest, an invented number quietly poisons the phase-cost chart this log exists to produce.
+**The Cowork workaround: harvest the transcript.** Cowork writes exact per-turn usage to the session transcript at `~/.claude/projects/<project>/<session>.jsonl` inside the session container — `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `output_tokens` on every assistant turn. Ask Claude to read it and log the numbers **before the session ends**; the container is ephemeral, so the file goes with it.
+
+Weight the raw counts to get a figure worth comparing across sessions: `effective = input + 0.1 x cacheRead + 2 x cacheWrite + 5 x output`. Cache reads are cheap, cache writes and output are not.
+
+**On dollars: there is no per-session figure, and often no figure at all.** Usage inside a Pro or Max plan allowance is metered against plan limits, not in dollars; a dollar amount exists only while usage credits are being drawn. So `costUsd` will usually stay null, and that is correct rather than missing. Tokens are the comparable number. Never estimate a cost — a null is honest, an invented figure quietly poisons the phase-cost chart this log exists to produce.
 
 <!-- devlog:start -->
 
@@ -74,6 +79,21 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-16 | Hunt map drew no hazards or creatures, so the tells had nothing to check against | eye |
 
 <!-- devlog:end -->
+
+## What the first measurement showed
+
+36.2M effective tokens across 438 turns, and the shape is the useful part:
+
+| Where it went | Share |
+|---|---|
+| Re-reading the growing conversation | 79% |
+| Fixed instructions and tool list, re-read every turn | 11% |
+| Claude's replies | 10% |
+| Every tool result from 250 calls | 0.1% |
+
+**The tools cost nothing. The conversation length cost everything.** Context per turn grew from 87k to 678k — the last quarter of the session re-read 68M tokens against the first quarter's 18M, for the same number of turns.
+
+The lever is session length, not tool discipline: a fresh session per step would have cost a fraction of one long conversation covering all of them. This is the strongest practical argument for the step-at-a-time working pattern already in `ROADMAP.md`, and it now has a number behind it.
 
 ## The rule this log produced
 
