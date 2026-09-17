@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 16 Sep 2026, end of step 1c.
+**Last updated:** 17 Sep 2026, end of step 1c. Sessions are now one per step — see below.
 
 ## Where we are
 
@@ -17,6 +17,29 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1g · text renderer + agent harness | pending | built to `docs/EVALS.md` requirements |
 
 118 tests. `npm test`, `npm run typecheck`, both clean.
+
+## One session per step
+
+**Each step of Phase 1 gets its own fresh session, named for that step** — `SE 1d — creatures`, `SE 1e — resolve`, and so on. The name should match the `label` in `docs/dev-log.json` so the session list and the log line up.
+
+This is measured, not a preference. The first long session covering Phase 0 through 1c ran 438 turns and 36.2M effective tokens, of which **79% was re-reading the growing conversation and 0.1% was every tool result put together**. Context per turn grew from 87k to 678k; the last quarter cost nearly four times the first for the same number of turns. A new session starts at ~87k, so a step-sized session runs roughly 8x cheaper per turn.
+
+Starting fresh is only cheap because this repo can orient a session that knows nothing. That is what `CLAUDE.md`, `docs/GDD.md` and this file are for — keep them current, and the cost of closing a session stays near zero.
+
+**Opening a step session:**
+
+```
+Read CLAUDE.md, docs/GDD.md, docs/PHASE-1-PROGRESS.md and docs/EVALS.md.
+Execute Phase 1 step <N>. Stop at its exit criteria.
+Build a visualiser for the subsystem before writing its tests.
+```
+
+**Closing one — do this before the session ends, not after:**
+
+1. Update this file's step table and the carried-forward notes.
+2. Add a session object to `docs/dev-log.json`: hours, tests before/after, commits, and every defect with what found it.
+3. **Harvest the token counts.** Ask Claude to read the session transcript at `~/.claude/projects/<project>/<session>.jsonl` and sum `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` and `output_tokens` across the assistant turns. The container is ephemeral — once the session is gone, so is the file, and the numbers are unrecoverable.
+4. `npm run devlog`, commit, push.
 
 ## The two tools, and what they are for
 
