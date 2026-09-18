@@ -52,11 +52,12 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 |---|---|---|---|---|---|---|---|---|
 | 1 | 2026-09-16 | Phase 0 — scaffold | — | 0 | 0 → 44 (+44) | +2118 / −9 | — | 1 |
 | 2 | 2026-09-16 | Phase 1a–1c | — | 1a, 1b, 1b-fix, 1c | 44 → 118 (+74) | +1731 / −31 | — | 7 |
-| 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | — | — | — |
+| 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | +2966 / −193 | — | — |
 | 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | +2631 / −59 | — | 7 |
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
-| | | **Total** | **6.0 h** | | **239** | **+13,438 / −365** | **—** | **28** |
+| 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | — | — | 8 |
+| | | **Total** | **9.0 h** | | **266** | **+16,404 / −558** | **—** | **36** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -64,12 +65,13 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| visualiser | 10 | 36% |
-| eye | 8 | 29% |
-| tests | 4 | 14% |
-| mutation check | 3 | 11% |
-| probe | 2 | 7% |
-| tooling | 1 | 4% |
+| visualiser | 13 | 36% |
+| eye | 10 | 28% |
+| tests | 4 | 11% |
+| mutation check | 3 | 8% |
+| test | 3 | 8% |
+| probe | 2 | 6% |
+| tooling | 1 | 3% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -101,6 +103,14 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-17 | Five verbs roll a d20 whose band changes almost nothing: MOVE and LISTEN only at the critical-failure noise bonus, USE and SEND not at all, SEARCH/READ/REST two-valued. GDD 2.6 promises a gift at Strong Success and none is implemented, which constrained the prose — the top bands differ in texture and never in claim, because implying a find that did not happen would be the engine lying | eye |
 | 2026-09-17 | The lint panel caught three vision words in dark variants in freshly written prose (two 'looking', one 'see'), which is the defect the dark-variant rule exists to prevent and which no human would reliably catch across 532 strings | visualiser |
 | 2026-09-17 | The source-of-truth test's own sweep callback used `return` where it meant `continue`, so it inspected exactly one event per turn and counted zero spoken lines. Caught only by the vacuity guard asserting the sweep had said more than 2000 things | tests |
+| 2026-09-18 | A status expired on the turn that applied it. Statuses land at step 3 and are ticked at step 7 of the same turn, once per turn consumed (1e's rule), so a Confused applied by a two-turn FORCE was decremented twice and gone before the player read a single suppressed tell. FORCE's one unconditional cost cost nothing at four of six bands, ENDURE's entire margin-shortens-the-duration mechanic did nothing at any band, and a strongSuccess FORCE left the player blind where a plain success did not - a better roll punished. The off-by-one predated 1g: a bloom resolving on the MOVE that entered it bought one turn of suppression rather than the specified two, and one is not obviously wrong the way zero is. Every test passed throughout. The transcript printed 'confused for 2 turn(s)' and 'confused for 0 turn(s)' one line apart | visualiser |
+| 2026-09-18 | The reward as first written paid a flask at mixed-or-better, the band where a clearing actually happens. At starting stats that is a 60% chance of four oil against an expected cost of 0.65 - +1.75 oil for every bloom walked into, turning every hazard in the labyrinth into an oil farm and inverting the thing it was meant to be | visualiser |
+| 2026-09-18 | tests/outcomes.test.ts's compile-time guard on the action list guarded nothing. Annotating the array as `readonly ActionKind[]` makes (typeof ALL_ACTION_KINDS)[number] evaluate to ActionKind, so the assertion read `ActionKind extends ActionKind` and held whatever the list contained - three new verbs compiled clean against a list naming none of them. tests/tuning.test.ts still has the same hole, noted for 1h | eye |
+| 2026-09-18 | A MOVE-only walker deadlocks on a hazard: two test policies filtered the menu to `move` and stopped when it came back empty, which is now what standing in a bloom looks like. Trivial in a test, load-bearing for 1i - the heuristic bot cannot be written as 'pick the move that reduces distance' | test |
+| 2026-09-18 | A test that had passed by luck for two steps: 'binds the encounter to ENTERING a room' asserted unconditionally that a creatureEncounter event leaves the flag set, but drift can walk the creature out at step 7 of the same turn, in which case clearing it is correct. Changing how many turns an action costs moved the RNG and a seed finally did it. The rule was always conditional; the test never said so | test |
+| 2026-09-18 | The suite was green or red depending on CPU speed: outcomes.test.ts's source-of-truth sweep drives hundreds of seeded runs and sat just under vitest's 5s default on a fast desktop and over it on slower hardware. testTimeout is now 30s | test |
+| 2026-09-18 | The first sweep's hazard policy chose FORCE and AVOID 164 times out of 164, never ENDURE or DODGE. Not a finding about the verbs - a finding about the metric: a value function denominated in oil cannot see a shorter Confused or speed-over-caution, so it proves only that it is an oil-maximising policy while half the mechanic goes unmeasured. A second `quiet` policy exists because of this | visualiser |
+| 2026-09-18 | `npm run sim` has never existed. package.json declares "sim": "tsx scripts/sim.ts" and scripts/sim.ts is not in the repo, so the command errors - while CLAUDE.md 5 instructs every session that touches balance to run it and report the actual number, and ROADMAP's Phase 1 exit criteria list its output. Every balance read so far has come from a per-step visualiser sweep instead, which is a different thing and a weaker one. Recorded rather than fixed: the harness belongs to 1i | eye |
 
 <!-- devlog:end -->
 

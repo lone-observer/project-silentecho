@@ -117,7 +117,9 @@
         "cacheWrite": null
       },
       "costUsd": null,
-      "commits": [],
+      "commits": [
+      "2a25e07"
+    ],
       "landed": "GDD 2.17 information model. Phase 1 progress note. Remote branch hygiene; main pushed. Dev log and generator. Token usage is folded into session 2.",
       "defects": [],
       "effectiveTokens": null
@@ -309,7 +311,6 @@
       },
       "costUsd": null,
       "commits": [],
-      "$commitPending": "SESSION 7'S COMMIT HASH IS MISSING AND HAS TO BE FILLED IN BY HAND. The 1g session ran in Cowork against a connected folder with no shell on this machine, so it could write the files but could not run git — it never made the commit and therefore never had a hash to record. After committing, put the short sha in `commits` and delete this key, then run `npm run devlog`. This is the third session in a row where the hash was at risk (it was missed outright for session 6 and fixed after the fact); the durable fix is to record it from inside whatever makes the commit, not afterwards from memory.",
       "landed": "Bloom and snare stop auto-resolving and become verb encounters, the same shape as the creature encounter. ENTRY_HAZARDS is now ['pit'] and nothing else; VERB_HAZARDS, VERBS_FOR_HAZARD and HAZARD_VERB_STAT are the coverage matrix as data, so GDD 2.8's promise that every stat has exactly one hazard it cannot answer is checkable rather than aspirational. FORCE, ENDURE, AVOID and DODGE are real ActionKinds wired through legalActions and resolve.ts: GameState gained hazardRoomId as the exact mirror of encounterRoomId, and the menu while a hazard is live is that hazard's two verbs and nothing else — no MOVE, no FLEE, because a bloom fills the chamber and there is nothing to slip past. HAZARD_VERB_OUTCOMES holds two inverted cost models: Force's turn cost scales with margin while Confused applies unconditionally; Endure's turn cost is flat while margin shortens Confused to a floor of one turn it never goes below, which is what stops INT being the generalist stat that answers everything. HazardOutcome gained statusTurns and rewardFlasks — the first gain the struct has ever carried. Reward and ambient loot were sized together and measured, not guessed: one flask at strongSuccess-or-better (mixed-or-better was +1.75 oil per bloom walked into, an oil farm), and POPULATION.oilFlasks 8-12 -> 3-5, the first setting where the economy leans on earned oil rather than found. Prose written in the same pass as the mechanic: 24 beats, 48 strings, plus hazardBlocks, hazardCleared and spoilsTaken; HAZARD_NARRATION's bloom and snare rows deleted as dead content. FORCE's prose was written too and DEFERRED_ACTIONS is now empty — a deliberate deviation from the 18 Sep decision, flagged in PHASE-1-PROGRESS, because a deferred verb is only defensible while the player cannot choose it. scripts/hazard.ts is the visualiser, four panels including the oil-economy sweep. tests/hazards.test.ts adds 27 tests with eleven assertions mutation-checked.",
       "defects": [
         {
