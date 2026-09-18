@@ -99,7 +99,7 @@
     },
     {
       "id": 3,
-      "date": "2026-09-17",
+      "date": "2026-09-16",
       "label": "Docs and hygiene",
       "hours": null,
       "surface": "cowork",
@@ -118,7 +118,11 @@
       },
       "costUsd": null,
       "commits": [
-        "2a25e07"
+        "ca7b641",
+        "ead4059",
+        "51e8b32",
+        "2ea5bb5",
+        "e64e71d"
       ],
       "landed": "GDD 2.17 information model. Phase 1 progress note. Remote branch hygiene; main pushed. Dev log and generator. Token usage is folded into session 2.",
       "defects": [],
@@ -388,7 +392,7 @@
           "foundBy": "eye"
         },
         {
-          "what": "DEV-LOG.md is stale against dev-log.json: the commits field is no longer empty for 1e, 1f and 1g, but session 7's Lines column still reads dash in the generated table, so devlog was never re-run after the follow-up commit populated the field. The checklist item caught the field and missed the artefact it feeds. Separately, 1g's commits lists 2a25e07, which is session 3's 'Docs and hygiene' commit - either wrong or double-counting that diff; unverifiable from this session, check with git show -s --oneline 2a25e07",
+          "what": "DEV-LOG.md was stale against dev-log.json, and behind it session 3 had been carrying 1g's commit. Surface problem: the commits field was no longer empty for 1e/1f/1g, but session 7's Lines column still read dash, because npm run devlog was never re-run after the follow-up commit populated the field - the checklist item caught the field and missed the artefact it feeds. Underneath: session 3 ('Docs and hygiene') listed 2a25e07, which is 1g's hazard-verb commit. Not a hash that failed to resolve, one that resolved to the wrong session's work, which is why nothing ever looked wrong - session 3 rendered +2966/-193 and session 7 +2987/-203, a difference of exactly 00b6cea, so session 3's entire churn was 1g's diff and the totals row double-counted 1g. Session 3's real commits (the five Docs: commits between ef05f90 and d4aaa7b) were recorded nowhere. Both fixed at 1h close-out. The generalisable part: churnOf cannot tell a wrong hash from a right one - a hash that does not resolve contributes zero, a hash belonging to another session contributes their diff, and both render as a working dev log",
           "foundBy": "eye"
         },
         {
