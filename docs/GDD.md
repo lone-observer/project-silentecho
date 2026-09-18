@@ -15,7 +15,7 @@ The tone is **cozy horror**: warm lamplight, hand-lettered signage, a comforting
 
 ## 2.2 The run loop
 
-One run = one labyrinth crawl, **20 turns maximum**.
+One run = one labyrinth crawl, turn-capped per difficulty (§2.2.1). *(18 Sep 2026: the flat 20-turn cap is retired — see the turn column below and `claude/design-decisions.md`.)*
 
 1. **Descend.** Player enters at the mouth of a procedurally generated labyrinth — a **10×10 grid, 100 rooms**, of which only about half are reachable inside half the turn budget.
 2. **Explore.** One action per turn. You always see the room you're standing in. Adjacent rooms leak *tells* — and the tells are shown as directional overlays pointing at the doorway they come from (§4).
@@ -26,9 +26,9 @@ One run = one labyrinth crawl, **20 turns maximum**.
 **Partial:** **Retreat** — leave alive without the Heart. Not a loss. The map is the prize (§2.11).
 **Lose:** Caught by the Wumpus, killed by a hazard, or the turn limit ends without escaping.
 
-**Why 100 rooms when the Heart is never more than 7 away.** A round trip costs at least twice the Heart's distance, so at 20 turns the Heart has to sit in the near third whatever the grid size — the turn budget binds, not the geometry. The other ~70 rooms are the **too-deep region**: you never *choose* to go there, you end up there by searching the wrong direction, and then the turn count decides whether you get back. At 5×5 the whole map could be brute-forced inside the limit and nothing was ever truly unknown.
+**Why 100 rooms when the Heart is never more than 7 away.** This reasoning was derived against the original flat 20-turn cap: a round trip costs at least twice the Heart's distance, so at 20 turns the Heart had to sit in the near third whatever the grid size — the turn budget bound, not the geometry. **Stale as of the 18 Sep turn-cap change (below) — not yet re-derived.** At 45–50 turns a much larger share of the 100-room grid is reachable inside a single run, which may be exactly the point (see the 18 Sep decision — the original complaint was "not enough of the map, most runs feel short"), but the Heart-distance contract (§2.2.1) and the "too-deep region" framing were both tuned against the old budget and have not been re-measured against the new one. Pending 1i.
 
-Turn 20 is a real antagonist. A 5×5 labyrinth is ~8 turns deep and ~8 turns back — the margin is thin, and every detour costs.
+**Turn pressure is no longer flat across difficulty.** At Drowsing and Stirring the turn cap is now generous on purpose — oil is meant to be the thing you're managing, not the clock. At Hunting and Ravening the cap tightens back down and turn pressure returns as the dominant threat, alongside a faster, more perceptive Wumpus. See §2.2.1 and `claude/design-decisions.md`, 18 Sep.
 
 ### 2.2.2 Turn order
 
@@ -53,10 +53,12 @@ Difficulty is not merely a Wumpus tier. It is a set of guarantees the generator 
 
 | Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Wumpus start | Turns |
 |---|---|---|---|---|---|---|
-| Drowsing | 1 | 2 | +2 | 5–6 | 4–6 | 20 |
-| Stirring | 2 | 1 | +3 | 6–7 | 5–8 | 20 |
-| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 5–8 | 20 |
-| Ravening | 4 | 0 | — | 7 | 5–8 | 18 |
+| Drowsing | 1 | 2 | +2 | 5–6 | 4–6 | **50** |
+| Stirring | 2 | 1 | +3 | 6–7 | 5–8 | **45** |
+| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 5–8 | **40** |
+| Ravening | 4 | 0 | — | 7 | 5–8 | **35** |
+
+**Turns changed 18 Sep 2026** — was a flat 20/20/20/18. Starting numbers, explicitly provisional: intent is Drowsing/Stirring to be oil-constrained rather than turn-constrained, Hunting/Ravening to keep real turn pressure. **Not yet retuned against the new cap: Heart distance, hazard-free route counts, min safe detour, and the "first contact around turn 7" claim below** — all were derived against the old 18–20-turn budget. 1i re-measures and adjusts. See `claude/design-decisions.md`, 18 Sep.
 
 **The Wumpus start is a band, and the ceiling is the load-bearing half.** It was once a floor alone — "at least 5 rooms from the entrance" — which on a 10×10 grid put it a mean of 11 rooms away. A Drowsing Wumpus covers 6 rooms in twenty turns, so in 83% of Drowsing seeds and 63% of Stirring ones **it could not reach the player at all**, and the teaching tier could not teach the tell it exists to teach. This is the same failure as a Heart distance specified at one end only (§2.2): a bound that only says *not too close* guarantees *too far*.
 
@@ -150,11 +152,13 @@ Resolve on **margin** (`roll_total − DC`):
 | Margin | Band | Meaning |
 |---|---|---|
 | ≤ −6 | **Critical Failure** | Action fails and the world escalates. Trap springs, noise spikes, the Wumpus advances. |
-| −5 to −1 | **Failure** | Action fails. Minor cost: a turn, lamp oil, a point of health. |
+| −5 to −1 | **Failure** | Action fails. Minor cost: a turn, extra lamp oil. |
 | 0 to +3 | **Mixed Success** | You get what you wanted *and* it costs you something. **The game's signature band — write the most interesting outcomes here.** |
 | +4 to +7 | **Success** | Clean. What you intended. |
 | +8 to +11 | **Strong Success** | Success plus a small gift: a glimpse of the map, a trinket, the Wumpus loses your scent. |
 | ≥ +12 | **Critical Success** | Success, treasure, and a lasting advantage. |
+
+**18 Sep 2026 — cost is margin, not injury.** There is no health resource. Every action's oil cost scales with the band it lands in: a bad roll spends more of what you were already spending to attempt it, a good roll spends less (strong/critical success can net you oil back). Nothing about a bad roll "hurts" you — it costs you resource, same currency either way. The only two ways a run ends in death are falling in a pit and the Wumpus catching you (see §2.8, §2.10); every other bad outcome, however bad the roll, is survivable and just costs oil and turns. See `claude/design-decisions.md`, 18 Sep, for the full reasoning and what replaced the old `damage` field.
 
 **Natural 1 and natural 20 override the band edges:** a natural 1 always carries a twist of misfortune regardless of modifiers; a natural 20 always carries a gift. Tension stays alive for a maxed character; hope stays alive for a fresh one.
 
@@ -166,9 +170,17 @@ Sanity-check the starting math before you trust it: a fresh character (stat 8, m
 
 ## 2.7 Actions
 
-`MOVE <direction>` · `LISTEN` · `SEARCH` · `FORCE` · `ENDURE` · `SNEAK` · `AVOID` · `DODGE` · `FIGHT` · `TAME` · `FLEE` · `USE <item>` · `SEND <companion> <direction>` · `READ` · `ENTER PORTAL` · `REST`
+`MOVE <direction>` · `FOCUS` · `SEARCH` · `FORCE` · `ENDURE` · `SNEAK` · `AVOID` · `DODGE` · `DISARM` · `FIGHT` · `TAME` · `FLEE` · `USE <item>` · `SEND <companion> <direction>` · `ENTER PORTAL` · `REST` · `DROP HEART`
 
-Every action is a roll, including `MOVE` — a bad move roll means you stumble loudly or take a wrong turn. The verbs stay fixed; the *outcomes* get authored per room type. Make outcomes data, not code (§4).
+**Changed 18 Sep 2026.** `LISTEN` and `READ` are retired, replaced by `FOCUS` (below). `DISARM` and `DROP HEART` are new. Every action is a roll except `DROP HEART`, which is free and unconditional. The verbs stay fixed; the *outcomes* get authored per room type. Make outcomes data, not code (§4).
+
+**`FOCUS` — resolves a doorway's hazard tell.** The base lamp tells you a doorway has *something* nearby (presence only) — `FOCUS` is what tells you what it is and confirms the direction with certainty. This replaces `LISTEN`'s old job (buying back tell range in the dark) and `READ`'s old job (recognizing hazards, deciphering portals). One `FOCUS` resolves one doorway. **Difficulty caps how many doorways can be focused per room, replacing the old oil-band tell-range restriction entirely** — Drowsing and Stirring allow focusing all four; Hunting and Ravening allow exactly one, forcing a real guess on the rest. The Wumpus's stench and any companion informational passive (grellhound, lumewing) are exempt — always free, always automatic, never gated by `FOCUS` or by oil level. See §2.4, §2.8.1, and `claude/design-decisions.md`, 18 Sep.
+
+**`SEARCH`** is a lighter, cheaper pass under the same `FOCUS` family — finds loot at lower reliability, does not resolve hazard tells. Exact split TBD, 1i.
+
+**`DISARM` — clears a bloom or snare permanently**, available alongside `FORCE`/`ENDURE` and `AVOID`/`DODGE` respectively. Where the other options get you past the hazard once, `DISARM` removes it from the room for the rest of the run — useful if you expect to pass through again (e.g. on the way back with the Heart), and meant to cost more up front than just getting past. Whether `DISARM` is stat-gated (joining the per-stat coverage matrix in §2.8) or stat-agnostic (a universal, build-independent option) is **not yet decided** — leaning stat-agnostic so it doesn't disturb the existing "every stat has exactly one hazard it can't touch" design, but not settled. Pending 1i.
+
+**`DROP HEART`** — see §2.9.1.
 
 `FORCE`, `ENDURE`, `AVOID` and `DODGE` are **built** — step 1g, 18 Sep 2026. They are not free verbs: each is offered only while you are standing in the hazard it answers, and while one is offered it is the *whole* menu (see 2.8). Their prose was written in the same pass as the mechanic, per the 18 Sep decision.
 
@@ -189,48 +201,56 @@ Every hazard but the pit now offers a choice of verb, the same shape as the Crea
 
 | Hazard | Behavior |
 |---|---|
-| **Pits** | Tell: draft. AGI save on entry. Failure ends the run; mixed success costs health and the lamp gutters. No verb options — absolute, by design, at least for now. |
-| **Spore blooms** | Tell: sweetness. Two ways through: `FORCE` (STR) cuts through — margin sets how many turns it costs (2, or 1 on a strong success), but *Confused* always applies regardless of the roll. `ENDURE` (INT) stands through it instead — turn cost is flat at two turns, but margin shortens how long *Confused* lasts, to a floor of one turn that it never goes below. Neither ever fully substitutes for the other; AGI has no option against a bloom. *(Decided 17 Sep 2026, built 18 Sep — see `claude/design-decisions.md`.)* |
-| **Snare-carvings** | Tell: fresh chisel. Two ways through: `AVOID` (INT) reads the mechanism before it triggers and pays for a misread in **clock** — the snare's own currency, since it delays rather than kills; `DODGE` (AGI) reacts after it fires, which is faster when it works and pays in **blood** when it does not. STR has no answer to a snare, by design. *(Decided 17 Sep 2026, built 18 Sep — see `claude/design-decisions.md`.)* |
-| **Portals** | Tell: hum. Entering shuffles you into a *different* labyrinth — map knowledge resets, but you may land closer to a Heart, and the Wumpus loses your scent entirely. INT to read where it goes. |
+| **Pits** | Tell: draft. AGI save on entry. **Binary, 18 Sep 2026 — no partial-credit band.** Pass and you're through unhurt; fail and the run ends. No verb options — absolute, by design. Along with the Wumpus catching you, this is one of only two ways a run ends in death (§2.6). |
+| **Spore blooms** | Tell: sweetness. Two ways through: `FORCE` (STR) cuts through — margin sets how many turns it costs (2, or 1 on a strong success), but *Confused* always applies regardless of the roll. `ENDURE` (INT) stands through it instead — turn cost is flat at two turns, but margin shortens how long *Confused* lasts, to a floor of one turn that it never goes below. Neither ever fully substitutes for the other; AGI has no option against a bloom. `DISARM` is also available (§2.7) — clears the bloom permanently instead of just getting past it, at a higher up-front cost. *(Force/Endure decided 17 Sep 2026, built 18 Sep. `DISARM` added 18 Sep, magnitudes pending 1i — see `claude/design-decisions.md`.)* |
+| **Snare-carvings** | Tell: fresh chisel. Two ways through: `AVOID` (INT) reads the mechanism before it triggers and pays for a misread in **clock** — the snare's own currency, since it delays rather than kills; `DODGE` (AGI) reacts after it fires, which is faster when it works and pays in **blood** when it does not. STR has no answer to a snare, by design. `DISARM` is also available (§2.7) — clears the snare permanently instead of just getting past it, at a higher up-front cost. *(Avoid/Dodge decided 17 Sep 2026, built 18 Sep. `DISARM` added 18 Sep, magnitudes pending 1i — see `claude/design-decisions.md`.)* |
+| **Portals** | Tell: hum. INT roll, and the two outcomes are deliberately far apart — **non-negotiable, 18 Sep 2026.** Good roll: reseed into a different labyrinth, map knowledge resets, oil carries over unchanged, Wumpus loses your scent entirely. Bad roll: you land already **holding the new labyrinth's Heart** — no exploration phase, straight into the escape problem, with whatever oil you had left and zero map knowledge. `DROP HEART` (§2.9.1) is the release valve if that's not a fight worth having. |
 | **Lamp oil** | An action budget rather than a second clock. Low oil applies a labelled penalty to every roll **and visibly shrinks the lantern radius** — the screen closes in on you. See below. |
 
-**A hazard cleared at Strong Success or better pays out an oil flask** (`FORCE`, `ENDURE`, `AVOID`, `DODGE`, and a `FIGHT` that drives the creature off), the same way a successful `TAME` pays out a companion. No health resource exists to trade against instead: oil is the only resource the player manages, and any future hazard cost stays on the oil/turns axis.
+**18 Sep 2026 — the reward is folded into the margin-scaled cost, not a separate flask on top.** The 17 Sep design (a flat oil price per verb, plus a bonus flask at Strong-Success-or-better, gated there specifically to avoid an oil-farming exploit measured at +1.75 oil per bloom) is superseded by the "cost is margin, not injury" model in §2.6: each band now carries its own net oil delta directly — heavy loss on a critical failure, down through breakeven around mixed/success, to a net gain on strong/critical success. This is the same shape the old two-part model was reaching for (bad rolls cost you, great rolls pay you back a little), collapsed into one number per band instead of a base price plus a conditional bonus. Exact deltas per verb per band are **not yet set** — 1i measures them the same way 1g measured the old ones, via `SWEEP=300 npm run hazard`, and the same oil-farming trap (paying out too generously at too low a bar) applies and needs the same discipline this time.
 
-**Strong Success, not mixed-or-better, and the reason is measured.** Paying at the band where the clearing actually happens is a 60% chance of four oil at starting stats against an expected cost of 0.65 — **+1.75 oil for every bloom walked into**, which makes the hazards an oil farm. Narrowing the gate takes that to +0.15 while staying reachable at every stat (one in five at 8, nearly one in two at 18). It is deliberately *not* gated on Critical Success, which would be arithmetically unreachable at starting stats — the exact shape of the `TAME_OUTCOMES.brave` bug that kept `SEND` from ever firing for three steps.
+**What stays true regardless of the exact numbers:** hazards should be net-negative in **turns**, which is the currency that actually decides runs (1g measured a 12.5-point escape-rate cost from the old verb redesign alone — see `docs/PHASE-1-PROGRESS.md`). That finding doesn't get invalidated by the cost-model change; it gets re-measured against the new turn caps (§2.2.1) and the new per-action turn costs once 1i has real numbers.
 
-**What could not be satisfied, stated rather than fudged.** The design log asks for the reward to be smaller than the average failure cost. A flask is 4 oil, a third of the lamp; an average hazard failure costs well under one oil-equivalent. No reachable probability makes four smaller than that, so with a whole flask as the unit the constraint is unsatisfiable, and the only way to appear to satisfy it was to choose a band nobody reaches. What *is* true, and is what the constraint was reaching for, is that hazards are heavily net-negative in the currency that decides runs — **turns**. Making the four verbs cost no extra turns was measured at **+12.5 points of escape rate**. See `docs/PHASE-1-PROGRESS.md` for the full distribution.
-
-**Ambient oil flasks were re-sized in the same pass**, because the reward and the loot count are one number wearing two hats. `POPULATION.oilFlasks` went from 8–12 to **3–5**: measured across that range the win rate and the shape of the oil budget are flat, and 3–5 is the first setting where the economy actually leans on *earned* oil rather than found oil.
+**Ambient oil flasks were re-sized in the same 1g pass**, because the reward and the loot count are one number wearing two hats. `POPULATION.oilFlasks` went from 8–12 to **3–5**: measured across that range the win rate and the shape of the oil budget are flat, and 3–5 is the first setting where the economy actually leans on *earned* oil rather than found oil. **This was measured against the old passive-burn, health-bearing economy and needs re-checking under the 18 Sep model** — a per-action oil price and a much wider turn budget change how much oil a run actually needs, so 3–5 is a starting point, not a re-confirmed number.
 
 ### 2.8.1 Oil — the light budget
 
 Oil is expressed as a **labelled modifier on the roll, never as a hidden DC change.** A raised DC is invisible; `Guttering lamp −2` sitting in the roll breakdown teaches the mechanic for free and honours the labelled-modifier rule in `CLAUDE.md` §4.
 
-| Oil | State | Roll modifier | Lantern radius | Tell range |
-|---|---|---|---|---|
-| 12–7 | Bright | — | 2 | all four doorways |
-| 6–3 | Guttering | −2 | 1 | all four doorways |
-| 2–1 | Ember | −4 | 1 | **facing doorway only** |
-| 0 | Dark | −6 | 0 | **facing doorway only** |
+| Oil | State | Roll modifier | Lantern radius |
+|---|---|---|---|
+| 12–7 | Bright | — | 2 |
+| 6–3 | Guttering | −2 | 1 |
+| 2–1 | Ember | −4 | 1 |
+| 0 | Dark | −6 | 0 |
 
-- Start a run with **12**. Burn **1 every 2 turns**, so a clean 20-turn run finishes with a little left.
-- `SEARCH`, `READ` and `REST` burn **1 extra**. This is what makes oil an action budget: it only bites if you dawdle, which is exactly the right pressure against the turn limit.
-- An oil flask restores **4**.
+**18 Sep 2026 — oil is spent per action, not burned passively.** The old "start at 12, burn 1 every 2 turns" clock is retired along with health (§2.6). Every action has an oil price, and margin scales it — see the price table below. Starting oil is still **12**; an oil flask still restores **4**, both pending re-check against the new model (§2.8, "ambient oil flasks").
 
-#### Darkness restricts range, never reliability
+**The price list, starting point — all pending 1i's sim data:**
 
-**Oil never degrades the honesty of a tell.** What the player receives is always true. In the dark they simply receive *less* of it: at Ember and below, only the doorway they last moved through leaks anything.
+| Action | Base oil cost | Notes |
+|---|---|---|
+| `MOVE` | 0.5 (or 0.25 — sim decides) | |
+| `FIGHT` / `TAME` / `SNEAK` / `FORCE` / `ENDURE` / `AVOID` / `DODGE` | 1 | Margin scales this up or down — see §2.6. |
+| `DISARM` | 1 | Higher effective cost intended once margin scaling is applied; clears the hazard permanently (§2.7). |
+| `FOCUS` | 0.5 | Per doorway, capped by difficulty (§2.7). |
+| `SEARCH` | lower than `FOCUS` | Weaker find-rate to match. Exact number TBD. |
+| `REST` | 0.5 | Refunded to net 0 on a good roll; lost outright on a bad one. No more +1 penalty. |
+| `FLEE` | ~ `MOVE` | Clean exit is cheap; a botched one costs extra oil and a scent marker, same shape as a bad `FIGHT`. |
+| `ENTER PORTAL` | 0 beyond the roll | Good roll: reseed into a new labyrinth, oil carries over unchanged. Bad roll: you land already holding the new labyrinth's Heart — see §2.9.1. |
+| `USE` (an oil flask) | 0 | Now rolled rather than flat: good roll restores 100% of `flaskValue`, bad roll restores 50%. |
+| `SEND` | 0 beyond the roll | See §2.9. |
+| `DROP HEART` | 0 | Free, unconditional. |
 
-`LISTEN` reveals all four doorways, truthfully, for the price of one turn.
+#### Darkness restricts range, never reliability — now via `FOCUS`, not oil band
 
-That is the whole mechanic: **in the dark, information costs turns.** With the Wumpus loose and four turns left, spending one to listen is a real decision — and it is the first thing in the design that gives `LISTEN` a reason to exist.
+**Oil never degrades the honesty of a tell,** and this still holds, but the mechanism moved. The old oil-band tell-range restriction (Ember/Dark → facing doorway only) is retired — 1g's own data showed it almost never triggered, since most runs never reach Ember. In its place: the base lamp tells you a doorway has *something*, and `FOCUS` (§2.7) is what resolves what and confirms the direction, capped per room by difficulty rather than by oil level. Zero oil is dangerous — roll penalty maxed, lantern dark — but it is not fatal by itself and it does not touch honesty; see "0 oil is not a third death" below.
 
-Three deliberate choices here:
+Three things carried over from the old design, still true:
 
-- **Probabilistic tells were rejected.** They compound with the −2/−4/−6 penalty into an unrecoverable state (worse at everything *and* blind), they relocate blame from the player's judgement to the dice, and they make the tell-ignored metric in `docs/EVALS.md` and `docs/OBSERVABILITY.md` unmeasurable — you could no longer tell "ignored the warning" apart from "the warning didn't fire."
-- **Range restriction starts at Ember, not Guttering.** The first oil threshold stays purely arithmetic so the deep one lands as a genuine change of state rather than more of the same.
-- **`LISTEN` costs no extra oil.** It is the escape valve; charging for it twice would close the valve.
+- **Probabilistic tells were rejected**, and stay rejected. Whatever `FOCUS` resolves is always true; the cost is in turns and oil to resolve it, never in the reliability of what comes back.
+- **The Wumpus's own stench, and any companion informational passive (grellhound, lumewing), are exempt from all of this** — always free, always automatic, never gated by oil or by `FOCUS`. CLAUDE.md §3's mandatory-adjacency guarantee widens to **two rooms**, not one, as of 18 Sep — see §2.10.
+- **0 oil is not a third death.** Only the pit and the Wumpus end a run (§2.6). Running out of oil means maximum roll penalty and no light — it makes every other danger more likely to kill you, but it never kills you directly. Making it lethal would recreate the "second death clock" the original 16 Sep oil design explicitly rejected.
 
 #### Darkness changes the channel, not the fact
 
@@ -289,12 +309,14 @@ The player may **spend a Fortune point to keep a bolting companion.** That is an
 |---|---|---|
 | **Wild goblin** | +2 to `SEARCH`. Scrounges — occasionally finds oil. | Grubby, opportunistic, weirdly loyal once fed. |
 | **Lumewing** (cave moth) | Lantern radius +1, so oil lasts longer. | Gentle. Genuinely beautiful. Sits on your shoulder. |
-| **Grellhound** (blind hound) | Reveals hazards in adjacent rooms. Growls when the Wumpus reaches radius 2 — an extra turn of warning. | The good one. Players will get attached. |
+| **Grellhound** (blind hound) | Reveals hazards in adjacent rooms. Growls when the Wumpus reaches radius 2. **Largely superseded 18 Sep** by the universal radius-2 stench floor (§2.10) — this passive needs a rework (longer range, escalating detail) to stay worth taking; parked, not built. | The good one. Players will get attached. |
 | **The Quiet One** | Mimics your voice. Passive: reduces your scent output. | This is the cozy-horror one. It is friendly. It should not be. It copies things it has heard you say, and once in a while it says something you haven't said yet. |
 
 **The stone-grub is not tameable and is not in v1.** It returns in a late phase as the labyrinth's **shuffler**: grubs eat walls, so on the higher difficulties the geometry drifts while you are inside it. That explains the changing world diegetically instead of by fiat, and it makes the grub a hazard with a personality rather than a companion with a gimmick.
 
-**`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail — **3 turns for a goblin, lumewing or grellhound (2 if you're carrying the Heart), 2 turns for the Quiet One (1 with the Heart).** The decoy's strength scales with how hard the creature was to tame: `COMPANION.sendScent` is 10 for the Easy/Moderate-DC creatures and 5 for the Quiet One's Hard DC, against the same `SCENT.decayFactor` everyone else decays by — the harder creature isn't a worse decoy by design, it's what the shared scent-decay math produces once "1 turn while carrying the Heart" is held fixed. *(Decided 17 Sep 2026 — see `claude/design-decisions.md`; the flat `sendScent = 5` / "2–3 turns" figure from 16 Sep is superseded.)*
+**`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail.
+
+**Superseded 18 Sep 2026 — every companion's decoy is now equally strong; the roll decides the duration, not which creature you tamed.** A good `SEND` roll buys **3 turns**, a bad one buys **2**, and carrying the Heart still halves whichever you get (2 / 1) — the "hot trail" logic stays load-bearing and stacks with the roll rather than being replaced by it. This retires the 17 Sep `COMPANION.sendScent` tiering (10 for Easy/Moderate-DC creatures, 5 for the Quiet One), which had made the decoy's strength a function of which creature you'd tamed rather than how well you executed the send. Simpler, and it decouples the escape valve from an earlier tame roll's luck. *(See `claude/design-decisions.md`, 18 Sep — supersedes the 17 Sep decision below, kept for its reasoning.)*
 
 **The companion does not come back.**
 
@@ -324,7 +346,9 @@ A creature **may** wander into the room the player is standing in. It does **not
 
 #### The Heart-carrying scent multiplier
 
-The other drift is not on the map. Lifting the Heart multiplies every scent deposit the player makes for the rest of the run (`HEART.carryScentMultiplier`), and this is what answers *why not simply retrace my steps*: the way out crosses the same rooms but poses a different problem, because you are now laying a hot trail down a corridor the Wumpus is already moving toward. It is applied at step 4 in `resolve.ts`, not in the drift pass — it belongs here because it is the third thing that changes state mid-run, not because it shares an implementation.
+The other drift is not on the map. Lifting the Heart multiplies every scent deposit the player makes (`HEART.carryScentMultiplier`), and this is what answers *why not simply retrace my steps*: the way out crosses the same rooms but poses a different problem, because you are now laying a hot trail down a corridor the Wumpus is already moving toward. It is applied at step 4 in `resolve.ts`, not in the drift pass — it belongs here because it is the third thing that changes state mid-run, not because it shares an implementation.
+
+**`DROP HEART` — new, 18 Sep 2026.** The player may set the Heart back down, free and unconditional (§2.7). This cancels the carrying scent multiplier — the trail goes cold again — but **not** the Wumpus tier jump or the one-turn exact-position reveal that fired the moment the Heart was first taken (§2.10); the labyrinth having noticed doesn't un-notice just because the Heart is back on the ground. Dropping is a real trade, not a free out: you can pick it back up later, but you may not have the oil left to do the round trip twice. This is also the escape valve for a bad `ENTER PORTAL` roll (§2.8.1) — landing already holding a new labyrinth's Heart is survivable specifically because you can set it down and leave clean instead of being forced into an immediate, unprepared escape.
 
 #### Drift scales with difficulty, and Drowsing does not drift
 
@@ -357,7 +381,7 @@ It is not a monster that chases you. It is a **weather system with intent**. The
 
 **What the fairness guarantee actually is.** The Wumpus never crosses more than one room to reach you, so it is always adjacent before it catches you. That means **a player who holds still is always warned**: the stench arrives a full turn before the thing does.
 
-It does *not* mean you can never be caught unwarned. Move into a room that happens to be adjacent to the Wumpus and nothing leaked at your previous room, because it was two away. That is the cost of exploring blind, it is what makes a moving threat different from a static hazard, and it is exactly the hole the **grellhound** exists to close — it growls at radius 2, buying back the turn of warning that movement costs you. Tests in `tests/wumpus.test.ts` assert both halves.
+**Widened 18 Sep 2026 — the mandatory stench tell now fires at two rooms, not one.** This is a presentation-layer floor, independent of a tier's own Perception stat (below) — it fires regardless of whether the Wumpus itself has actually noticed you yet. Compensates directly for §2.8.1's `FOCUS` rework, which makes the base game blinder by default than the old always-on directional tells were; without a wider floor, the new information economy would make first contact feel unfair rather than tense. It does *not* mean you can never be caught unwarned — move into a room that happens to be adjacent to the Wumpus and nothing leaked at your previous room, because it was three away, not two. That is the cost of exploring blind, and it is what the **grellhound** now adds *on top of* the baseline rather than uniquely providing — its existing radius-2 growl (§2.9) now duplicates part of the universal floor, so its value proposition shrinks to whatever warning it still gives beyond two rooms. An escalating, longer-range version of the grellhound's growl is parked in the companion-rework backlog (not built, not scheduled) and would restore its differentiation if it lands. Tests in `tests/wumpus.test.ts` assert both halves; the radius constant moves, the shape of the guarantee does not.
 
 **Adjacency tells are mandatory and always honest** — the violet stench overlay plus the ambience dropout (§4). *Never* hide this. The fear comes from knowing.
 
@@ -382,6 +406,8 @@ Between runs, in the **Lanternhouse** hub:
 - Choose the next labyrinth from 2–3 offers with visible Wumpus tier and rumored Heart value.
 - **Return to a labyrinth you mapped.** Retreating alive without the Heart preserves the seed and everything you charted. The Lanternhouse then offers that labyrinth back alongside fresh ones — you keep the map, but the Wumpus has moved, blooms have spread and creatures have wandered. This is what makes retreat a strategy rather than a consolation, and what makes a 100-room map worth having: no single run can chart it, so charting becomes something you do across runs.
 - A **bestiary page** that fills in as you tame each creature — a quiet collection reward that costs nothing to build and gives players a reason to try taming things they'd normally fight.
+
+**Parked, 18 Sep 2026 — an "Endless" mode:** pure exploration and charting, no Wumpus, cozy rather than tense. Not scoped, not scheduled, noted here so it isn't lost.
 
 ## 2.12 Art direction
 
@@ -435,8 +461,9 @@ interface AgentView {                 // what a player-agent sees
   room: string                        // prose description
   tells: { direction: Dir, tell: TellKind, text: string }[]
   legalActions: { action: Action, label: string, dc?: number }[]
-  status: { turn: number, health: number, oil: number,
+  status: { turn: number, oil: number,
             fortune: number, companion: string | null, carryingHeart: boolean }
+            // health removed, 18 Sep 2026 — see §2.6
   log: string[]                       // recent events
 }
 
@@ -478,7 +505,7 @@ The same rule governs actions. `legalActions` is computed **in the engine**, fil
 
 ### The status budget
 
-A player can hold about seven things in working memory. The run currently asks them to track: turn count, oil level, oil band, health, Fortune, companion, carrying-Heart, active statuses — **before** the four directional tells.
+A player can hold about seven things in working memory. The run currently asks them to track: turn count, oil level, oil band, Fortune, companion, carrying-Heart, active statuses — **before** the four directional tells. **Health dropped from this list 18 Sep 2026** (§2.6) — one fewer thing to track, for free.
 
 That is over budget, and every phase adds to it. So:
 

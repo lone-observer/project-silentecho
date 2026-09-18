@@ -34,7 +34,9 @@ Types, seeded RNG, dice resolver, engine-isolation guard, empty React shell.
 
 The largest phase. Everything except pictures.
 
-Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · **the hazard verbs (`FORCE`/`ENDURE`/`AVOID`/`DODGE`)** · text renderer · **a human playtest pass to rebalance the hazard rewards** · agent/sim harness.
+Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · **the hazard verbs (`FORCE`/`ENDURE`/`AVOID`/`DODGE`)** · text renderer · **the economy-unification rebuild (health retired, margin-scaled oil, `FOCUS`/`DISARM`/`DROP HEART`, turn caps raised to 50/45/40/35 — GDD, 18 Sep 2026) plus its sim-driven rebalance (1i part 1)** · **companion buff rework (1i part 2, queued behind part 1)** · agent/sim harness.
+
+**18 Sep 2026 — 1i grew from "rebalance the hazard rewards" to "rebuild the resource economy, then rebalance it."** A human playtest pass on 1h's text renderer found the old health/damage model and the LISTEN/READ tell-range model both worth replacing, not just retuning — see `docs/PHASE-1-PROGRESS.md` and `claude/design-decisions.md`, 18 Sep, for the full design thread. The flat 20-turn cap named below is also retired as part of that pass; see GDD §2.2.1.
 
 **`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1j**, and until it does, "the sim says" means "a visualiser sweep says".
 
@@ -64,7 +66,7 @@ The homage layer. Small, self-contained, high delight-per-hour.
 
 **Stop. Play ten real runs. Answer honestly.**
 
-1. Is turn 20 tense, or just annoying?
+1. Is the turn cap tense, or just annoying? (**50/45/40/35** by difficulty as of 18 Sep 2026 — was a flat 20/20/20/18; see GDD §2.2.1.)
 2. Do the tells change your decisions, or do you ignore them and move anyway?
 3. Is fight-vs-tame ever a genuine choice, or is one option always right?
 
