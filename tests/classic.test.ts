@@ -16,13 +16,29 @@
 
 import { describe, it, expect } from 'vitest'
 
-import type { Action, Difficulty, GameEvent, GameState, RunOutcome } from '../src/engine/types.ts'
+import type {
+  Action,
+  Difficulty,
+  Direction,
+  GameEvent,
+  GameState,
+  RunOutcome,
+} from '../src/engine/types.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
 import { applyAction, legalActions } from '../src/engine/resolve.ts'
+import type { LegalAction } from '../src/engine/resolve.ts'
 import { rngFromState } from '../src/engine/rng.ts'
 import { oilBandFor } from '../src/engine/data/tuning.ts'
 import { eventsToLines, toStrings } from '../src/classic/lines.ts'
-import { doorways, roomView, statusChunks } from '../src/classic/view.ts'
+import {
+  actionForDirection,
+  chartedMap,
+  doorways,
+  roomView,
+  statusChunks,
+  wayBack,
+} from '../src/classic/view.ts'
+import type { MapCell } from '../src/classic/view.ts'
 import { startRun, takeAction } from '../src/state/run.ts'
 import type { RunView } from '../src/state/run.ts'
 
@@ -79,6 +95,12 @@ function drive(
 /** Re-resolve one action against the state it was taken in, for comparison. */
 function eventsOf(before: GameState, action: Action): readonly GameEvent[] {
   return applyAction(before, action, rngFromState(before.rng)).events
+}
+
+/** A chart as one comparable string, for the Wumpus-leak assertion. */
+function flatten(rows: MapCell[][] | null): string {
+  if (rows === null) return ''
+  return rows.map((r) => r.map((c) => `${c.kind}:${c.ch}`).join('')).join('\n')
 }
 
 function spokenText(event: GameEvent): string | null {
@@ -379,6 +401,245 @@ describe('classic renderer — the status line', () => {
         })
       }
     }
+  })
+})
+
+describe('classic renderer — the charted map', () => {
+  it('is drawn on the two lower difficulties and withheld on the two higher ones', () => {
+    for (const difficulty of DIFFICULTIES) {
+      const run = startRun(11, { difficulty })
+      const chart = chartedMap(run.state)
+      const expected = difficulty === 'drowsing' || difficulty === 'stirring'
+      expect(chart !== null, `${difficulty}`).toBe(expected)
+    }
+  })
+
+  /**
+   * MUTATION-CHECKED, and the assertion the whole feature hangs on.
+   *
+   * `docs/EVALS.md` makes 1j prove an agent cannot see through walls; a map is
+   * the most direct way a HUMAN renderer could. So: the map is a pure function
+   * of the labyrinth and where the player is standing. Move the Wumpus to every
+   * room in the labyrinth in turn and the drawing must not change by one
+   * character — which it cannot, if nothing in `chartedMap` ever reads
+   * `state.wumpus`. Add a `W` to it and this fails on the first seed.
+   */
+  it('does not change by one character when the Wumpus moves', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      let run = startRun(seed, { difficulty: 'stirring' })
+      // Walk a little first, so there is a charted area to leak into.
+      for (let i = 0; i < 6 && run.state.outcome === 'inProgress'; i++) {
+        const entry = run.menu[pick(run.menu.length, seed, i)]
+        if (entry === undefined) break
+        run = takeAction(run, entry.action)
+      }
+
+      const baseline = flatten(chartedMap(run.state))
+      for (const roomId of Object.keys(run.state.labyrinth.rooms)) {
+        const moved = {
+          ...run.state,
+          wumpus: { ...run.state.wumpus, roomId },
+        }
+        expect(flatten(chartedMap(moved)), `leaked with the Wumpus in ${roomId}`).toBe(baseline)
+      }
+    }
+  })
+
+  /**
+   * The other half of the same rule: nothing an unvisited room CONTAINS may
+   * appear. A room you have never entered is either blank, or — if you have
+   * stood next to it and seen its doorway — a lead. Never its hazard, never its
+   * creature, never the Heart.
+   */
+  it('never draws the contents of a room the player has not entered', () => {
+    for (const difficulty of ['drowsing', 'stirring'] as const) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          const chart = chartedMap(run.state)
+          if (chart === null) throw new Error('expected a chart')
+          const { labyrinth, player } = run.state
+
+          for (const room of Object.values(labyrinth.rooms)) {
+            if (room.visited || room.id === player.roomId) continue
+            const cell = chart[room.y * 2]?.[room.x * 2]
+            if (cell === undefined) continue
+            expect(['blank', 'lead'], `${room.id} showed ${cell.kind}`).toContain(cell.kind)
+            expect([' ', '?']).toContain(cell.ch)
+          }
+
+          // And the Heart's room specifically, which is the one worth cheating
+          // at: drawn only once it has been stood in.
+          const heart = labyrinth.rooms[labyrinth.heartRoomId]
+          if (heart !== undefined && !heart.visited) {
+            const cell = chart[heart.y * 2]?.[heart.x * 2]
+            expect(cell?.kind).not.toBe('heart')
+          }
+        })
+      }
+    }
+  })
+
+  it('always puts the player somewhere on the map, exactly once', () => {
+    for (let seed = 1; seed <= 15; seed++) {
+      drive(seed, 'drowsing', (run) => {
+        const chart = chartedMap(run.state)
+        if (chart === null) throw new Error('expected a chart')
+        const players = chart.flat().filter((c) => c.kind === 'player')
+        expect(players).toHaveLength(1)
+      })
+    }
+  })
+})
+
+describe('classic renderer — getting around', () => {
+  /**
+   * The way back is the opposite of the way you came, and only when there is a
+   * door there. Null on turn 1, because nothing has moved yet.
+   */
+  it('marks the doorway you came in by, and only that one', () => {
+    const opposite: Record<Direction, Direction> = { N: 'S', E: 'W', S: 'N', W: 'E' }
+
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        expect(wayBack(startRun(seed, { difficulty }).state)).toBeNull()
+
+        drive(seed, difficulty, (run) => {
+          const { player, labyrinth } = run.state
+          const back = wayBack(run.state)
+          const room = labyrinth.rooms[player.roomId]
+          if (room === undefined) throw new Error('no room')
+
+          if (player.facing === null) {
+            expect(back).toBeNull()
+          } else {
+            const reverse = opposite[player.facing]
+            expect(back).toBe(room.exits[reverse] === undefined ? null : reverse)
+          }
+
+          // At most one doorway is ever the way back.
+          const marked = doorways(run.state, run.tells, run.sensed).filter((d) => d.wayBack)
+          expect(marked.length).toBeLessThanOrEqual(1)
+        })
+      }
+    }
+  })
+
+  /**
+   * The direction keys resolve to an action the engine already offered, or to
+   * nothing at all. A key that could invent an action would be a renderer
+   * building its own menu (GDD 2.17).
+   */
+  it('binds a direction only to an action legalActions already returned', () => {
+    let resolved = 0
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          for (const direction of DIRECTIONS) {
+            const action = actionForDirection(run.menu, direction)
+            if (action === null) continue
+            resolved += 1
+            expect(run.menu.map((e) => e.action)).toContainEqual(action)
+            expect('direction' in action && action.direction).toBe(direction)
+          }
+        })
+      }
+    }
+    expect(resolved, 'no direction key ever resolved').toBeGreaterThan(100)
+  })
+
+  /**
+   * MUTATION-CHECKED — but only after it was rebuilt, and the first version is
+   * the more useful story.
+   *
+   * A sent companion never comes back (CLAUDE.md 3), so a direction key must
+   * never be able to fire SEND. Written first as a sweep, this PASSED when the
+   * `kind !== 'send'` filter was deliberately removed — because SEND needs a
+   * brave companion, the scripted policy never tames on purpose, and 1g already
+   * measured SEND firing in ~0.5% of runs. The mutation was unreachable, which
+   * is the identical trap as 1f finding 3 and 1g's unmeasured FIGHT reward.
+   *
+   * So the companion is placed by hand. `GameState` is plain JSON (CLAUDE.md
+   * 2.5), which is exactly what makes a state like this constructible without a
+   * fixture library — and the assertion below now fails when the filter goes.
+   */
+  it('never binds a direction key to SEND', () => {
+    // In today's engine SEND always arrives alongside a MOVE — `canSend`
+    // requires a doorway, and `legalActions` offers a MOVE through every
+    // doorway — so the MOVE preference alone already hides it, and a sweep
+    // cannot distinguish the two guards. The menu is therefore built by hand,
+    // to test what the filter is actually for: the day SEND turns up without
+    // its MOVE, the fallback must still refuse it.
+    const sendOnly: LegalAction[] = [
+      { action: { kind: 'send', direction: 'N' }, label: 'Send the goblin N', dc: 5 },
+      { action: { kind: 'listen' }, label: 'Listen', dc: 5 },
+    ]
+    expect(actionForDirection(sendOnly, 'N')).toBeNull()
+
+    // And with the MOVE present, the key means the move — not the send.
+    const both: LegalAction[] = [
+      { action: { kind: 'send', direction: 'N' }, label: 'Send the goblin N', dc: 5 },
+      { action: { kind: 'move', direction: 'N' }, label: 'Move N', dc: 5 },
+    ]
+    expect(actionForDirection(both, 'N')?.kind).toBe('move')
+
+    // A live state, for the co-occurrence claim above rather than for the guard.
+    let checked = 0
+    for (let seed = 1; seed <= 40 && checked < 3; seed++) {
+      const base = startRun(seed, { difficulty: 'stirring' })
+      const armed: GameState = {
+        ...base.state,
+        player: {
+          ...base.state.player,
+          companion: { kind: 'goblin', brave: true, skittish: false },
+        },
+      }
+      const menu = legalActions(armed)
+      for (const entry of menu.filter((e) => e.action.kind === 'send')) {
+        if (!('direction' in entry.action)) continue
+        const sentWay: Direction = entry.action.direction
+        checked += 1
+        expect(
+          menu.some(
+            (e) =>
+              e.action.kind === 'move' &&
+              'direction' in e.action &&
+              e.action.direction === sentWay,
+          ),
+          'SEND was offered without a MOVE — the hand-built case above is now live',
+        ).toBe(true)
+      }
+    }
+    expect(checked, 'never built a state where SEND was on the menu').toBeGreaterThan(0)
+  })
+
+  /**
+   * The display rule from 1f finding 2: MOVE and LISTEN have no banded
+   * consequence above a critical failure, so their breakdown panel is noise.
+   * The roll still happens and still reaches the log — this is about which
+   * panel opens.
+   */
+  it('marks a MOVE or LISTEN roll inconsequential unless it critically failed', () => {
+    let inert = 0
+    let loud = 0
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const { run } = drive(seed, difficulty)
+        for (const turn of run.turns) {
+          const roll = turn.roll
+          if (roll === null) continue
+          if (roll.action === 'move' || roll.action === 'listen') {
+            const isCrit = roll.band === 'criticalFailure'
+            expect(roll.consequential).toBe(isCrit)
+            if (isCrit) loud += 1
+            else inert += 1
+          } else {
+            expect(roll.consequential).toBe(true)
+          }
+        }
+      }
+    }
+    expect(inert, 'never saw an ordinary walk').toBeGreaterThan(50)
+    expect(loud, 'never saw a clumsy one').toBeGreaterThan(0)
   })
 })
 

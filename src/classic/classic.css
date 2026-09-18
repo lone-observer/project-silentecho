@@ -165,8 +165,87 @@ button {
 }
 
 .doorways .dir {
-  flex: 0 0 4.5em;
+  flex: 0 0 6em;
   color: var(--dim);
+}
+
+/* The way you came in. A label on an action, never a different action. */
+.back {
+  color: var(--amber);
+  opacity: 0.75;
+}
+
+/* --- the charted map --------------------------------------------------- */
+
+.chart {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.1;
+  letter-spacing: 0.14em;
+  overflow-x: auto;
+}
+
+/* Rows that hold only vertical doorways. Half-height, because a 10x10 grid
+   drawn at full line-height is two-thirds connector rows. */
+.chart .link-row {
+  line-height: 0.62;
+}
+
+.chart .m-blank,
+.chart .m-door {
+  color: var(--rule);
+}
+
+.chart .m-empty {
+  color: var(--dim);
+}
+
+/* A doorway you have seen into a room you have not entered. The only thing on
+   the map that is a question rather than a fact, so it gets the accent. */
+.chart .m-lead {
+  color: var(--amber);
+  opacity: 0.55;
+}
+
+.chart .m-player {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.chart .m-entrance,
+.chart .m-heart {
+  color: var(--amber);
+}
+
+.chart .m-hazard {
+  color: var(--warn);
+}
+
+.chart .m-creature,
+.chart .m-flask,
+.chart .m-grave {
+  color: var(--ink);
+}
+
+/* --- the opening frame -------------------------------------------------- */
+
+.intro {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.intro summary {
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.intro p {
+  margin: 10px 0 0;
+  color: var(--ink);
 }
 
 .doorways .quiet,

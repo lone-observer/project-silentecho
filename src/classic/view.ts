@@ -7,10 +7,14 @@
  */
 
 import type {
+  Action,
+  Difficulty,
   Direction,
   GameState,
+  HazardKind,
   OutcomeBand,
   RollResult,
+  Room,
   RunOutcome,
   Tell,
   TellKind,
@@ -19,6 +23,7 @@ import { DIRECTIONS } from '../engine/types.ts'
 import { oilBandFor } from '../engine/data/tuning.ts'
 import { ARCHETYPE_WORD, CREATURE_WORD, DIRECTION_WORD } from '../engine/data/outcomes.ts'
 import { hasStatus, statusTurnsLeft, TELL_TEXT } from '../engine/resolve.ts'
+import type { LegalAction } from '../engine/resolve.ts'
 import { BAD_BANDS, BAND_LABEL, signed } from './labels.ts'
 
 // ---------------------------------------------------------------------------
@@ -91,6 +96,8 @@ export interface DoorwayView {
   readonly unsensed: UnsensedReason | null
   /** Reserved for the Wumpus alone. GDD 2.17, "exactly one alarming signal". */
   readonly alarming: boolean
+  /** The doorway you came in by. A label, never a different action. */
+  readonly wayBack: boolean
 }
 
 /**
@@ -123,6 +130,7 @@ export function doorways(
   if (room === undefined) throw new Error(`classic/view: no room ${state.player.roomId}`)
 
   const confused = hasStatus(state.player, 'confused')
+  const back = wayBack(state)
   const out: DoorwayView[] = []
   for (const direction of DIRECTIONS) {
     if (room.exits[direction] === undefined) continue
@@ -135,9 +143,194 @@ export function doorways(
       sensed: isSensed,
       unsensed: isSensed ? null : confused ? 'confused' : 'range',
       alarming: here.some((t) => t.kind === 'stench'),
+      wayBack: direction === back,
     })
   }
   return out
+}
+
+/**
+ * The doorway you came in by, or null on the first turn.
+ *
+ * `player.facing` is the direction of the last MOVE, so the way back is its
+ * opposite — mirroring `retreatDirection` inside `resolve.ts`, which is private
+ * and computes the same thing for FLEE. Both check the door actually exists,
+ * because a portal lands you somewhere your facing has nothing to do with.
+ *
+ * Purely a label. It changes no action and adds no option: "Move W" and
+ * "Move W (go back)" resolve identically, and the menu is still exactly what
+ * `legalActions` returned, in its order (GDD 2.17). What it fixes is that the
+ * compass is absolute and the player's memory is relative — you walk east and
+ * the way home is now called west, which takes a beat to invert on every single
+ * turn and is a beat spent on bookkeeping rather than on the decision.
+ */
+export function wayBack(state: GameState): Direction | null {
+  const facing = state.player.facing
+  if (facing === null) return null
+  const opposite: Record<Direction, Direction> = { N: 'S', E: 'W', S: 'N', W: 'E' }
+  const reverse = opposite[facing]
+  const room = state.labyrinth.rooms[state.player.roomId]
+  if (room === undefined || room.exits[reverse] === undefined) return null
+  return reverse
+}
+
+/**
+ * The one action in the menu that goes this way, for the WASD/arrow bindings.
+ *
+ * NOT A MENU. It looks up an entry `legalActions` already returned and hands
+ * back that entry's action unchanged; a direction with nothing behind it
+ * resolves to null and the key does nothing (GDD 2.17).
+ *
+ * MOVE wins when offered, because that is what the key means to a player.
+ * Otherwise the direction resolves to the single directional entry pointing
+ * that way — SNEAK past a creature, FLEE back out — so the keys keep working
+ * inside an encounter, where they matter most.
+ *
+ * SEND IS DELIBERATELY EXCLUDED. It carries a direction like the others, but a
+ * sent companion never comes back (CLAUDE.md 3), and binding "throw your friend
+ * that way" to the same key as "walk that way" is how someone loses a companion
+ * to a keystroke. SEND keeps its number and has to be chosen on purpose.
+ */
+export function actionForDirection(
+  menu: readonly LegalAction[],
+  direction: Direction,
+): Action | null {
+  const move = menu.find((e) => e.action.kind === 'move' && e.action.direction === direction)
+  if (move !== undefined) return move.action
+  const directional = menu.filter(
+    (e) => 'direction' in e.action && e.action.direction === direction && e.action.kind !== 'send',
+  )
+  return directional.length === 1 && directional[0] !== undefined ? directional[0].action : null
+}
+
+// ---------------------------------------------------------------------------
+// The charted map
+// ---------------------------------------------------------------------------
+
+export type MapCellKind =
+  | 'player'
+  | 'entrance'
+  | 'heart'
+  | 'hazard'
+  | 'creature'
+  | 'flask'
+  | 'grave'
+  | 'empty' //   charted, nothing in it
+  | 'lead' //    a doorway you have seen, into a room you have not entered
+  | 'door'
+  | 'blank'
+
+export interface MapCell {
+  readonly ch: string
+  readonly kind: MapCellKind
+}
+
+/**
+ * Which difficulties give the player a charted map.
+ *
+ * THIS IS A DESIGN CHANGE AND IT IS BIGGER THAN IT LOOKS. GDD 2.2.1 says
+ * "difficulty is a contract on GENERATION, not just a Wumpus tier" — it decides
+ * how the labyrinth is BUILT. This adds a second axis: difficulty now also
+ * decides how much of what you have seen you are allowed to keep. Whether that
+ * belongs in the difficulty contract at all, or belongs in `tuning.ts` where the
+ * diorama and `AgentView` would read the same rule, is Gautham's call. It sits
+ * here, in the renderer, until it is made — because a renderer capability that
+ * turns out to be a game rule is cheaper to move than to unpick.
+ *
+ * `docs/ROADMAP.md` parked the map render pending "telemetry showing players
+ * actually get lost". That gate is met: Gautham mapped seed 730339 on paper,
+ * mis-mapped it, took the pit route and died carrying the Heart.
+ */
+export const MAP_DIFFICULTIES: readonly Difficulty[] = ['drowsing', 'stirring'] as const
+
+/**
+ * What the player has charted, and nothing else.
+ *
+ * TEXT PARITY CUTS BOTH WAYS HERE (CLAUDE.md 2.3). Every renderer must be able
+ * to express every fact the player can learn — and must not express one they
+ * cannot. So this draws:
+ *
+ *  - rooms with `visited` set, and what is in them, because they walked in (or
+ *    a grellhound charted it for them, which `resolve.ts` also marks visited);
+ *  - doorways leading OUT of a charted room, including into rooms they have not
+ *    entered, because standing in a room the menu offered them that exit;
+ *  - nothing else. An unvisited room's CONTENTS never appear, the Wumpus never
+ *    appears, and `heartRoomId` is only ever drawn once they have stood on it.
+ *
+ * A door into the dark renders as a connector to a `lead` cell, which is the
+ * single most useful thing on the map: it is the list of places you have not
+ * been yet, and it is information the player already had and was tracking on
+ * paper.
+ */
+export function chartedMap(state: GameState): MapCell[][] | null {
+  if (!MAP_DIFFICULTIES.includes(state.labyrinth.difficulty)) return null
+
+  const { labyrinth, player } = state
+  const at = (x: number, y: number): Room | undefined =>
+    labyrinth.rooms[`${x},${y}`] ?? Object.values(labyrinth.rooms).find((r) => r.x === x && r.y === y)
+
+  const known = (r: Room | undefined): boolean => r !== undefined && r.visited
+  /** A room you have never entered but have seen a doorway into. */
+  const isLead = (r: Room | undefined): boolean => {
+    if (r === undefined || r.visited) return false
+    for (const d of DIRECTIONS) {
+      const neighbourId = r.exits[d]
+      if (neighbourId === undefined) continue
+      if (labyrinth.rooms[neighbourId]?.visited === true) return true
+    }
+    return false
+  }
+
+  const cellFor = (r: Room | undefined): MapCell => {
+    if (r === undefined) return { ch: ' ', kind: 'blank' }
+    if (r.id === player.roomId) return { ch: '@', kind: 'player' }
+    if (!r.visited) return isLead(r) ? { ch: '?', kind: 'lead' } : { ch: ' ', kind: 'blank' }
+    if (r.isEntrance) return { ch: 'E', kind: 'entrance' }
+    if (r.id === labyrinth.heartRoomId) return { ch: 'H', kind: 'heart' }
+    if (r.hazard !== null) return { ch: HAZARD_CHAR[r.hazard], kind: 'hazard' }
+    if (r.creature !== null) return { ch: 'c', kind: 'creature' }
+    if (r.oilFlask) return { ch: 'o', kind: 'flask' }
+    if (r.grave !== null) return { ch: '+', kind: 'grave' }
+    return { ch: '·', kind: 'empty' }
+  }
+
+  /** A doorway is drawn once either side of it has been stood in. */
+  const seenDoor = (a: Room | undefined, b: Room | undefined, d: Direction): boolean => {
+    if (a === undefined || b === undefined) return false
+    if (a.exits[d] !== b.id) return false
+    return known(a) || known(b)
+  }
+
+  const rows: MapCell[][] = []
+  for (let y = 0; y < labyrinth.height; y++) {
+    const roomRow: MapCell[] = []
+    const linkRow: MapCell[] = []
+    for (let x = 0; x < labyrinth.width; x++) {
+      const here = at(x, y)
+      roomRow.push(cellFor(here))
+      if (x < labyrinth.width - 1) {
+        roomRow.push(
+          seenDoor(here, at(x + 1, y), 'E')
+            ? { ch: '─', kind: 'door' }
+            : { ch: ' ', kind: 'blank' },
+        )
+      }
+      linkRow.push(
+        seenDoor(here, at(x, y + 1), 'S') ? { ch: '│', kind: 'door' } : { ch: ' ', kind: 'blank' },
+      )
+      if (x < labyrinth.width - 1) linkRow.push({ ch: ' ', kind: 'blank' })
+    }
+    rows.push(roomRow)
+    if (y < labyrinth.height - 1) rows.push(linkRow)
+  }
+  return rows
+}
+
+const HAZARD_CHAR: Record<HazardKind, string> = {
+  pit: 'p',
+  sporeBloom: 'b',
+  snareCarving: 'n',
+  portal: '¤',
 }
 
 // ---------------------------------------------------------------------------
@@ -215,9 +408,35 @@ export interface RollPart {
   readonly value: string
 }
 
+/**
+ * Verbs whose band changes nothing except at the very bottom.
+ *
+ * Measured against `resolve.ts`, not assumed — this is 1f finding 2, which
+ * `PHASE-1-PROGRESS.md` still carries as open: MOVE and LISTEN have no banded
+ * consequence at all beyond `SCENT.criticalFailureBonus`, so five of their six
+ * bands are mechanically identical and differ only in prose. SEARCH, READ and
+ * REST are NOT here: they are two-valued, and a roll that decides whether you
+ * find the flask is a roll worth reading.
+ *
+ * This drives display only. The roll still happens, a critical failure is still
+ * loud, and the line is still in the log. What it stops is a full breakdown
+ * panel for walking through a door, which is the fastest way to teach a player
+ * that the breakdown panel is noise — on the one screen whose job is to explain
+ * why they rolled what they rolled (CLAUDE.md 4).
+ *
+ * If the roll itself is ever cut for these two verbs, this constant is the list
+ * to cut, and this comment is the reasoning to re-read first.
+ */
+const INERT_ABOVE_CRIT_FAIL: readonly string[] = ['move', 'listen'] as const
+
 export interface RollView {
   readonly action: string
   readonly hazard: string | null
+  /**
+   * Whether this roll's band actually did anything. False for a MOVE or LISTEN
+   * that landed anywhere above a critical failure.
+   */
+  readonly consequential: boolean
   readonly natural: number
   readonly parts: readonly RollPart[]
   readonly total: number
@@ -242,6 +461,8 @@ export function rollView(action: string, result: RollResult, hazard: string | nu
   return {
     action,
     hazard,
+    consequential:
+      !INERT_ABOVE_CRIT_FAIL.includes(action) || result.band === 'criticalFailure',
     natural: result.natural,
     parts: result.modifiers.map((m) => ({ source: m.source, value: signed(m.value) })),
     total: result.total,

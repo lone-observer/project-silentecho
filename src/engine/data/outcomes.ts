@@ -216,6 +216,36 @@ export const ARCHETYPE_WORD: Record<RoomArchetype, string> = {
   heartChamber: 'The Heart Chamber',
 }
 
+/**
+ * What the player reads before the first turn. GDD 2.14's "room description"
+ * gap is still open; this is a different thing — the frame around the run.
+ *
+ * PLAIN STRINGS, NOT A `Beat`. A run opens at full oil by construction, so a
+ * dark variant could never fire, and twelve unreachable beats is exactly the
+ * dead content 1g deleted from `HAZARD_NARRATION`.
+ *
+ * EVERY CLAIM HERE IS MECHANICALLY TRUE, which is the only hard rule this text
+ * has. An intro that oversells is the game lying to the player on turn one,
+ * before it has any credit to spend. Checked line by line: leaving by the
+ * entrance really is how a run ends (1e); the lamp really does burn on a timer
+ * whether or not you move, and really does cost RANGE rather than sight
+ * (GDD 2.8.1); draft/sweetness/freshChisel really are pit/bloom/snare and
+ * really never lie (CLAUDE.md 3); creatures really can be tamed, slowly and
+ * quietly (GDD 2.9); the Wumpus really does track scent, really is always
+ * announced when adjacent, and really cannot be killed (CLAUDE.md 3).
+ *
+ * It names three of the seven tells and no numbers. The turn limit is not in
+ * here because it is per-difficulty (18 at Tier 4, 20 elsewhere) and `Slots`
+ * is a closed set of five nouns with no number in it — the status line carries
+ * the count, where it stays correct.
+ */
+export const RUN_INTRO: readonly string[] = [
+  'They say there is a Heart at the middle of this place, and that it is worth the walk down. You have come to find out. The way you came in is the way you will go out, if you go out.',
+  'The lamp is yours and the oil in it is all the oil there is. It burns whether you are walking or standing still, and what it costs you as it dims is not sight so much as reach — the doorways stop telling you what is on the far side.',
+  'So listen at them while they still will. Cold air means a floor that is not there. Something sweet means spores. Fresh chisel-marks mean somebody cut a trap into the stone and never came back to collect it. Not everything down here wants to hurt you, either — some of it can be talked round, slowly, if you are quiet about it.',
+  'And one thing hunts by the smell you leave behind you. You will know when it is close; it is not the kind of thing that arrives as a surprise. Knowing is the whole of the advantage you get.',
+]
+
 const SLOT_PATTERN = /\{([a-zA-Z]+)\}/g
 
 export function fill(text: string, slots: Slots = {}): string {

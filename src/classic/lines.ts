@@ -19,7 +19,7 @@
 
 import type { Direction, GameEvent, Labyrinth, NarrationBeat, RollResult } from '../engine/types.ts'
 import { ARCHETYPE_WORD, DIRECTION_WORD } from '../engine/data/outcomes.ts'
-import { BAND_LABEL, signed } from './labels.ts'
+import { BAND_LABEL, num, signed } from './labels.ts'
 
 export type LineTone =
   | 'narration' //  something happened, in the engine's own words
@@ -48,7 +48,7 @@ export function formatRoll(result: RollResult): string {
   for (const m of result.modifiers) parts.push(`${m.source} ${signed(m.value)}`)
   const head = parts.join('  ·  ')
   const band = BAND_LABEL[result.band]
-  const tail = `= ${result.total} vs DC ${result.dc}  →  ${band} (${signed(result.margin)})`
+  const tail = `= ${num(result.total)} vs DC ${result.dc}  →  ${band} (${signed(result.margin)})`
   const flags: string[] = []
   if (result.overridden) flags.push('natural die overrode the margin')
   if (result.fortuneUsed) flags.push(`Fortune: ${result.fortuneUsed}`)

@@ -43,3 +43,15 @@ export function signed(n: number): string {
   if (n < 0) return `−${Math.abs(n)}`
   return '0'
 }
+
+/**
+ * A plain number, with the same minus sign as everything around it.
+ *
+ * Not `signed` — a roll total is a value, not a modifier, so it takes no `+`.
+ * It exists because a failed roll at low oil renders a negative TOTAL, and
+ * `= -3` next to `Agility −1 · Failing lamp −4` puts two different characters
+ * for minus on one line. Caught by reading a real death in the log.
+ */
+export function num(n: number): string {
+  return n < 0 ? `−${Math.abs(n)}` : `${n}`
+}

@@ -353,6 +353,39 @@ The brief said to flag new prose rather than write it, and that held: **no sente
 - **The run record is on the end screen.** `seed + actionLog` as copyable JSON, plus "same labyrinth again". No save system, and 1i's playtest can reproduce anything it finds for the price of a paste.
 - **No CRT skin, no `WUMPUS` egg, no epitaph, no map, no agent anything.** All Phase 1.5 or 1j, all left alone.
 
+### The 1h QoL pass — seven items from the first real playtest
+
+Gautham played seed 730339 at stirring, mapped it on paper, mis-mapped it, took the pit route and died carrying the Heart. Seven items came back. Four were built, one was answered with a rendering fix instead of the engine change asked for, and two are open design calls.
+
+**Built:**
+
+- **An opening frame.** `RUN_INTRO` in `data/outcomes.ts` — four paragraphs, collapsible, open by default, above the log. Plain strings rather than a `Beat`, because a run opens at full oil by construction and a dark variant could never fire. **Every claim in it is mechanically true**, checked line by line against the tables; an intro that oversells is the game lying on turn one, before it has any credit to spend. It names three of the seven tells and no numbers — the turn limit is per-difficulty and `Slots` has no number in it.
+- **WASD and the arrow keys, bound to the compass.** The real problem was that a *filtered* menu renumbers: "Move N" is 1 in a two-exit room and 3 in another, so the player re-reads the whole list every turn to find the same move. Directions never renumber. Numbers still work and still drive everything with no compass. `actionForDirection` looks up an entry `legalActions` already returned — it is not a second menu (GDD 2.17), and a direction with nothing behind it does nothing, which is what makes a hazard menu read as a wall. **SEND is excluded**: it carries a direction like the others, it is irreversible (CLAUDE.md 3), and binding "throw your friend that way" to the walking key is how someone loses a companion to a keystroke.
+- **`(go back)` on the doorway you came in by**, in the menu and as `↩` on the doorway list. Pure label, no new action. The compass is absolute and the player's memory is relative — you walk east and home is now called west, and inverting that every turn is a beat spent on bookkeeping.
+- **A charted map**, for drowsing and stirring. See the decision note below; this is the biggest of the seven and it is not a QoL edit.
+
+**Answered rather than built:** MOVE and LISTEN do roll for almost nothing (1f finding 2) — but "dice only for hazards and creatures" would also delete SEARCH's find/don't-find, which is genuinely two-valued, and MOVE's critical failure is the only thing that makes a careless step loud. So the roll stays and the **panel** is now hidden for a MOVE or LISTEN that landed above a critical failure (`RollView.consequential`). The line is still in the log. Cutting the roll itself is a design call and is below.
+
+**Three more defects found by looking at it, none of which a test caught** — same ratio as 1h's first pass, and worth noting the habit keeps paying:
+
+| what | why no test saw it |
+|---|---|
+| The chart reserved the full 10×10 grid for three charted rooms | Correct output, unreadable panel. Fixed by half-height connector rows, **not** by cropping — see the decision note. |
+| `= -3` beside `Agility −1 · Failing lamp −4` | A hyphen-minus for the total against a real minus for the modifiers, on one line. Found by reading a pit death in the log. |
+| A direction key could scroll the log out from under the player | An arrow key with no legal action fell through to the browser. Swallowed either way now. |
+
+### The charted map, as a decision rather than a feature
+
+`docs/ROADMAP.md` parked the map render explicitly, and gated it on data: "build it only if telemetry shows players or bots actually getting lost." **That gate is met** — the author got lost, on paper, and died to it. Built for drowsing and stirring only, at Gautham's call.
+
+**It is bigger than it looks, and the part that needs a decision is not the drawing.** GDD 2.2.1 says difficulty is a contract on GENERATION — it decides how the labyrinth is *built*. This adds a second axis: difficulty now also decides how much of what you have seen you are allowed to keep. Whether that belongs in the difficulty contract, or in `tuning.ts` where the diorama and `AgentView` would read the same rule, is open. `MAP_DIFFICULTIES` sits in the renderer until it is settled, because a renderer capability that turns out to be a game rule is cheaper to move than to unpick.
+
+**What it draws, and the two things it refuses to.** Rooms with `visited` set and what is in them; doorways leading out of a charted room, *including into rooms never entered*, because standing in a room the menu offered that exit. Nothing else — an unvisited room's contents never appear, `heartRoomId` is drawn only once stood on, and the Wumpus never appears at all. That last one has a mutation-checked test with a shape worth reusing: **the map is a pure function of the labyrinth and where the player stands, so moving the Wumpus to every room in turn must not change one character.** Add a `W` to the drawing and it fails on the first seed.
+
+A door into the dark renders as a connector to a `?`. That is the most useful thing on it — the list of places you have not been — and it is information the player already had and was tracking by hand.
+
+**The grid is never cropped to the charted area, deliberately.** Cropping would re-frame the map every time exploration reached a new edge, moving every room the player had already placed. Fixed coordinates for the whole run; the empty space is the cheap part.
+
 ### 1h findings
 
 **1. The engine computes which doorways it looked at and then throws it away.** `tellsFor` returns the tells it found and nothing about the doorways it did not check, so *"there is nothing through that door"*, *"your lamp does not reach that far"* and *"you are too Confused to tell"* all arrive at every renderer as the same absence.
@@ -571,7 +604,10 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 
 - **NEW-1h — what shape the Fortune seam takes.** 1h finding 2: Fortune is unspendable by anyone because `applyAction` resolves a whole turn in one call. Two candidate shapes — a two-phase `beginAction`/`commitAction`, or a spend intent passed into `applyAction` — and they differ in what they cost everything that already calls the reducer. **Decide before 1j opens**, because `docs/EVALS.md`'s Fortune metric depends on it and the retrofit gets more expensive with every test written against the current signature.
 - **NEW-1h — whether the engine should emit the sensed doorway set.** 1h finding 1. Today every renderer re-derives it and the darkness invariant is only as safe as the last renderer to get it right. The question is not whether to fix it but where: a field on `tellsFor`'s return, or an event.
-- **NEW-1h — whether `Move N` should read `Move north`.** 1h finding 5. A one-line label change in `resolve.ts`; on screen next to a doorway list that says "north". Left for whoever is reading the screen in 1i.
+- **NEW-1h — whether `Move N` should read `Move north`.** 1h finding 5. A one-line label change in `resolve.ts`; on screen next to a doorway list that says "north". Left for whoever is reading the screen in 1i. *Partly overtaken by the QoL pass: the menu now shows a compass KEY rather than a number for directional entries, so the letter is doing double duty.*
+- **NEW-1h/QoL — whether MOVE and LISTEN should roll at all.** Raised by Gautham on first play: "why am I rolling for walking?" He is right that five of six bands do nothing. The roll stays for now and the breakdown panel is hidden instead. **The real cost of cutting it** is that `SCENT.criticalFailureBonus` is the only thing making a careless step loud — delete the roll and clumsy movement stops feeding the Wumpus — plus 72 strings of MOVE prose become dead content. Note the precise scope: MOVE and LISTEN, *not* "hazards and creatures only", because SEARCH/READ/REST are genuinely two-valued.
+- **NEW-1h/QoL — whether `PLAYER.startingStat` should be 10 rather than 8.** Also raised on first play: "what is Agility −1?" `statModifier` is `floor((score − 10) / 2)`, so a fresh character is −1 on all four stats and a first-time player's roll breakdown is **nothing but negative numbers** — on the one screen whose entire job is teaching them how the dice work. The counter-argument is the meta-progression arc (3 stat points per run, GDD 2.11): starting below zero is what makes the second run feel different. Moving to 10 shifts every DC's felt difficulty by one point, so it is a balance call for 1i with real play behind it.
+- **NEW-1h/QoL — where the map-vs-difficulty rule lives**, and whether difficulty is allowed an information axis at all. See "The charted map, as a decision" above. `MAP_DIFFICULTIES` is in the renderer pending the call.
 
 **These four bullets — the turn-cost price, the bloom-choice question, the dark-register threshold, and whether oil binds — are what step 1i exists to answer.** All four say "needs human play" or "nobody has played it"; none of them are 1j/1k's to arbitrate first. **1h unblocked all four: there is now something to play.**
 - **A genuinely INT-weak trap** (a mimic or fake-treasure-room — forceable by STR, dodgeable by AGI, a real cost for an INT build trusting its read of the room), to fully close the per-stat coverage matrix the hazard redesign above sets up. New content, deferred alongside creature difficulty tiers — not part of the hazard-verb step.

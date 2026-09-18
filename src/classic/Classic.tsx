@@ -21,12 +21,23 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
-import type { Action } from '../engine/types.ts'
+import type { Action, Direction } from '../engine/types.ts'
 import type { LegalAction } from '../engine/resolve.ts'
+import { RUN_INTRO } from '../engine/data/outcomes.ts'
 import { useRun } from '../state/run.ts'
 import type { RunView, TurnRecord } from '../state/run.ts'
-import { doorways, isWin, OUTCOME_LABEL, roomView, statusChunks } from './view.ts'
-import type { DoorwayView, RollView, StatusChunk, UnsensedReason } from './view.ts'
+import {
+  actionForDirection,
+  chartedMap,
+  doorways,
+  isWin,
+  OUTCOME_LABEL,
+  roomView,
+  statusChunks,
+  wayBack,
+} from './view.ts'
+import type { DoorwayView, MapCell, RollView, StatusChunk, UnsensedReason } from './view.ts'
+import { num } from './labels.ts'
 import './classic.css'
 
 /**
@@ -41,6 +52,33 @@ function keyFor(index: number): string | null {
   return MENU_KEYS[index] ?? null
 }
 
+/**
+ * WASD and the arrow keys, bound to the compass rather than to a menu slot.
+ *
+ * WHY THIS IS NOT A SECOND MENU. GDD 2.17 forbids a renderer building its own
+ * action list, and this does not: it looks up an entry that `legalActions`
+ * already returned and fires that entry's action unchanged. A direction with no
+ * legal action does nothing — which is correct, and is what makes a hazard
+ * menu feel like a wall rather than a bug.
+ *
+ * The problem it solves is real and specific to a filtered menu: the numbers
+ * RENUMBER. `legalActions` returns what is available this turn, so "Move N" is
+ * 1 in a two-exit room and 3 in another, and the player re-reads the list every
+ * single turn to find the same move. Directions never renumber. The numbers
+ * stay for everything that has no compass (Listen, Search, Fight, Tame).
+ */
+const DIRECTION_KEYS: Record<string, Direction> = {
+  W: 'N',
+  A: 'W',
+  S: 'S',
+  D: 'E',
+  ARROWUP: 'N',
+  ARROWLEFT: 'W',
+  ARROWDOWN: 'S',
+  ARROWRIGHT: 'E',
+}
+
+
 // ---------------------------------------------------------------------------
 
 export function Classic({ run }: { run: RunView }): React.JSX.Element {
@@ -54,6 +92,8 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
   )
   const chunks = useMemo(() => statusChunks(run.state), [run.state])
   const lastRoll = useMemo(() => lastRollOf(run.turns), [run.turns])
+  const chart = useMemo(() => chartedMap(run.state), [run.state])
+  const back = useMemo(() => wayBack(run.state), [run.state])
 
   const choose = useCallback((action: Action) => act(action), [act])
 
@@ -65,7 +105,19 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const target = event.target
       if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return
-      const index = MENU_KEYS.indexOf(event.key.toUpperCase() as (typeof MENU_KEYS)[number])
+      const key = event.key.toUpperCase()
+
+      const direction = DIRECTION_KEYS[key]
+      if (direction !== undefined) {
+        const action = actionForDirection(run.menu, direction)
+        // Swallow the arrow key either way, so a dead direction does not
+        // scroll the log out from under the player.
+        event.preventDefault()
+        if (action !== null) choose(action)
+        return
+      }
+
+      const index = MENU_KEYS.indexOf(key as (typeof MENU_KEYS)[number])
       if (index === -1) return
       const entry = run.menu[index]
       if (entry === undefined) return
@@ -112,13 +164,24 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
             </section>
           )}
 
+          {chart !== null && (
+            <section className="panel">
+              <h2>Charted</h2>
+              <ChartedMap rows={chart} />
+            </section>
+          )}
+
           {/*
             The heading names the action, because during an encounter or a
             hazard this panel is showing the roll for the MOVE that walked you
             in, not for the choice you are about to make — and a breakdown you
             cannot attribute is a breakdown you cannot learn from.
+
+            `consequential` is why a plain walk no longer opens this panel: five
+            of MOVE's six bands do nothing, and a breakdown shown for a step
+            that cost nothing teaches the player to stop reading breakdowns.
           */}
-          {lastRoll !== null && (
+          {lastRoll !== null && lastRoll.consequential && (
             <section className="panel roll">
               <h2>The roll · {lastRoll.action}</h2>
               <Roll roll={lastRoll} />
@@ -127,12 +190,17 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
 
           <section className="panel">
             <h2>{ended ? 'The run is over' : 'What do you do?'}</h2>
-            {ended ? <Ending run={run} /> : <Menu menu={run.menu} onChoose={choose} />}
+            {ended ? (
+              <Ending run={run} />
+            ) : (
+              <Menu menu={run.menu} onChoose={choose} back={back} />
+            )}
           </section>
         </div>
 
         <section className="panel log-panel">
           <h2>Log</h2>
+          <Intro paragraphs={RUN_INTRO} />
           <Log turns={run.turns} />
         </section>
       </div>
@@ -190,7 +258,10 @@ function Doorways({ doors }: { doors: readonly DoorwayView[] }): React.JSX.Eleme
     <ul className="doorways">
       {doors.map((door) => (
         <li key={door.direction} className={door.alarming ? 'alarming' : undefined}>
-          <span className="dir">{door.word}</span>
+          <span className="dir">
+            {door.word}
+            {door.wayBack && <span className="back"> ↩</span>}
+          </span>
           {door.unsensed !== null ? (
             <span className="unsensed">{UNSENSED_TEXT[door.unsensed]}</span>
           ) : door.tells.length === 0 ? (
@@ -225,7 +296,7 @@ function Roll({ roll }: { roll: RollView }): React.JSX.Element {
           </span>
         ))}
         <span className="op">=</span>
-        <span>{roll.total}</span>
+        <span>{num(roll.total)}</span>
         <span className="op">vs</span>
         <span>DC {roll.dc}</span>
       </div>
@@ -241,28 +312,88 @@ function Roll({ roll }: { roll: RollView }): React.JSX.Element {
   )
 }
 
+/** The compass letter shown for a direction, matching `DIRECTION_KEYS`. */
+const KEY_FOR_DIRECTION: Record<Direction, string> = { N: 'W', W: 'A', S: 'S', E: 'D' }
+
 function Menu({
   menu,
   onChoose,
+  back,
 }: {
   menu: readonly LegalAction[]
   onChoose: (action: Action) => void
+  back: Direction | null
 }): React.JSX.Element {
   return (
     <ul className="menu">
       {menu.map((entry, index) => {
-        const key = keyFor(index)
+        // Directional entries show their compass key instead of their number.
+        // The number still works — the handler is index-based and unchanged —
+        // but the compass key is the one worth learning, because it is the only
+        // one that means the same thing next turn.
+        const dir =
+          'direction' in entry.action && entry.action.kind !== 'send'
+            ? entry.action.direction
+            : null
+        const shown = dir !== null ? KEY_FOR_DIRECTION[dir] : (keyFor(index) ?? '·')
         return (
           <li key={`${entry.label}-${index}`}>
             <button type="button" onClick={() => onChoose(entry.action)}>
-              <span className="key">{key ?? '·'}</span>
-              <span className="label">{entry.label}</span>
+              <span className="key">{shown}</span>
+              <span className="label">
+                {entry.label}
+                {dir !== null && dir === back && <span className="back"> (go back)</span>}
+              </span>
               {entry.dc !== undefined && <span className="dc">DC {entry.dc}</span>}
             </button>
           </li>
         )
       })}
     </ul>
+  )
+}
+
+/**
+ * The frame around the run, before the first turn.
+ *
+ * Collapsible and open by default: it is four paragraphs on turn one and dead
+ * weight on turn twelve, and closing it is the player's call rather than a
+ * timer's. The text is `RUN_INTRO` from `data/outcomes.ts` — the renderer still
+ * writes no prose.
+ */
+function Intro({ paragraphs }: { paragraphs: readonly string[] }): React.JSX.Element {
+  return (
+    <details className="intro" open>
+      <summary>Before you go down</summary>
+      {paragraphs.map((text, i) => (
+        <p key={i}>{text}</p>
+      ))}
+    </details>
+  )
+}
+
+/**
+ * What the player has charted. Drawn only where `chartedMap` returns something,
+ * which is the two lower difficulties — see `MAP_DIFFICULTIES`.
+ */
+function ChartedMap({ rows }: { rows: readonly MapCell[][] }): React.JSX.Element {
+  return (
+    <pre className="chart" aria-label="charted map">
+      {rows.map((row, y) => (
+        // Connector rows get a shorter line so the grid is not half whitespace.
+        // The grid itself is NEVER cropped to the charted area, deliberately:
+        // a map that re-frames as you explore moves every room you had already
+        // placed, which is the opposite of what an orientation aid is for.
+        // Fixed coordinates for the whole run; empty space is the cheap part.
+        <div key={y} className={y % 2 === 1 ? 'link-row' : undefined}>
+          {row.map((cell, x) => (
+            <span key={x} className={`m-${cell.kind}`}>
+              {cell.ch}
+            </span>
+          ))}
+        </div>
+      ))}
+    </pre>
   )
 }
 

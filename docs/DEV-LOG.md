@@ -57,8 +57,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
 | 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | +2987 / −203 | — | 8 |
-| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 280 (+14) | +2311 / −49 | — | 11 |
-| | | **Total** | **9.0 h** | | **280** | **+20,124 / −750** | **—** | **47** |
+| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 288 (+22) | +2311 / −49 | — | 15 |
+| | | **Total** | **9.0 h** | | **288** | **+20,124 / −750** | **—** | **51** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -66,11 +66,11 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| eye | 15 | 32% |
-| visualiser | 13 | 28% |
-| played it | 5 | 11% |
-| tests | 4 | 9% |
-| test | 4 | 9% |
+| eye | 15 | 29% |
+| visualiser | 13 | 25% |
+| played it | 8 | 16% |
+| test | 5 | 10% |
+| tests | 4 | 8% |
 | mutation check | 3 | 6% |
 | probe | 2 | 4% |
 | tooling | 1 | 2% |
@@ -124,6 +124,10 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-18 | TELL_TEXT is the one piece of prose still living in code (resolve.ts) and no test has ever looked at it: outcomes.test.ts's source-of-truth sweep reads narration, oilChanged and companionLost events, and tell events are not in spokenText. So the seven tell strings have no lit/dark variants, and stench's 'pallid' and freshChisel's 'fresh chisel marks' describe an appearance - which is what 1f's dark-register rule exists to keep out of a lamp-less room. Neither word is in VISION_WORDS, so moving the table alone would not catch them | eye |
 | 2026-09-18 | The menu says 'Move N' and the doorway list six lines above says 'north'. legalActions builds move labels from the compass letter; DIRECTION_WORD exists because, in its own comment, compass letters read badly in a sentence. One line in resolve.ts, left alone because changing an engine-owned label is not a rendering step's call | played it |
 | 2026-09-18 | A test asserting the doorway range restriction failed, and the renderer was right: LISTEN buys the full set of tells back for exactly one turn (GDD 2.8.1), so all four doorways stay reported while the player is choosing what to do with what they paid a turn to learn. The assertion as first written asked the screen to throw that away one beat early | test |
+| 2026-09-18 | The charted map reserved the full 10x10 grid for three charted rooms - correct output, unreadable panel. Fixed with half-height connector rows rather than by cropping to the charted area: cropping would re-frame the map every time exploration reached a new edge, moving every room the player had already placed, which is the opposite of what an orientation aid is for | played it |
+| 2026-09-18 | The roll breakdown rendered '= -3' with a hyphen-minus next to 'Agility -1 . Failing lamp -4' with real minus signs, on the same line. Only visible on a failed roll at low oil, which is a negative total - found by reading a pit death in the log | played it |
+| 2026-09-18 | An arrow key with no legal action behind it fell through to the browser and scrolled the log out from under the player. Direction keys are swallowed whether or not they resolve | played it |
+| 2026-09-18 | A test asserting a direction key never binds SEND PASSED when the guard was deliberately removed - twice. First because the scripted policy never tames so SEND never reaches the menu (the same unreachable-mutation trap as 1f finding 3), then because SEND always co-occurs with a MOVE in the same direction and the MOVE preference hides it anyway. Rebuilt against a hand-built menu, which is what the guard is actually for: the day SEND turns up without its MOVE | test |
 
 <!-- devlog:end -->
 
