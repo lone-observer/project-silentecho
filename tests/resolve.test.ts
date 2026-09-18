@@ -271,8 +271,15 @@ describe('turn order (GDD 2.2.2)', () => {
           found = true
           break
         }
-        const moves = legalActions(state).filter((m) => m.action.kind === 'move')
-        const next = moves[i % Math.max(1, moves.length)]
+        // A MOVE-only walker deadlocks as of 1g: standing in a bloom or a
+        // snare, the menu is that hazard's two verbs and nothing else, so
+        // `moves` comes back empty and the walk stops one room short of
+        // wherever it was going. Falling through to the whole menu is what a
+        // real policy has to do too — noted for 1i's heuristic bot, which
+        // cannot be written as "pick the move that reduces distance".
+        const menu = legalActions(state)
+        const moves = menu.filter((m) => m.action.kind === 'move')
+        const next = moves[i % Math.max(1, moves.length)] ?? menu[i % Math.max(1, menu.length)]
         if (!next) break
         state = act(state, next.action).state
       }
@@ -429,21 +436,34 @@ describe('legalActions (GDD 2.17)', () => {
     expect(kinds.has('fight')).toBe(false)
   })
 
-  it('never offers FORCE, because nothing in the world model is forceable', () => {
-    // Deliberate. FORCE is in GDD 2.7's verb list, but `exits` has no
-    // closed-door state and inventing one would mean geometry changing mid-run,
-    // which GDD 2.9.1 forbids. Carried forward rather than faked — if this ever
-    // starts failing, someone added door state and should say so.
-    for (let seed = 1; seed <= 20; seed++) {
+  it('offers FORCE only against a spore bloom, never as a free verb', () => {
+    // REPLACES 1e's "never offers FORCE, because nothing in the world model is
+    // forceable". That test was right for as long as FORCE had nothing to act
+    // on; 1g gave it a bloom (GDD 2.7), so the claim that needs defending
+    // changed rather than disappeared.
+    //
+    // The old worry is still the live one, just narrowed: FORCE must not become
+    // a door-opener. `Room.exits` has no closed-door state and inventing one
+    // would mean geometry changing mid-run, which GDD 2.9.1 forbids. So the
+    // assertion is that every offer of FORCE comes with the player standing in
+    // a bloom — if it is ever offered in an ordinary room, someone has done
+    // exactly the thing GDD 2.7 rules out.
+    let sawForce = 0
+    for (let seed = 1; seed <= 40; seed++) {
       let state = run(seed)
-      for (let i = 0; i < 8 && state.outcome === 'inProgress'; i++) {
-        expect(legalActions(state).some((m) => m.action.kind === 'force')).toBe(false)
+      for (let i = 0; i < 12 && state.outcome === 'inProgress'; i++) {
         const menu = legalActions(state)
+        if (menu.some((m) => m.action.kind === 'force')) {
+          expect(roomOf(state, state.player.roomId).hazard).toBe('sporeBloom')
+          expect(state.hazardRoomId).toBe(state.player.roomId)
+          sawForce += 1
+        }
         const choice = menu[i % menu.length]
         if (!choice) break
         state = act(state, choice.action).state
       }
     }
+    expect(sawForce, 'FORCE was never offered in 40 seeds — the sweep proves nothing').toBeGreaterThan(0)
   })
 
   it('only offers SEND with a brave companion', () => {
@@ -532,10 +552,26 @@ describe('what the reducer owns that creatures.ts deliberately does not', () => 
         if (!move) break
         const { state: after, events } = act(state, move.action)
         if (events.some((e) => e.kind === 'creatureEncounter')) {
-          expect(after.encounterRoomId).toBe(after.player.roomId)
-          expect(roomOf(after, after.player.roomId).creature).not.toBeNull()
-          bound += 1
-          break
+          // The flag tracks the CREATURE, not the event. Drift runs at step 7
+          // of the same turn and may walk the creature straight back out of
+          // the room, in which case clearing the flag is the correct answer
+          // and not a failure — an encounter with nothing in front of you is
+          // a menu the player cannot act on.
+          //
+          // This assertion used to read `expect(after.encounterRoomId).toBe(
+          // after.player.roomId)` unconditionally, and it passed for two steps
+          // by luck: no seed in the loop happened to drift the creature away on
+          // the turn it was met. 1g changed how many turns an action costs,
+          // which changed where the RNG lands, and one did. The rule was always
+          // conditional; the test just never said so.
+          if (roomOf(after, after.player.roomId).creature !== null) {
+            expect(after.encounterRoomId).toBe(after.player.roomId)
+            bound += 1
+            break
+          }
+          expect(after.encounterRoomId).toBeNull()
+          state = after
+          continue
         }
         expect(after.encounterRoomId).toBeNull()
         state = after

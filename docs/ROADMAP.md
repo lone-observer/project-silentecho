@@ -34,13 +34,16 @@ Types, seeded RNG, dice resolver, engine-isolation guard, empty React shell.
 
 The largest phase. Everything except pictures.
 
-Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · text renderer · agent/sim harness.
+Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · **the hazard verbs (`FORCE`/`ENDURE`/`AVOID`/`DODGE`)** · text renderer · agent/sim harness.
+
+**`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1i**, and until it does, "the sim says" means "a visualiser sweep says".
 
 **The agent interface is a Phase 1 deliverable, built to `docs/EVALS.md` requirements** — pluggable policies, fixed seed sets, full per-turn logging, no state leakage, resumable batches. `npm run sim` is one policy among several. Building it as a one-off script means rebuilding it in week 5.
 
 **Exit criteria**
 - [ ] A full run is playable start to finish in text
-- [ ] Every `(archetype × action × band)` outcome has content; coverage test passes
+- [x] Every `(archetype × action × band)` outcome has content; coverage test passes — 246 authored cells, total over all 576 triples, `DEFERRED_ACTIONS` empty (1f, 1g)
+- [x] Every hazard but the pit offers a verb choice, and every stat has exactly one hazard it cannot answer (GDD §2.8) — 1g
 - [ ] `npm run sim` reports win rate, loss causes, band distribution, tame-vs-fight rate
 - [ ] Agent harness satisfies every requirement in `docs/EVALS.md` — verified by running a `random` policy batch and a `heuristic` batch over the same fixed seed list
 - [ ] `docs/PHASE-1-NOTES.md` written, including the honest weak-points read

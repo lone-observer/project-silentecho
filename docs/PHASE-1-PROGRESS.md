@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 17 Sep 2026, end of step 1f (the outcomes table). Sessions are now one per step — see below.
+**Last updated:** 18 Sep 2026, end of step 1g (the hazard-verb redesign). Sessions are now one per step — see below.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -16,9 +16,14 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1d · creatures | **done** | `src/engine/creatures.ts`, `scripts/tame.ts`, GDD §2.9.1 written |
 | 1e · resolve | **done** | `src/engine/resolve.ts`, `scripts/turn.ts`, both SEND fixes implemented |
 | 1f · outcomes table | **done** | `src/engine/data/outcomes.ts`, `scripts/prose.ts`, `tests/outcomes.test.ts` |
-| 1g · text renderer + agent harness | **next** | built to `docs/EVALS.md` requirements |
+| 1g · hazard-verb redesign | **done** | `src/engine/data/tuning.ts` (`VERB_HAZARDS`, `HAZARD_VERB_OUTCOMES`), `resolve.ts`, `scripts/hazard.ts`, `tests/hazards.test.ts`. Bloom and snare are verb encounters; `FORCE`/`ENDURE`/`AVOID`/`DODGE` are real `ActionKind`s; reward and ambient flask count both measured and set. |
+| 1h · text (classic) renderer | **next** | reads the full event stream against every table above; budget it like 1e/1f, not like 1d, per the cost note above |
+| 1i · agent harness core | queued | `AgentView` adapter + a "can't see through walls" leakage test, the `Policy` interface (with the Fortune-spend hook — see `docs/EVALS.md`), `random` + `heuristic` policies, run-batch infra |
+| 1j · LLM integration + benchmark run | queued | OpenRouter wiring, the fixed prompt (`docs/AGENT-PROMPT.md`), the model roster, scoring/report script, the actual n=100 batches, the human baseline |
 
-239 tests. `npm test`, `npm run typecheck`, both clean.
+**17 Sep, re-split from the old "1g."** Gautham asked to build the hazard-verb redesign next, before the text-renderer-and-agent-harness step that was originally slotted as 1g — and to break that original 1g into session-sized pieces, since it was already flagged (in the cost-per-step note above) as covering more of the engine than one step should. The new 1g is the hazard redesign; the old 1g's scope becomes 1h/1i/1j, split by *what each piece has to hold in context* — text renderer alone, the harness plumbing alone, then the model-facing wiring alone — rather than by file count. This split is a judgement call, not something Gautham has confirmed line-by-line; flag it back if 1h/1i/1j should be cut differently once someone is actually sitting down to open a session for one of them.
+
+266 tests. `npm test`, `npm run typecheck`, both clean.
 
 ## One session per step
 
@@ -44,6 +49,14 @@ The prediction one paragraph up — "1f (one big data table) should be narrow ag
 The reason is the part worth keeping. Cost tracks **how much of the engine a step has to hold in context**, not how much code it produces. Writing prose that must agree with the mechanics means holding the mechanics: `tuning.ts`'s five band tables to know what each band actually does, `resolve.ts` to know where each line is emitted and in what order, `types.ts`, the whole GDD for §2.6's band meanings and §2.8.1's dark-variant rule and §2.17's ending rule, and this file. That is the same ~190k of source and spec 1e needed, for the same reason. Cause 1 from the 1e session ("`resolve.ts` is the module that touches every other module") generalises: **any step whose output must be consistent with the whole engine pays the whole engine's context cost, whether or not it writes code.** Cause 2 (shell heredocs re-injecting whole files) was avoided this session and did not recur; the 6x gap between 1d and 1e was therefore mostly cause 1, not cause 2.
 
 Practical rule for 1g and beyond: **estimate a step's cost from the number of modules its output has to be correct against, not from the number of files it creates.** By that measure 1g — text renderer plus agent harness, both of which read the whole event stream and every one of these tables — should be budgeted like 1e and 1f, not like 1d.
+
+**Fifth measurement, from 1g — and it adds a second cost driver the rule above does not cover.** Step 1g ran **272 assistant turns and 79.8M effective tokens: 293k per turn**, against 1f's 283k and 1e's 270k. Peak context 440k. The split was 98.4% cache reads, 1.3% cache writes, 0.3% output, 544 raw input tokens.
+
+**Per-turn cost barely moved. The turn count moved 41%,** and that is where the extra 25M went. The existing rule — cost tracks how much of the engine a step has to hold at once — predicted the per-turn figure correctly and says nothing about the total, because it is a rule about context *width*.
+
+The new driver is **empirical tuning, which is a loop**. 1g could not pick the reward magnitude by reading a table: it had to write the visualiser, run a sweep, read a number, change one constant, run the sweep again, and do that across two parameters and four difficulties, plus a controlled counterfactual. Each of those is a turn, each turn carries the same ~290k of context, and none of them writes any code. A step that *measures* something costs the width of the engine multiplied by however many times it has to go round.
+
+Practical rule, extending the one above: **estimate context width from the number of modules the output must be correct against, and estimate turn count from whether the step can be reasoned to an answer or has to be measured to one.** 1h (text renderer) is wide but not a loop. 1i and 1j are both — the harness is wide *and* the benchmark is a measurement loop by definition, so budget them above this session rather than at it.
 
 Starting fresh is only cheap because this repo can orient a session that knows nothing. That is what `CLAUDE.md`, `docs/GDD.md` and this file are for — keep them current, and the cost of closing a session stays near zero.
 
@@ -86,6 +99,8 @@ Neither is a toy. Each caught a real defect that tests did not.
 
 **`npm run prose -- [mode]`** — the outcomes table. Four panels. **A** is the coverage matrix and is the cheap one. **B** prints one `(action × archetype)` as six bands with lit above dark, which is the only way to see that six bands read as one sentence rewritten six times — the specific failure mode of authoring 222 cells in a sitting, and one no coverage test can detect. **C** drives a real run and prints every line the engine emitted, in order, tagged with its beat id; ordering defects are invisible in the table and obvious in a transcript. **D** is the lint, and it shares its rules with `tests/outcomes.test.ts` rather than restating them.
 
+**`npm run hazard -- [mode]`** — the hazard verbs. Four panels. **A** is the coverage matrix (which stat each hazard has no answer for) and is the one that would have caught the INT-covers-everything gap this step was designed around. **B** prices every band and attaches the exact d20 odds of reaching it per stat, plus the expected oil value of one attempt — that is where "reward on mixed-or-better pays +1.75 oil per bloom" showed up as a number rather than a hunch. **C** is the ordering panel and it found the Confused defect below. **D** is the oil economy sweep: `SWEEP=n npm run hazard -- oil [difficulty]`, three policies, every figure read off the event stream rather than recomputed from the tables.
+
 **`npm run turn -- <seed> [difficulty] [policy]`** — a whole run driven through `applyAction`, with every turn broken back out into the eight steps of GDD §2.2.2. `SWEEP=n` aggregates. The panel that earns its keep is the one printing each event's **step number**: they must ascend within a turn, so a reducer that ever emits out of order shows it on every turn you look at rather than only in the cases a test enumerated. It also splits "caught" into **which** catch check fired, re-checks replay determinism and JSON round-tripping on every run it prints, and compares a tell-ignoring policy against a fifty-character one that refuses to step toward a draft or a stench.
 
 What they found:
@@ -100,6 +115,12 @@ What they found:
 - **Panel B of `tame.ts` would have kept printing the old, broken brave odds.** It hardcoded `.criticalSuccess`, so the moment 1e moved the gate the visualiser would have gone on reporting 0% for the exact thing the session had just fixed. It now derives the brave bands from `TAME_OUTCOMES`. Worth generalising: **a visualiser that hardcodes the rule it is watching is a visualiser that lies on the day the rule changes**, which is the only day you are looking at it.
 - **Three events the player could not be told about.** `creatureEncounter`, `heartTaken` and `statusChanged` carried no text at all — the reducer emitted a bare event and left the renderer to invent the sentence. That is a text-parity failure (`CLAUDE.md` §2.3) in the direction nobody checks: not a renderer hiding a fact, but the event stream being unable to express one. Taking the Heart is the loudest moment in the game and it said nothing. Found by reading Panel C of `prose.ts`, not by any test — every test passed before and after.
 - **`scripts/turn.ts` identified oil events and catch checks by comparing prose.** It worked until 1f gave every beat a second variant, at which point it would have kept working in the lamplight and silently started mislabelling every oil event in the run the moment the player's lamp got low. Same lesson as Panel B above, one layer down: identity belongs on an id, not on an appearance. Events now carry `NarrationBeat`.
+
+- **A status expired on the turn that applied it.** `scripts/hazard.ts` Panel C, first run. Statuses land at step 3 and are ticked at step 7 of the same turn, once per turn consumed — so a Confused applied by a two-turn `FORCE` was decremented twice and gone before the player read a single suppressed tell. `FORCE`'s one unconditional cost cost nothing at four of six bands; `ENDURE`'s entire margin-shortens-the-duration mechanic did nothing at any band; and a strongSuccess `FORCE` (one turn) left the player blind where a plain success (two turns) did not — **a better roll punished**. Every test passed before and after. The transcript printed `confused for 2 turn(s)` and `confused for 0 turn(s)` back to back, one line apart, which is the entire diagnosis.
+- **The "compile-time guard" on the action list guarded nothing.** `tests/outcomes.test.ts` declared `const ALL_ACTION_KINDS: readonly ActionKind[] = [...]` and then asserted `ActionKind extends (typeof ALL_ACTION_KINDS)[number]`. Annotating the array as `readonly ActionKind[]` makes that index type evaluate to `ActionKind`, so the guard read `ActionKind extends ActionKind` and held no matter what the list contained. Adding three verbs to the union compiled clean against a list naming none of them. Fixed with `as const` plus a second assertion in the other direction. `tests/tuning.test.ts` has the same pattern and the same hole — **left for whoever opens 1h**, noted below.
+- **A MOVE-only walker deadlocks on a hazard.** Two test policies filtered the menu to `move` and stopped when it came back empty, which is now what standing in a bloom looks like. Trivial to fix in a test; the point is that **1i's heuristic bot cannot be written as "pick the move that reduces distance"** — it has to answer hazards, and choosing between two cost models is a real decision rather than plumbing.
+- **A test that passed by luck for two steps.** "binds the encounter to ENTERING a room" asserted unconditionally that a `creatureEncounter` event leaves the flag set. Drift can walk the creature out of the room at step 7 of the same turn, in which case clearing the flag is correct — and 1g changed how many turns an action costs, which moved the RNG, and one seed finally did it. The rule was always conditional; the test just never said so.
+- **A suite that was green or red depending on CPU speed.** `tests/outcomes.test.ts`'s source-of-truth sweep drives hundreds of seeded runs and sits just under vitest's 5s default on a fast desktop, over it on slower hardware. `testTimeout` is now 30s in `vite.config.ts`. A test whose result depends on the machine is not measuring what it claims to.
 
 Build the equivalent tool for each remaining step. It has paid for itself every time.
 
@@ -193,6 +214,90 @@ GDD §2.6 describes Strong Success as "success plus a small gift: a glimpse of t
 **Four of those six need a companion.** Neither policy ever tames anything, which makes the companion system the least-exercised part of the reducer. That is the same encounter-density number from the 1d findings (0.6 per run) turning up for a third time, now as a *test coverage* problem rather than a design one. 1g's heuristic policy should tame deliberately, or a whole subsystem stays unexercised by anything but its own unit tests.
 
 **4. The step-ordering panel was two changes away from lying.** `scripts/turn.ts` identified oil events and catch checks by comparing `event.text` against prose constants. Adding a second variant per beat broke that silently and conditionally — it would have kept working at full oil and started mislabelling every oil event once the lamp got low, which is precisely when you are reading the panel. Events now carry a `NarrationBeat` id and the panel keys off that.
+
+## What 1g landed
+
+- **`src/engine/data/tuning.ts`** — `VERB_HAZARDS`, `VERBS_FOR_HAZARD`, `HAZARD_VERB_STAT`, `HAZARD_VERB_OUTCOMES`. `ENTRY_HAZARDS` is now `['pit']` and nothing else. `HazardOutcome` gained two fields: `statusTurns` (so a status carries the duration whatever applied it, rather than reading one constant) and `rewardFlasks` (the first GAIN that struct has ever carried — until now a hazard could only cost you something). `FightOutcome` gained `rewardFlasks` too.
+- **`src/engine/resolve.ts`** — a hazard encounter, built as the exact mirror of the creature encounter: `GameState.hazardRoomId`, `liveHazardKind`, a branch at the top of `legalActions`, `resolveHazardVerb`, and `meetHazard` splitting arrival into the two shapes. Both arrival paths (`enterRoom` and `resolvePortal`) go through the one helper so they cannot disagree.
+- **`src/engine/data/outcomes.ts`** — 24 new beats, 48 strings: `FORCE`, `ENDURE`, `AVOID`, `DODGE` as subject-led tables, plus `hazardBlocks`, `hazardCleared` and `spoilsTaken`. `HAZARD_NARRATION`'s bloom and snare rows are **deleted** — they described a saving throw that no longer exists, and twelve beats nothing can emit is dead content that `allBeats()` and the lint would have reported forever. `EntryHazard` narrows to `'pit'`.
+- **`scripts/hazard.ts`** — the visualiser, four panels. See "the two tools" above; it is six now.
+- **`tests/hazards.test.ts`** — 27 tests, taking the suite from 239 to 266. **Eleven assertions mutation-checked**, each verified to fail when the named line is deliberately broken: ENTRY_HAZARDS regaining a bloom, the pit gaining a verb, Force's turn cost flattened, Force's top band ceasing to Confuse, Endure cancelling Confused, Endure's turn cost starting to scale, step 3 reverting to the `STATUS` constant, the `appliedThisTurn` guard removed, Endure made loud, the bloom given an AGI answer, and the reward gate moved to an unreachable band.
+- **`vite.config.ts`** — `testTimeout: 30_000`.
+
+### Decisions taken in 1g, all reversible
+
+- **A hazard's menu is the hazard's two verbs and nothing else.** No MOVE, no FLEE. A creature encounter offers a way out because you can slip past a creature; a bloom fills the chamber. This is also what keeps the coverage matrix honest — if a hazard could be walked away from, the "stat with no option" column would cost nothing.
+- **Both options on a hazard share one DC (Easy 8).** The choice is between two COST MODELS, never between an easy option and a hard one; a cheaper roll *as well as* a cheaper price would collapse the decision into one right answer per build. `FORCE` moved from Moderate to Easy — its Moderate was a placeholder for a door-forcing verb that never existed.
+- **The hazard stays in the room after you answer it.** What clears is the encounter, not the world. Terrain never drifts within a run, and a bloom you walked through is still a bloom on the way back.
+- **`FORCE`'s prose was written, and `DEFERRED_ACTIONS` is now empty.** A deviation from the 18 Sep decision, which named only `ENDURE`/`AVOID`/`DODGE` — see the flag below.
+- **A status applied this turn is not ticked this turn.** The fix for the defect above, and a rule rather than a patch: the turns an action spends applying a status are not turns spent under it.
+
+### The one deliberate deviation from the handoff — `FORCE` is narrated
+
+The 18 Sep decision said 1g writes prose for `ENDURE`, `AVOID` and `DODGE`, and that `FORCE` stays in `DEFERRED_ACTIONS`. It was written before anyone had established that 1g would also make `FORCE` *selectable*, which it necessarily does — `FORCE` is one of the bloom's two verbs.
+
+Deferring `FORCE` was only ever defensible on one claim, and `tests/outcomes.test.ts` states it out loud: **a deferred verb must be one the player can never choose.** Honouring the letter of the decision would therefore have meant shipping one of three things — a failing test, a player who shoulders through a spore bloom while the engine says nothing (a text-parity failure, `CLAUDE.md` 2.3), or a verb in the menu that cannot fire. The 18 Sep reasoning for writing prose alongside the mechanic ("freshest in whoever's context while they're building it") applies to `FORCE` identically.
+
+So `FORCE` is written and `DEFERRED_ACTIONS` is `[]`, kept as an empty array rather than deleted so the coverage assertion still forces the next person who adds an `ActionKind` to write its prose or write down why not. **If Gautham wants `FORCE` deferred anyway, the way to do it is to not offer it** — which means cutting `FORCE` from the bloom and leaving blooms to `ENDURE` alone, and that is a design change (STR loses its only hazard answer, and the coverage matrix loses a column), not a content one.
+
+### The empirical read — the oil economy, measured
+
+This is the part 1g was asked to answer rather than guess. Everything below is `SWEEP=300 npm run hazard -- oil <difficulty>`, three policies, every figure read off the event stream rather than recomputed from the tables.
+
+**The per-attempt expectation, at starting stats, in oil** (`npm run hazard -- cost`). Turns are priced at the game's own rate — one oil per `OIL.burnEveryNTurns`. Damage and Confused are reported separately because there is no honest exchange rate between a point of health and a point of oil:
+
+| verb | cost | reward @ mixed+ | net | reward @ strong+ | net | damage | Confused turns |
+|---|---|---|---|---|---|---|---|
+| FORCE | 0.65 | 2.40 | **+1.75** | 0.80 | +0.15 | 0.15 | 2.15 |
+| ENDURE | 0.75 | 2.40 | **+1.65** | 0.80 | +0.05 | 0.15 | 2.20 |
+| AVOID | 0.48 | 2.40 | **+1.92** | 0.80 | +0.33 | 0.15 | — |
+| DODGE | 0.20 | 2.40 | **+2.20** | 0.80 | +0.60 | 0.75 | — |
+
+Paying at the band where a clearing actually happens makes every hazard in the labyrinth an oil farm. That is the finding; the gate moved to strongSuccess-or-better because of it.
+
+**The ambient-flask sweep**, stirring, n=300, forager policy (the only one that searches — a router never picks an ambient flask up at all, so its earned share is 100% at every setting):
+
+| `POPULATION.oilFlasks` | found/run | earned/run | **earned share** | escape % | oil left, runs reaching turn 18+ |
+|---|---|---|---|---|---|
+| 8–12 (was) | 0.47 | 0.22 | 32.0% | 18.7% | 4.83 |
+| 5–8 | 0.31 | 0.23 | 42.5% | 20.0% | 4.77 |
+| **3–5 (is)** | 0.18 | 0.23 | **55.7%** | 20.3% | 4.24 |
+
+Win rate and the shape of the oil budget are flat across the whole range — the cut is free at n=300, and what it changes is where oil comes from, not how much of it there is. 3–5 is the first setting where the economy leans on earned oil, which is what was asked for.
+
+**The final settings, across all four difficulties**, route policy, n=300:
+
+| difficulty | escaped | caught | killed | out of turns | hazards met/run | net oil/run | oil left, 18+ turn runs |
+|---|---|---|---|---|---|---|---|
+| drowsing | 54.7% | 31.3% | 13.7% | 0.3% | 1.10 | 5.08 | 4.45 (n=11) |
+| stirring | 23.3% | 61.0% | 12.0% | 3.7% | 1.61 | 5.08 | 3.51 (n=61) |
+| hunting | 17.0% | 61.0% | 18.0% | 4.0% | 1.16 | 4.53 | 4.08 (n=61) |
+| ravening | 16.7% | 57.0% | 17.7% | 8.7% | 1.05 | 4.28 | 3.84 (n=55) |
+
+### 1g findings
+
+**1. The redesign costs 12.5 points of escape rate, and it costs them in turns.** Measured as a controlled counterfactual: the same seeds and policy with every hazard verb set to zero extra turns and zero reward, against the shipped tables.
+
+| | escaped | caught | out of turns |
+|---|---|---|---|
+| hazard verbs free | 34.0% | 53.5% | 0.5% |
+| as shipped | 21.5% | 61.0% | 5.5% |
+
+The arithmetic is unsurprising once stated: a bloom used to cost one turn (walk in, it resolves itself, walk out was the next turn). It now costs **four** — arrive, answer it over two turns, leave — and a snare costs three. At 1.55 hazards per run that is roughly 2.3 turns off a 20-turn budget, and turns are what the Wumpus eats.
+
+**This is not presented as a problem to fix.** Hazards are supposed to hurt, and before 1g they barely did. It is presented because a 12.5-point swing is a large thing to introduce without anyone writing the number down, and because **it is the real answer to "are hazards net-negative in expectation"** — the oil ledger says +0.15, the turn ledger says −12.5 points of win rate, and the second is the one that decides runs. If the swing reads as too harsh in play, the cheapest lever is `ENDURE`'s flat cost (two turns) before anything structural.
+
+**2. The bloom choice does not measurably matter yet.** The `quiet` policy takes `ENDURE` over `FORCE` on every bloom; `route` takes `FORCE` on every bloom. Across 300 seeds at stirring their outcomes are within noise of each other (23.3% vs 23.3% escaped, 61.0% vs 60.0% caught) and their Confused totals differ by 0.00–0.04 turns per run. `FORCE` is twelve times louder and buys a turn back one time in five; neither shows up.
+
+Two readings and they are not exclusive. One: the difference is real but too small to see against a 60% catch rate driven by everything else — which is an argument for measuring it again once 1i's bot plays well enough that marginal decisions matter. Two: it genuinely is not a choice yet at starting stats, and the lever would be the scent weights rather than the cost models. **Do not act on this before 1i**; a sim result that says "nothing you do matters" usually means the policy, not the game.
+
+**3. `DODGE` was never once chosen, and `ENDURE` only when a policy was written to want it.** The first version of the sweep had one hazard rule — best expected oil — and it picked `FORCE` and `AVOID` 164 times out of 164. That is not a finding about the verbs; it is a finding about the metric. A value function denominated in oil cannot see what `ENDURE` and `DODGE` are for (a shorter Confused, speed over caution), so it proves only that it is an oil-maximising policy while half the mechanic goes unmeasured. The `quiet` policy exists because of this and it is worth carrying into 1i: **the heuristic bot needs a second axis or it will silently benchmark one third of the action space.** (`DODGE` is still unchosen by all three policies, because `AVOID` ties it on scent and beats it on oil.)
+
+**4. A clean run ends at Guttering, not Ember — 1f's dark-prose assumption is off by a band.** 1f chose the Ember threshold for the dark prose register on the reasoning that "a clean 20-turn run ends at Ember", which was arithmetic, not a measurement. Measured, the runs that reach turn 18+ end at **3.5 to 5.2 oil** — the middle of Guttering. So the dark register is rarer than 1f expected, and the last turns of a good run read in the lamplight after all. That is not obviously wrong, but it is not what was decided, and the decision was made on the number.
+
+**6. `npm run sim` has never existed.** `package.json` declares `"sim": "tsx scripts/sim.ts"`; that file is not in the repo and never has been. `CLAUDE.md` §5 tells every session that touches balance to "run `npm run sim` and report the actual number", and `docs/ROADMAP.md`'s Phase 1 exit criteria list its output — both point at a command that errors. Every balance read through 1b–1g has come from a per-step visualiser sweep instead, which is a different and weaker thing: the visualisers read the true map, none of them is the pluggable-policy harness `docs/EVALS.md` specifies, and two of them disagree with the reducer about step 7. **Not fixed here** — the harness is 1i's whole job, and writing a stub `sim.ts` now would make the instruction technically true and substantively worse. Until 1i, read "the sim says" in any of these notes as "a visualiser sweep says".
+
+**5. Oil is not a binding constraint at any difficulty, and the reason is that runs do not last.** Mean net consumption is 4.3–5.1 against a 12-point lamp; 0–2% of runs ever reach Dark; ~40–50% never leave Bright. But mean survival is 10.8–12.6 turns, because 57–64% of runs end with the Wumpus. **Oil is correctly sized for a run that lasts 20 turns and almost no run does.** Any future read of the oil numbers has to say which population it is describing, or it is measuring how early runs end.
 
 ## 1d findings — three real defects, none of them in 1d's own code
 
@@ -324,18 +429,25 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **A sent companion never returns.** `sendCompanion` returns exactly `{ sent, targetRoomId, scent }` and a test asserts that key set, so a `returnChance` field cannot appear quietly.
 - **Terrain never drifts.** Within a run hazards are exactly where generation put them. If a future change makes the world grow mid-run, the "NEVER changes the terrain" test is the one that will stop it.
 - **Hostility lives with the creature, not the room**, so drift carries it.
+- **NEW — the pit has no verbs.** `VERBS_FOR_HAZARD` has no `pit` row and `ENTRY_HAZARDS` is exactly `['pit']`. It is the only instant-loss check in the game and a pit-free route is guaranteed; giving it a verb would make the one absolute thing in the labyrinth negotiable. Tested both ways, including that the reducer refuses a hazard flag set on a pit by hand.
+- **NEW — every verb hazard leaves a stat with no answer.** Bloom is STR/INT, snare is INT/AGI, and the test asserts the specific pairs rather than "some stat is missing somewhere" — which a matrix that walls the same stat out of everything would also satisfy.
+- **NEW — `ENDURE` never cancels Confused.** The floor of one turn is the only thing stopping INT being the safe generalist stat: INT already owns taming, and as first specified it also answered both verb hazards cleanly.
+- **NEW — a hazard roll is an ordinary action roll.** Same `ACTION_DC`/`ACTION_STAT` path, one `RollResult`, no `hazard` field, modifiers assembled in `rollForAction` with everything else. This is what lets 1i's `Policy.spendFortune` pick them up for free; a hazard roll built in its own branch would be invisible to it, and that retrofit is not budgeted.
 
-## Carried forward into 1g
+## Carried forward into 1h / 1i / 1j
 
-1f's own inherited list is done: `NARRATION` is absorbed, `HAZARD_OUTCOMES` has prose, retreat is written rather than placeheld, and every cell has a dark variant. What 1g inherits:
+1g's own inherited list is done: bloom and snare are verb encounters, the four verbs exist and are narrated, the reward and the ambient flask count are both measured and set. What the next sessions inherit — **1g additions are marked NEW**:
 
 - **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so 1g's adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls. **1f makes `AgentView.log` nearly free:** every narration now carries a `NarrationBeat`, so the log is a typed stream rather than strings to be reassembled, and the text renderer and the agent view read the same beats.
 - **The text renderer must not write prose.** Everything it needs is in `data/outcomes.ts`, and `tests/outcomes.test.ts` fails the build if a sentence appears in the engine. The same rule should hold for the renderer: if a line is missing, add a beat, do not inline a string.
-- **Five verbs roll for nothing** — see 1f finding 2. Either the top bands earn a gift or four verbs stop rolling. This is a sim question and it is 1g's.
-- **The hazard DCs are correctness floors, not balance numbers.** Pit at Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it.
+- **Five verbs roll for nothing** — see 1f finding 2. Either the top bands earn a gift or four verbs stop rolling. Deliberately untouched by 1g (it was scoped out of this step); it is 1i/1j's sim to arbitrate. Note that 1g has now built the machinery a gift would use — `rewardFlasks` on an outcome row — so the cheap version of this is a data change rather than a mechanic.
+- **The pit DC is still a correctness floor, not a balance number.** Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it. (The bloom and snare DCs are no longer "hazard DCs" at all: they are the verbs' `ACTION_DC` entries, and 1g measured what they produce.)
 - **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If a 1g sim number contradicts a 1d sweep number, this is the first place to look.
 - **The fight-vs-tame comparison is still stale**, for the reason 1d gave plus the reducer's differing step-7 accounting. Re-measure with 1g's heuristic policy, not with either visualiser.
-- **1g's heuristic policy should tame deliberately.** Four of the six beats no test sweep reaches need a companion, because neither 1f policy ever tames. The companion system is the least-exercised part of the reducer.
+- **1i's heuristic policy must tame AND fight deliberately.** Six of the *seven* beats no test sweep reaches now need a companion or a fight — `spoilsTaken`, 1g's FIGHT oil reward, joined the list the day it was written, because neither sweep policy ever engages a creature. The whole encounter subsystem is verified by nothing but its own unit tests.
+- **NEW — 1i's heuristic bot cannot be "pick the move that reduces distance".** It has to answer hazards, and two of the four verbs are invisible to any value function denominated in oil (1g finding 3). A bot with one axis will silently benchmark a third of the action space at zero. It also needs a second axis to be *measured* against: `scripts/hazard.ts`'s `route` and `quiet` policies are the minimum shape.
+- **NEW — the FIGHT oil reward is the one number in 1g that nothing measured.** `earned driving off a creature` came back 0.00 per run at every difficulty and every setting tried, because no policy fights. Its gate was aligned with the hazard verbs' (strongSuccess+) as the conservative choice, not an observed one. The argument for mixed+ instead is that TAME pays its companion from mixed up, so a FIGHT that pays a band later is worse exactly where most wins happen — and that is the asymmetry the reward was added to correct. Settle it with a bot that fights.
+- **NEW — `tests/tuning.test.ts` has a compile-time guard that guards nothing.** Same bug fixed in `tests/outcomes.test.ts` this session: `const ALL_ACTIONS: readonly ActionKind[] = [...]` makes `(typeof ALL_ACTIONS)[number]` evaluate to `ActionKind`, so the guard reads `ActionKind extends ActionKind` and is vacuously true. Adding three verbs to the union compiled clean against a list naming none of them. One-line fix (`as const`, plus an assertion in the other direction); left undone only to keep 1g's diff to its own subject.
 - **Archetype-specific death beats, together with the epitaph.** GDD §2.17 argues the last line of a run carries more weight than any line inside it, and §2.16's epitaph is the literal last thing a failed run produces. Neither exists yet. Scope them as one piece of work, not two.
 
 ## Not yet decided
@@ -344,14 +456,19 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **Whether the top three bands should earn anything for MOVE, LISTEN, SEARCH, READ, REST, USE and SEND.** GDD §2.6 promises "a small gift" at Strong Success and none of these implement one; USE and SEND do not read the band at all. 1f wrote the prose honestly around this (texture, never claim) rather than papering it. 1g's sim decides whether to add the gifts or stop rolling. See 1f finding 2.
 - **Whether the prose register should shift at Ember or at Dark.** 1f chose Ember, deriving it from `OIL_BANDS[].tellRange` so it moves with the range restriction. The consequence is that a clean 20-turn run ends in the dark register, which reads as the right shape but has not been played.
 - **Whether endings should be archetype-aware**, decided together with the epitaph (GDD §2.16, §2.17).
-- **`FORCE` is resolved — decided in shape, not yet built.** 17 Sep PM session: `FORCE` was never meant for doors or walls, only for bypassing a spore bloom. Bloom and Snare both move from auto-resolving `ENTRY_HAZARDS` to a verb choice, mirroring the Creature encounter — `FORCE`(STR)/`ENDURE`(INT) on blooms, `AVOID`(INT)/`DODGE`(AGI) on snares — deliberately built so every stat has exactly one hazard type it can't touch. See `claude/design-decisions.md`, 17 Sep, for the full reasoning, the Endure-cost-model decision, and the oil-reward addition that rides along with it. **This is a new mechanic, not content — it is not part of 1f.** It needs its own step, scheduled after 1f, not yet slotted into the roadmap.
+- ~~**`FORCE` is resolved — decided in shape, scheduled as step 1g, not yet built.**~~ **Built, 1g.** Kept below for the reasoning. One deviation: `FORCE`'s prose was written and `DEFERRED_ACTIONS` is empty — see "the one deliberate deviation from the handoff" above.
+- **`FORCE` — the original entry.** 17 Sep PM session: `FORCE` was never meant for doors or walls, only for bypassing a spore bloom. Bloom and Snare both move from auto-resolving `ENTRY_HAZARDS` to a verb choice, mirroring the Creature encounter — `FORCE`(STR)/`ENDURE`(INT) on blooms, `AVOID`(INT)/`DODGE`(AGI) on snares — deliberately built so every stat has exactly one hazard type it can't touch. See `claude/design-decisions.md`, 17 Sep, for the full reasoning, the Endure-cost-model decision, and the oil-reward addition that rides along with it. **This is a new mechanic, not content.** **18 Sep, two more gaps closed directly by Gautham before 1g opens:** scent-marker loudness (`FORCE` loud like `FIGHT`; `ENDURE`/`AVOID`/`DODGE` quiet like `SNEAK`/`TAME` — written into GDD §2.10) and prose timing (1g writes the prose itself, unlike `FORCE` in 1f — `ENDURE`/`AVOID`/`DODGE` join `NARRATED_ACTIONS`, not `DEFERRED_ACTIONS`). The reward magnitude and the ambient oil-flask count are deliberately left open for 1g to answer empirically from its own sweep data, not decided in advance — see `claude/design-decisions.md`, 18 Sep.
 - **Whether `SEND` being used in ~0.5% of runs is acceptable.** Unchanged by the above — this is encounter density, not hazard mechanics. The gate is fixed; the rate is now bound by encounter density (0.6 encounters per run), not by anything in the band tables. Raising it means raising encounter frequency, which is the entry two bullets below. Worth settling together: they are the same number.
 - Whether a skittish companion should charge upkeep on the very turn you tame it. It does, twice, because a tame consumes two turns and 1e made step 7 scale with `turnCost`. Defensible, slightly mean, and a one-line change either way.
-- Whether the reducer should spend Fortune at all, or whether every Fortune decision belongs to the renderer (1e assumed the latter; see the 1e decisions).
-- **The hazard-success oil reward's magnitude.** Gated on the 1g sim's oil-burn baseline, same posture as the hazard DCs. When set, converge toward reward-smaller-than-failure-cost so hazards stay net-negative in expectation.
-- **Ambient oil-flask counts (`POPULATION.oilFlasks`), reconsidered alongside the reward above.** Gautham wants the economy leaning more on earning oil through risk than finding it in the open — size the two together, not as separate numbers.
+- ~~Whether the reducer should spend Fortune at all, or whether every Fortune decision belongs to the renderer~~ **Resolved, 17 Sep PM session.** 1e's assumption stands — the reducer never spends Fortune — but `Policy` gets an explicit after-roll spend hook, and it's available to every policy, not just a human renderer: an LLM playing the game needs to be able to spend Fortune too, or `docs/EVALS.md`'s required "Fortune spend rate and timing" metric has nothing to measure for non-human policies. See `docs/EVALS.md`'s Phase 1 requirements section for the interface shape. Scheduled for 1i.
+- ~~**The hazard-success oil reward's magnitude**~~ and ~~**ambient oil-flask counts**~~ **Resolved, 1g, measured.** Reward: one flask at strongSuccess-or-better, for all four hazard verbs and a driven-home FIGHT. Ambient: `POPULATION.oilFlasks` 8–12 → **3–5**. Both sized in one pass against the sweep; full distributions under "the empirical read" above. **One part of the brief could not be met and is flagged rather than fudged:** "reward smaller than the average failure cost" is unsatisfiable while the reward is a whole flask — 4 oil is a third of the lamp and an average hazard failure costs under one oil-equivalent, so the only way to appear to satisfy it was to pick a band nobody reaches. Hazards are net-negative in turns instead, by 12.5 points of escape rate (1g finding 1). If Gautham wants the oil ledger itself negative, the lever is `OIL.flaskValue` or a sub-flask reward unit, and both are bigger changes than 1g's remit.
+- **NEW — whether the redesign's 12.5-point turn cost is the right price.** A bloom went from costing one turn to costing four. Measured, not modelled (1g finding 1). Hazards *should* hurt and before 1g they barely did, so this may simply be correct — but nobody has played it. The cheapest lever if it reads harsh is `ENDURE`'s flat two-turn cost.
+- **NEW — whether the bloom choice is a choice.** `FORCE` and `ENDURE` produce outcomes within noise of each other over 300 seeds (1g finding 2). Either the difference is real and drowned out by a 60% catch rate, or it is not a decision yet at starting stats. Re-measure with 1i's bot before touching the scent weights; "nothing you do matters" from a sim usually indicts the policy.
+- **NEW — whether the dark prose register should move to Guttering.** 1f chose Ember on the arithmetic that a clean 20-turn run ends there. Measured, runs reaching turn 18+ end at 3.5–5.2 oil, which is Guttering (1g finding 4). The decision was made on a number and the number is wrong; the choice may still be right.
+- **NEW — whether oil should bind at all.** 0–2% of runs reach Dark, 40–50% never leave Bright, and the reason is that 57–64% of runs end with the Wumpus around turn 12 (1g finding 5). Oil is sized for a run that lasts and almost none do. Either that is fine — oil is the *dawdling* tax and dawdlers die to the Wumpus first — or the lamp is decorative below Guttering. Needs human play to answer, not a sim.
 - **A genuinely INT-weak trap** (a mimic or fake-treasure-room — forceable by STR, dodgeable by AGI, a real cost for an INT build trusting its read of the room), to fully close the per-stat coverage matrix the hazard redesign above sets up. New content, deferred alongside creature difficulty tiers — not part of the hazard-verb step.
 - **The stone-grub's chew/dig-through-terrain mechanic**, retired from v1 but slated to return. Separate from `FORCE`. Whenever it's built, it will hit the same "terrain never drifts within a run" tension the bloom-spread question above is already parked against — decide the two together, not separately.
+- **A known-path map render — explicitly deferred.** Prompted by a look at a reference game (Wumpin, itch.io) that pairs its text with a force-directed node-graph of discovered rooms. The graph-layout approach is wrong for this game (it's a real grid with real directions, not an arbitrary topology), but a fixed-grid render of *only what's been discovered* is a plausible text-renderer nice-to-have — not now, not for 1.5. Gate it on data: build it only if telemetry shows players or bots actually getting lost. That requires a "lostness" metric that doesn't exist yet — see `docs/OBSERVABILITY.md`.
 - Whether `RUN.maxHeartDistance = 7` is the right *balance* number. It is currently a correctness floor. The sim in 1g answers this.
 - Whether Confused suppressing tells plays tame. The spicier scrambled-tells version is held in reserve (GDD §2.8.2).
 - Whether the Tier 4 turn budget of 18 is enough of a difference from 20.

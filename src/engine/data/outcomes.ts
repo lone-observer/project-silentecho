@@ -222,7 +222,15 @@ export function fill(text: string, slots: Slots = {}): string {
 export const ROOM_LED_ACTIONS = ['move', 'listen', 'search', 'read', 'rest'] as const
 export type RoomLedAction = (typeof ROOM_LED_ACTIONS)[number]
 
-/** The creature, item or portal is the subject. Band-only prose. */
+/**
+ * The creature, hazard, item or portal is the subject. Band-only prose.
+ *
+ * The four hazard verbs joined this list in 1g rather than the room-led one for
+ * the same reason `HAZARD_NARRATION` is not archetype-keyed: the bloom is what
+ * the sentence is about, and generation already biases each hazard toward its
+ * thematic archetype (`ARCHETYPE_FOR_HAZARD`), so an archetype axis here would
+ * mostly restate the hazard in a second voice.
+ */
 export const SUBJECT_LED_ACTIONS = [
   'sneak',
   'fight',
@@ -231,6 +239,10 @@ export const SUBJECT_LED_ACTIONS = [
   'use',
   'send',
   'enterPortal',
+  'force',
+  'endure',
+  'avoid',
+  'dodge',
 ] as const
 export type SubjectLedAction = (typeof SUBJECT_LED_ACTIONS)[number]
 
@@ -240,15 +252,31 @@ export const NARRATED_ACTIONS: readonly ActionKind[] = [
 ]
 
 /**
- * Verbs deliberately left unwritten, with the reason.
+ * Verbs deliberately left unwritten, with the reason. EMPTY as of 1g.
  *
- * FORCE: in GDD 2.7's list, never offered by `legalActions`, and its actual job
- * (bypassing a spore bloom, alongside ENDURE / AVOID / DODGE) is a mechanic
- * scheduled as its own step after 1f. Writing prose for a verb that cannot fire
- * is dead content; leaving it unclassified would let it ship silently. This is
- * the third option: named, justified, and enforced by the coverage test.
+ * It held exactly one member through 1f — FORCE — and the justification was
+ * specific: FORCE was in GDD 2.7's verb list but `legalActions` never offered
+ * it, so writing its prose would have been dead content. The test below turns
+ * that into a claim rather than a comment: **a deferred verb must be one the
+ * player can never choose.**
+ *
+ * 1g made FORCE choosable. The moment it did, the justification expired — and
+ * so, necessarily, did the deferral, because a live verb with no prose is a
+ * text-parity failure (CLAUDE.md 2.3) in the direction nobody checks: the
+ * player shoulders through a spore bloom and the engine says nothing at all.
+ *
+ * The 18 Sep decision that 1g writes prose in the same pass as the mechanic
+ * named only ENDURE, AVOID and DODGE, and said FORCE stays deferred. That was
+ * written before FORCE was known to go live in the same step; its own stated
+ * reason — the mechanic is freshest in whoever's context while they are
+ * building it — applies to all four identically. FORCE is written. Flagged in
+ * PHASE-1-PROGRESS as a deliberate deviation rather than done quietly.
+ *
+ * Kept as an empty array rather than deleted: the coverage assertion it feeds
+ * is what will force the next person who adds an `ActionKind` to either write
+ * its prose or write down why they have not.
  */
-export const DEFERRED_ACTIONS: readonly ActionKind[] = ['force'] as const
+export const DEFERRED_ACTIONS: readonly ActionKind[] = [] as const
 
 export const ARCHETYPES: readonly RoomArchetype[] = [
   'hewnChamber',
@@ -1398,6 +1426,174 @@ const ENTER_PORTAL: ByBand = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// The hazard verbs — GDD 2.8, written in 1g alongside the mechanic
+//
+// Four verbs, two hazards, one decision each. Read the pairs together, because
+// the writing has to carry the difference the tables encode:
+//
+//   FORCE  / ENDURE   answer a spore bloom.  FORCE is loud and buys TIME back
+//                     on a good roll; Confused lands whatever you roll. ENDURE
+//                     is silent, always costs the same two turns, and what a
+//                     good roll buys is a SHORTER Confused — never none.
+//   AVOID  / DODGE    answer a snare-carving. AVOID reads the mechanism before
+//                     it fires and pays in clock when it misreads. DODGE reacts
+//                     after it fires and pays in blood.
+//
+// THE CONSTRAINT THAT SHAPED THESE LINES: `HAZARD_VERB_OUTCOMES` is the truth
+// and the prose may not out-promise it. A FORCE at criticalSuccess is
+// mechanically identical to a FORCE at strongSuccess — same turn, same Confused
+// — so those two lines differ in TEXTURE and never in claim. The same
+// constraint 1f hit on SEARCH and MOVE, in a place where it bites harder,
+// because forcing feels like it ought to scale and it does not.
+//
+// Confused is named by its own beat (`confusedSettles`) and its duration rides
+// on the `statusChanged` event, so these lines do not all have to end in "You
+// are Confused" — which, across twelve bloom cells, is exactly the six-bands-
+// one-sentence failure Panel B of the prose visualiser exists to catch. What
+// they DO carry is the SHAPE of it: the three-turn rows read longer and worse.
+// ---------------------------------------------------------------------------
+
+/**
+ * FORCE — STR, loud, against a spore bloom.
+ *
+ * Confused in every row, at full duration, whatever the die says. The variable
+ * is the clock: two turns, or one from strongSuccess up.
+ */
+const FORCE: ByBand = {
+  criticalFailure: {
+    lit: 'You put your shoulder into a wall of caps and the wall puts itself into you. It is a long time before the sweetness thins enough to tell up from along.',
+    dark: 'You put your shoulder into a wall of caps and the wall puts itself into you. It is a long time before the sweetness thins enough to tell up from along.',
+  },
+  failure: {
+    lit: 'You go in swinging and the bloom goes up around you in a slow gold ruin. The lamp drinks some of it and likes it no better than you do.',
+    dark: 'You go in swinging and the bloom goes up around you, thick and slow against your arms. The lamp drinks some of it and likes it no better than you do.',
+  },
+  mixed: {
+    lit: 'You break a line through it and come out the far side wearing most of what you broke. It takes two turns you did not have, and the air is sweet for a while after.',
+    dark: 'You break a line through it by feel and come out the far side wearing most of what you broke. It takes two turns you did not have, and the air is sweet for a while after.',
+  },
+  success: {
+    lit: 'You go through the {hazard} the short way, which is straight, and it costs what going straight costs: the time, and a head full of sugar.',
+    dark: 'You go through the {hazard} the short way, which is straight, and it costs what going straight costs: the time, and a head full of sugar.',
+  },
+  // From here up, one turn instead of two — and nothing else changes. No line
+  // below may imply a cleaner head than the two above it.
+  strongSuccess: {
+    lit: 'You pick the thin place and drive through it in one movement. Half the time it should have taken; all of the sweetness.',
+    dark: 'You find the thin place with your hands and drive through it in one movement. Half the time it should have taken; all of the sweetness.',
+  },
+  criticalSuccess: {
+    lit: 'You cross it like a man crossing a stream on known stones, fast and without ceremony. The spores get you anyway. They always do.',
+    dark: 'You cross it like a man crossing a stream on known stones, fast and without ceremony. The spores get you anyway. They always do.',
+  },
+}
+
+/**
+ * ENDURE — INT, silent, against a spore bloom.
+ *
+ * The clock is flat in every row: standing through a bloom never gets quicker.
+ * What the die buys is how long the sweetness holds you afterwards, and it
+ * never buys all of it. A clean Endure still walks out of the room impaired —
+ * the deliberate answer to INT otherwise having no weak matchup in the whole
+ * coverage matrix. See `HAZARD_VERB_OUTCOMES`.
+ */
+const ENDURE: ByBand = {
+  criticalFailure: {
+    lit: 'You decide to wait it out and the bloom decides otherwise. It goes off at chest height and you breathe the whole of it, and the whole of it stays.',
+    dark: 'You decide to wait it out and the bloom decides otherwise. It goes off at chest height and you breathe the whole of it, and the whole of it stays.',
+  },
+  failure: {
+    lit: 'Standing still was right and standing there was wrong. You hold your ground in the thick of it, and the thick of it is in you a long while.',
+    dark: 'Standing still was right and standing there was wrong. You hold your ground in the thick of it, and the thick of it is in you a long while.',
+  },
+  mixed: {
+    lit: 'You go still, breathe shallow, and let it happen to you. It happens to you for two turns, and some of it comes along afterwards.',
+    dark: 'You go still, breathe shallow, and let it happen to you. It happens to you for two turns, and some of it comes along afterwards.',
+  },
+  success: {
+    lit: 'You know what it is and what it does, so you stand in it and do neither of the things that would make it worse. It still gets in. Knowing is not a filter.',
+    dark: 'You know what it is and what it does, so you stand in it and do neither of the things that would make it worse. It still gets in. Knowing is not a filter.',
+  },
+  // From here up the sweetness lifts a turn sooner. Never sooner than that.
+  strongSuccess: {
+    lit: 'You breathe against the back of your own hand and count it out, and the count is right. It clears early. Early, not clean.',
+    dark: 'You breathe against the back of your own hand and count it out, and the count is right. It clears early. Early, not clean.',
+  },
+  criticalSuccess: {
+    lit: 'You read the bloom exactly — what it wants, how long it has, when it is spent — and you give it the least of yourself it will accept. It takes that much and no more.',
+    dark: 'You read the bloom exactly — what it wants, how long it has, when it is spent — and you give it the least of yourself it will accept. It takes that much and no more.',
+  },
+}
+
+/**
+ * AVOID — INT, silent, against a snare-carving.
+ *
+ * Reading the mechanism before it triggers. The snare's currency is the clock,
+ * not blood (`HAZARD_VERB_OUTCOMES`), so a misread costs turns and the bottom
+ * of the table costs both.
+ */
+const AVOID: ByBand = {
+  criticalFailure: {
+    lit: 'You read the marks confidently and read them wrong, and step on the exact stone they were cut to warn about. Getting out of it takes everything the next two turns had in them.',
+    dark: 'You read the marks under your fingers confidently and read them wrong, and step on the exact stone they were cut to warn about. Getting out of it takes everything the next two turns had in them.',
+  },
+  failure: {
+    lit: 'You work out what the chisel was for a moment after your foot has already answered the question. Working loose eats the turn.',
+    dark: 'You work out what the chisel was for a moment after your foot has already answered the question. Working loose eats the turn.',
+  },
+  mixed: {
+    lit: 'You find the trigger stone before it finds you, and go round it — round it being past the lamp bracket, which does not survive the manoeuvre.',
+    dark: 'You find the trigger stone before it finds you, and go round it — round it being past a jut of rock that takes the lamp with it as you pass.',
+  },
+  success: {
+    lit: 'The {hazard} is a piece of engineering and you read it as one: here is the plate, here is the arm, here is the part of the floor to be somewhere else than.',
+    dark: 'The {hazard} is a piece of engineering and you read it as one, by hand: here is the plate, here is the arm, here is the part of the floor to be somewhere else than.',
+  },
+  strongSuccess: {
+    lit: 'You follow the fresh cuts back to the hand that made them and walk the line that hand walked, which is the only safe line in the room.',
+    dark: 'You follow the fresh cuts back by touch to the hand that made them and walk the line that hand walked, which is the only safe line in the room.',
+  },
+  criticalSuccess: {
+    lit: 'Whoever set this left themselves a way through and marked it, because they had to come back too. You take their way, unhurried.',
+    dark: 'Whoever set this left themselves a way through and marked it, because they had to come back too. You find the marks and take their way, unhurried.',
+  },
+}
+
+/**
+ * DODGE — AGI, silent, against a snare-carving.
+ *
+ * Answering the snare AFTER it has committed. Faster than reading round it when
+ * it works, and the failures are the only place in either snare column where
+ * the price is paid in blood rather than in clock.
+ */
+const DODGE: ByBand = {
+  criticalFailure: {
+    lit: 'It comes up out of the floor faster than you and takes you somewhere below the knee, hard, twice. You get free of it. You do not get free of it cheaply.',
+    dark: 'It comes up out of the floor faster than you and takes you somewhere below the knee, hard, twice. You get free of it. You do not get free of it cheaply.',
+  },
+  failure: {
+    lit: 'You move the instant it does and it is still the quicker of you. It has a piece before you are out of its reach, and the reach was longer than it had any right to be.',
+    dark: 'You move the instant it does and it is still the quicker of you. It has a piece before you are out of its reach, and the reach was longer than it had any right to be.',
+  },
+  mixed: {
+    lit: 'You throw yourself clear, mostly. The part of you that is not clear when it closes is a small part, and it hurts out of all proportion to its size.',
+    dark: 'You throw yourself clear, mostly. The part of you that is not clear when it closes is a small part, and it hurts out of all proportion to its size.',
+  },
+  success: {
+    lit: 'The floor gives and you are already going the other way. It shuts on the place you were standing a half-beat ago.',
+    dark: 'The floor gives and you are already going the other way. It shuts on the place you were standing a half-beat ago.',
+  },
+  strongSuccess: {
+    lit: 'You feel it start under your heel and go with the start of it instead of against, and it throws you clear of itself. Ungraceful, entirely effective.',
+    dark: 'You feel it start under your heel and go with the start of it instead of against, and it throws you clear of itself. Ungraceful, entirely effective.',
+  },
+  criticalSuccess: {
+    lit: 'It fires and you are not in it, and you are not in it so early that for a moment it is unclear which of you moved first. The {hazard} closes on nothing at all.',
+    dark: 'It fires and you are not in it, and you are not in it so early that for a moment it is unclear which of you moved first. The {hazard} closes on nothing at all.',
+  },
+}
+
 export const SUBJECT_LED_OUTCOMES: Record<SubjectLedAction, ByBand> = {
   sneak: SNEAK,
   fight: FIGHT,
@@ -1406,6 +1602,10 @@ export const SUBJECT_LED_OUTCOMES: Record<SubjectLedAction, ByBand> = {
   use: USE,
   send: SEND,
   enterPortal: ENTER_PORTAL,
+  force: FORCE,
+  endure: ENDURE,
+  avoid: AVOID,
+  dodge: DODGE,
 }
 
 // ---------------------------------------------------------------------------
@@ -1425,7 +1625,17 @@ export const SUBJECT_LED_OUTCOMES: Record<SubjectLedAction, ByBand> = {
 // `ENTRY_HAZARDS`: standing in a portal room does nothing to you.
 // ---------------------------------------------------------------------------
 
-export type EntryHazard = 'pit' | 'sporeBloom' | 'snareCarving'
+/**
+ * Hazards that still resolve themselves the moment you walk in. Pit only.
+ *
+ * Bloom and snare had rows here through 1f, written for a saving throw that no
+ * longer exists: since 1g they offer a verb, and the verb's own prose (FORCE /
+ * ENDURE / AVOID / DODGE in `SUBJECT_LED_OUTCOMES`) is what the player reads.
+ * Keeping the old rows would leave twelve beats that nothing can emit — dead
+ * content that `allBeats()` and the lint would report forever, and that a later
+ * session would eventually "fix" back into the reducer.
+ */
+export type EntryHazard = 'pit'
 
 export const HAZARD_NARRATION: Record<EntryHazard, ByBand> = {
   pit: {
@@ -1452,58 +1662,6 @@ export const HAZARD_NARRATION: Record<EntryHazard, ByBand> = {
     criticalSuccess: {
       lit: 'You were never going to walk into it. You skirt the pit the way you would a hole in a floor you owned.',
       dark: 'You were never going to walk into it. You skirt the pit the way you would a hole in a floor you owned.',
-    },
-  },
-  sporeBloom: {
-    criticalFailure: {
-      lit: 'The bloom goes off in your face and you take the whole of it in. Everything sweetens, and then everything stops arriving. You are Confused.',
-      dark: 'The bloom goes off in your face and you take the whole of it in. Everything sweetens, and then everything stops arriving. You are Confused.',
-    },
-    failure: {
-      lit: 'You get a lungful before you can turn your head. The sweetness crowds out everything else — no tells, for now. You are Confused.',
-      dark: 'You get a lungful before you can turn your head. The sweetness crowds out everything else — no tells, for now. You are Confused.',
-    },
-    mixed: {
-      lit: 'You get your sleeve over your mouth in time. The lamp does not care for the spores and says so.',
-      dark: 'You get your sleeve over your mouth in time. The lamp does not care for the spores and says so.',
-    },
-    success: {
-      lit: 'You hold your breath across it and let it out on the far side. Sweet, and behind you.',
-      dark: 'You hold your breath across it and let it out on the far side. Sweet, and behind you.',
-    },
-    strongSuccess: {
-      lit: 'You take the line where the caps are thinnest and cross without setting one of them off.',
-      dark: 'You take the line where the caps are thinnest, feeling for the gaps, and cross without setting one of them off.',
-    },
-    criticalSuccess: {
-      lit: 'You cross the bloom with your breath held and your feet placed, and it never knows you were in it.',
-      dark: 'You cross the bloom with your breath held and your feet placed, and it never knows you were in it.',
-    },
-  },
-  snareCarving: {
-    criticalFailure: {
-      lit: 'The carving was the trigger. It takes your ankle and holds it, and getting free costs blood and a great deal of the clock.',
-      dark: 'The carving was the trigger. It takes your ankle and holds it, and getting free costs blood and a great deal of the clock.',
-    },
-    failure: {
-      lit: 'It closes on you before you have understood what the fresh chisel marks were for. Working loose eats the turn.',
-      dark: 'It closes on you before you have understood what the fresh chisel marks were for. Working loose eats the turn.',
-    },
-    mixed: {
-      lit: 'You get clear of it, but not before it has had the lamp over. Oil on the stone, and less of it in the reservoir.',
-      dark: 'You get clear of it, but not before it has had the lamp over. Oil on the stone, and less of it in the reservoir.',
-    },
-    success: {
-      lit: 'You spot the mechanism a moment before it spots you, and step over the part of the floor that matters.',
-      dark: 'Your boot finds the raised edge of the mechanism a moment before it finds you, and you step over the part of the floor that matters.',
-    },
-    strongSuccess: {
-      lit: 'You follow the fresh chisel line back to what cut it, which is where the snare is not, and go that way.',
-      dark: 'You follow the fresh chisel line back by hand to what cut it, which is where the snare is not, and go that way.',
-    },
-    criticalSuccess: {
-      lit: 'Whoever set this cut their own marks into the wall to remember it by. You read them, and walk round the whole arrangement.',
-      dark: 'Whoever set this cut their own marks into the wall to remember it by. You read them off with a hand, and walk round the whole arrangement.',
     },
   },
 }
@@ -1648,6 +1806,32 @@ export const NOTES: Record<NoteBeat, Beat> = {
   creatureFound: {
     lit: 'There is a {creature} in here, and it has stopped what it was doing.',
     dark: 'Something in here stops what it was doing. A {creature}, close enough to touch.',
+  },
+  /**
+   * The hazard has the room and will not be walked around. GDD 2.8: bloom and
+   * snare offer a verb, and this is the line that tells the player the menu has
+   * become that choice. It has to read as a WALL rather than as an injury —
+   * nothing has happened to them yet, which is the whole difference between a
+   * verb hazard and a pit.
+   */
+  hazardBlocks: {
+    lit: 'The {hazard} has the room, corner to corner, and there is no edge of it to walk along. Whatever you do about it, you do it here.',
+    dark: 'The {hazard} has the room, corner to corner, and your hands find no edge of it to walk along. Whatever you do about it, you do it here.',
+  },
+  /**
+   * The hazard reward (GDD 2.8). Written to make the flask DIEGETIC rather than
+   * a prize dispensed for a good roll: a bloom grows on what the labyrinth has
+   * already taken, and a snare is set over something worth setting it over. The
+   * player earned it by clearing the room, not by winning a lottery.
+   */
+  hazardCleared: {
+    lit: 'On the far side of the {hazard}, where nobody has had reason to stand in a long time, there is a flask. Somebody else got this far.',
+    dark: 'On the far side of the {hazard}, where nobody has had reason to stand in a long time, your hand finds a flask. Somebody else got this far.',
+  },
+  /** A driven-off creature leaves its scrapings behind. See FightOutcome. */
+  spoilsTaken: {
+    lit: 'The {creature} leaves in a hurry and leaves its hoard with it — a flask among the bones and the bottle caps.',
+    dark: 'The {creature} leaves in a hurry and leaves its hoard with it. You go through it by hand and come up with a flask.',
   },
   /**
    * The loudest thing in the game (`SCENT.heartTaken` = 6) and the escalation

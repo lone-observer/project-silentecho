@@ -104,6 +104,7 @@ import {
   HAZARD_DC,
   HAZARD_OUTCOMES,
   HAZARD_STAT,
+  HAZARD_VERB_OUTCOMES,
   HEART,
   OIL,
   oilBandFor,
@@ -113,11 +114,15 @@ import {
   SCENT,
   SCENT_BY_ACTION,
   STATUS,
+  VERB_HAZARDS,
+  VERBS_FOR_HAZARD,
 } from './data/tuning.ts'
+import type { HazardVerb } from './data/tuning.ts'
 import type { EndingBeat, NoteBeat, Slots } from './data/outcomes.ts'
 import {
   companionLossText,
   endingText,
+  HAZARD_WORD,
   hazardText,
   isDarkProse,
   noteText,
@@ -183,8 +188,9 @@ function note(d: Draft, beat: NoteBeat, slots: Slots = {}): void {
  *
  * `archetypeRoomId` is the room the sentence is ABOUT, which for MOVE is the
  * room you arrived in and not the one you left. Subject-led verbs ignore it.
- * Returns silently for a verb with no prose — today only FORCE, which
- * `legalActions` never offers.
+ * Returns silently for a verb with no prose. As of 1g there are none —
+ * `DEFERRED_ACTIONS` is empty — and `tests/outcomes.test.ts` asserts that the
+ * set of verbs this can return null for is exactly the set no player can choose.
  */
 function narrateOutcome(
   d: Draft,
@@ -252,6 +258,9 @@ const ACTION_LABEL: Record<ActionKind, string> = {
   listen: 'Listen',
   search: 'Search the room',
   force: 'Force',
+  endure: 'Endure',
+  avoid: 'Avoid',
+  dodge: 'Dodge',
   sneak: 'Sneak',
   fight: 'Fight',
   tame: 'Tame',
@@ -309,6 +318,7 @@ export function createRun(seed: number, options: CreateRunOptions = {}): GameSta
     maxTurns: contract.maxTurns,
     outcome: 'inProgress',
     encounterRoomId: null,
+    hazardRoomId: null,
     actionLog: [],
   }
 }
@@ -352,6 +362,26 @@ export function legalActions(state: GameState): LegalAction[] {
   const here = roomOf(labyrinth, player.roomId)
   const out: LegalAction[] = []
   const dcOf = (kind: ActionKind): number => ACTION_DC[kind]
+
+  // A live hazard takes the menu before anything else, and it takes it whole.
+  //
+  // The creature encounter offers a way OUT as well as a way through — SNEAK
+  // past it, FLEE back the way you came — and a hazard deliberately does not.
+  // A bloom fills the chamber and a snare is already under your foot; there is
+  // nothing to slip past. The two verbs are the choice. That is also what keeps
+  // the coverage matrix honest: if a hazard could be walked away from, the
+  // "stat with no option" column would cost nothing.
+  const liveHazard = liveHazardKind(state)
+  if (liveHazard !== null) {
+    for (const verb of VERBS_FOR_HAZARD[liveHazard] ?? []) {
+      out.push({
+        action: { kind: verb },
+        label: `${ACTION_LABEL[verb]} the ${HAZARD_WORD[liveHazard]}`,
+        dc: dcOf(verb),
+      })
+    }
+    return out
+  }
 
   const creature = here.creature
   if (isEncounterLive(state) && creature !== null) {
@@ -404,10 +434,10 @@ export function legalActions(state: GameState): LegalAction[] {
     })
   }
 
-  // FORCE is deliberately absent. It is in GDD 2.7's verb list, but nothing in
-  // the world model is forceable yet — `exits` has no closed-door state, and
-  // inventing one here would mean geometry that changes mid-run, which is
-  // exactly what GDD 2.9.1 forbids. Carried forward rather than faked.
+  // The four hazard verbs are deliberately absent from THIS list. They are not
+  // free actions you may take in an empty room — they answer a hazard you are
+  // standing in, and the branch at the top of this function is the only place
+  // they are ever offered. FORCE in particular is not a door-opener: GDD 2.7.
 
   return out
 }
@@ -416,6 +446,27 @@ function isEncounterLive(state: GameState): boolean {
   if (state.encounterRoomId === null) return false
   if (state.encounterRoomId !== state.player.roomId) return false
   return roomOf(state.labyrinth, state.player.roomId).creature !== null
+}
+
+/**
+ * The unresolved verb-hazard the player is standing in, or null.
+ *
+ * Three conditions, all of them load-bearing, exactly mirroring
+ * `isEncounterLive`: the flag is set, it is set for THIS room, and the room
+ * still holds a hazard that takes verbs. The middle one is what stops a stale
+ * flag from following the player out of the room; the third is what stops a pit
+ * or a portal from ever producing a verb menu.
+ */
+function liveHazardKind(state: GameState): HazardKind | null {
+  if (state.hazardRoomId === null) return null
+  if (state.hazardRoomId !== state.player.roomId) return null
+  const hazard = roomOf(state.labyrinth, state.player.roomId).hazard
+  if (hazard === null || !VERB_HAZARDS.includes(hazard)) return null
+  return hazard
+}
+
+function isHazardVerb(kind: ActionKind): kind is HazardVerb {
+  return kind === 'force' || kind === 'endure' || kind === 'avoid' || kind === 'dodge'
 }
 
 /** Where FLEE goes: back the way you came. Null if you have not moved yet. */
@@ -460,10 +511,13 @@ interface Draft {
   damage: number
   oilDelta: number
   applyStatus: StatusEffect | null
+  /** Turns `applyStatus` lasts. Meaningless while `applyStatus` is null. */
+  applyStatusTurns: number
   turnCost: number
   fatal: boolean
   takesHeart: boolean
   encounterRoomId: RoomId | null
+  hazardRoomId: RoomId | null
   events: GameEvent[]
   /** Carried so every exit path commits the same action and the same RNG position. */
   readonly action: Action
@@ -510,10 +564,12 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     damage: 0,
     oilDelta: 0,
     applyStatus: null,
+    applyStatusTurns: STATUS.confusedTurns,
     turnCost: 1,
     fatal: false,
     takesHeart: false,
     encounterRoomId: state.encounterRoomId,
+    hazardRoomId: state.hazardRoomId,
     events: [],
     action,
     rng,
@@ -562,7 +618,15 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   }
 
   if (d.applyStatus !== null) {
-    const turns = STATUS.confusedTurns
+    // The duration comes from whatever applied it, not from a constant. ENDURE's
+    // entire cost model is that margin shortens Confused rather than the clock
+    // (HAZARD_VERB_OUTCOMES), so a fixed `STATUS.confusedTurns` here would have
+    // quietly thrown away the variable the verb exists to spend.
+    //
+    // It REPLACES rather than adds: a second bloom is a second lungful, not a
+    // stacking debuff, and the player is told a duration they can count on
+    // (GDD 2.8.2 — suppression the player knows the length of).
+    const turns = d.applyStatusTurns
     d.statuses = { ...d.statuses, [d.applyStatus]: turns }
     note(d, 'confusedSettles')
     d.events.push({ kind: 'statusChanged', status: d.applyStatus, turns })
@@ -708,7 +772,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
 
   // Statuses tick here, at the end of the turn, so a status applied this turn
   // is still in force for the tells the player reads before choosing next.
-  d.statuses = tickStatuses(d, d.statuses, d.turnCost, d.events)
+  d.statuses = tickStatuses(d, d.statuses, d.turnCost, d.events, d.applyStatus)
 
   // An encounter survives only while the creature is still standing in the room
   // you are standing in. Drift moving it away ends it; so does leaving.
@@ -751,14 +815,50 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   return commit(state, d, wumpus, outcome, nextTurn, listening, action, rng)
 }
 
+/**
+ * Count the turn's cost off every active status, at step 7.
+ *
+ * `appliedThisTurn` IS NOT AN OPTIMISATION — it is the whole correctness of the
+ * status system, and it was missing until 1g.
+ *
+ * A status lands at step 3 and this runs at step 7 of the SAME turn, once per
+ * turn the action consumed (1e's rule). So a Confused applied by a two-turn
+ * action was immediately decremented twice and expired before the player ever
+ * read a suppressed tell: `scripts/hazard.ts` Panel C showed
+ *
+ *     status   confused for 2 turn(s)
+ *     status   confused for 0 turn(s)
+ *
+ * inside one turn. FORCE's defining cost is that Confused applies whatever you
+ * roll (GDD 2.8), and it was applying for zero turns at every band that costs
+ * two. ENDURE always costs two, so its entire margin-scales-the-duration
+ * mechanic — the thing that stops INT being the free pass through the coverage
+ * matrix — delivered nothing at any band. Worse, a two-turn FORCE came out
+ * clean while a one-turn FORCE left you blind: a better roll was punished.
+ *
+ * The off-by-one predates 1g in miniature. A bloom used to resolve on the MOVE
+ * that entered it, turn cost 1, so `STATUS.confusedTurns = 2` bought one turn
+ * of suppression rather than the two GDD 2.8.2 specifies. Nobody noticed,
+ * because one is not obviously wrong the way zero is.
+ *
+ * The rule now: the turns an action spent APPLYING a status are not turns the
+ * player spent under it. You are in the bloom while it is happening; the
+ * counting starts when you come out. Found by reading a transcript, not by any
+ * test — every test passed before and after.
+ */
 function tickStatuses(
   d: Draft,
   statuses: Partial<Record<StatusEffect, number>>,
   turns: number,
   events: GameEvent[],
+  appliedThisTurn: StatusEffect | null,
 ): Partial<Record<StatusEffect, number>> {
   const next: Partial<Record<StatusEffect, number>> = {}
   for (const key of Object.keys(statuses).sort() as StatusEffect[]) {
+    if (key === appliedThisTurn) {
+      next[key] = statuses[key] ?? 0
+      continue
+    }
     const left = (statuses[key] ?? 0) - turns
     if (left > 0) next[key] = left
     else {
@@ -832,6 +932,12 @@ function applyActionOutcome(
     return
   }
 
+  const liveHazard = liveHazardKind(state)
+  if (liveHazard !== null && isHazardVerb(action.kind)) {
+    resolveHazardVerb(d, action.kind, liveHazard, band)
+    return
+  }
+
   switch (action.kind) {
     case 'move':
     case 'sneak': {
@@ -899,9 +1005,62 @@ function applyActionOutcome(
       return
 
     case 'force':
-      // Not offered; see the note in legalActions.
+    case 'endure':
+    case 'avoid':
+    case 'dodge':
+      // Only reachable with no live hazard, which legalActions forbids — the
+      // exact mirror of the fight/tame/flee case above.
       return
   }
+}
+
+/**
+ * FORCE / ENDURE / AVOID / DODGE — answering a hazard. GDD 2.8, step 1g.
+ *
+ * NOTHING HAZARD-SPECIFIC HAPPENS TO THE ROLL. The band arriving here came out
+ * of `rollForAction` exactly the way a MOVE's or a FIGHT's does: `ACTION_DC`,
+ * `ACTION_STAT`, the oil band, companion modifiers, one `RollResult`. That is
+ * deliberate and it is worth defending — GDD 2.5 spends Fortune *after seeing a
+ * roll*, and 1i's `Policy.spendFortune` hook will be handed whatever the
+ * reducer produced. A hazard roll assembled by hand down here would have been
+ * invisible to it, and retrofitting that later is a cost nobody budgeted for.
+ *
+ * The verb, not the hazard, keys the outcome table: FORCE and ENDURE answer the
+ * same bloom and cost completely different things, which is the entire point of
+ * the redesign.
+ */
+function resolveHazardVerb(
+  d: Draft,
+  verb: HazardVerb,
+  hazard: HazardKind,
+  band: OutcomeBand,
+): void {
+  const out = HAZARD_VERB_OUTCOMES[verb][band]
+
+  // Subject-led: the hazard is what the sentence is about, so the archetype is
+  // ignored by the lookup and the room id is passed only to satisfy it.
+  narrateOutcome(d, verb, band, d.playerRoomId, { hazard })
+
+  d.damage += out.damage
+  d.oilDelta -= out.oilLoss
+  d.turnCost += out.extraTurns
+  if (out.applies !== null) {
+    d.applyStatus = out.applies
+    d.applyStatusTurns = out.statusTurns
+  }
+
+  if (out.rewardFlasks > 0) {
+    for (let i = 0; i < out.rewardFlasks; i++) d.inventory = [...d.inventory, 'oilFlask']
+    note(d, 'hazardCleared', { hazard })
+  }
+
+  // The hazard is ANSWERED, not removed. `Room.hazard` stays exactly where
+  // generation put it — terrain never drifts within a run (GDD 2.9.1), and a
+  // bloom you walked through is still a bloom to whoever comes back this way,
+  // including you. What clears is the encounter, not the world.
+  d.hazardRoomId = null
+
+  pushPlayerScent(d, verb, band)
 }
 
 /**
@@ -942,13 +1101,38 @@ function enterRoom(
     d.events.push({ kind: 'creatureEncounter', creature: arrived.creature })
   }
 
-  if (arrived.hazard !== null && ENTRY_HAZARDS.includes(arrived.hazard)) {
-    resolveHazard(d, arrived.hazard, rng)
-  }
+  meetHazard(d, arrived.hazard, rng)
 }
 
 /**
- * The saving throw a hazard demands on entry.
+ * What happens when you cross a threshold into something dangerous.
+ *
+ * Two shapes, and which one a hazard gets is the whole of the 1g redesign:
+ *
+ *   ENTRY_HAZARDS  resolve themselves, right now, on a stat you did not pick.
+ *                  The pit, and only the pit. It is absolute by design.
+ *   VERB_HAZARDS   open a choice. The flag goes up, the turn ends, and next
+ *                  turn the menu is that hazard's two verbs and nothing else.
+ *
+ * The flag rather than an immediate resolution is what makes it a decision: a
+ * choice offered and resolved inside one call is not a choice the player ever
+ * saw. It costs a turn to answer a bloom, and it should.
+ */
+function meetHazard(d: Draft, hazard: HazardKind | null, rng: Rng): void {
+  if (hazard === null) return
+  if (ENTRY_HAZARDS.includes(hazard)) {
+    resolveHazard(d, hazard, rng)
+    return
+  }
+  if (VERB_HAZARDS.includes(hazard)) {
+    d.hazardRoomId = d.playerRoomId
+    note(d, 'hazardBlocks', { hazard })
+  }
+  // Anything else — a portal — does nothing to you for standing in it.
+}
+
+/**
+ * The saving throw an ENTRY hazard demands on entry. Pits, now, and only pits.
  *
  * Rolled separately from the MOVE that brought you here: the move's band says
  * how loudly you arrived, the hazard's says whether you survive it. Folding the
@@ -982,7 +1166,10 @@ function resolveHazard(d: Draft, hazard: HazardKind, rng: Rng): void {
   d.damage += out.damage
   d.oilDelta -= out.oilLoss
   d.turnCost += out.extraTurns
-  if (out.applies !== null) d.applyStatus = out.applies
+  if (out.applies !== null) {
+    d.applyStatus = out.applies
+    d.applyStatusTurns = out.statusTurns
+  }
 }
 
 function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
@@ -1053,6 +1240,15 @@ function resolveEncounterAction(
   d.turnCost = result.turnCost
   d.damage += result.damage
   d.pendingScent.push({ roomId, amount: result.scent, fromPlayer: true })
+
+  // What you drove off was carrying something. GDD 2.8's hazard-reward pass
+  // covers a successful FIGHT for the same reason it covers the hazard verbs:
+  // a cleared room pays, and FIGHT is the only encounter option that clears one
+  // without already paying you a companion.
+  if (result.rewardFlasks > 0) {
+    for (let i = 0; i < result.rewardFlasks; i++) d.inventory = [...d.inventory, 'oilFlask']
+    note(d, 'spoilsTaken', { creature })
+  }
 
   // Subject-led: the creature is what the sentence is about, so the archetype
   // is ignored by the lookup and `roomId` is passed only to satisfy it. The
@@ -1207,9 +1403,10 @@ function resolvePortal(d: Draft, band: OutcomeBand, rng: Rng): void {
     note(d, 'creatureFound', { creature: arrived.creature })
     d.events.push({ kind: 'creatureEncounter', creature: arrived.creature })
   }
-  if (arrived.hazard !== null && ENTRY_HAZARDS.includes(arrived.hazard)) {
-    resolveHazard(d, arrived.hazard, rng)
-  }
+  // Same helper as `enterRoom`, so surfacing into a bloom raises the choice
+  // rather than silently skipping it — the two arrival paths must not disagree
+  // about what a hazard does to you.
+  meetHazard(d, arrived.hazard, rng)
 }
 
 function pushPlayerScent(d: Draft, kind: ActionKind, band: OutcomeBand): void {
@@ -1279,6 +1476,7 @@ function commit(
     turn,
     outcome: finalOutcome,
     encounterRoomId: d.encounterRoomId,
+    hazardRoomId: d.hazardRoomId,
     actionLog: [...state.actionLog, action],
   }
 

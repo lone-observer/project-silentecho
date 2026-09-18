@@ -249,7 +249,24 @@ export type Action =
   | { readonly kind: 'move'; readonly direction: Direction }
   | { readonly kind: 'listen' }
   | { readonly kind: 'search' }
-  | { readonly kind: 'force'; readonly direction: Direction }
+  /**
+   * The four hazard verbs. GDD 2.8: every hazard but the pit offers a choice,
+   * the same shape as the creature encounter, built so each stat has exactly
+   * one hazard type it cannot answer.
+   *
+   *   spore bloom   FORCE (STR)  ·  ENDURE (INT)   — AGI has no option
+   *   snare-carving AVOID (INT)  ·  DODGE  (AGI)   — STR has no option
+   *   pit           none, absolute by design
+   *
+   * FORCE carries no direction. It cuts through the bloom you are standing in,
+   * not through a wall — `Room.exits` has no closed-door state and inventing
+   * one would mean geometry that changes mid-run, which GDD 2.9.1 forbids. See
+   * GDD 2.7's "What FORCE is and isn't for".
+   */
+  | { readonly kind: 'force' }
+  | { readonly kind: 'endure' }
+  | { readonly kind: 'avoid' }
+  | { readonly kind: 'dodge' }
   | { readonly kind: 'sneak'; readonly direction: Direction }
   | { readonly kind: 'fight' }
   | { readonly kind: 'tame' }
@@ -294,6 +311,23 @@ export interface GameState {
    * they never took. It is an intrusion, not an ambush.
    */
   readonly encounterRoomId: RoomId | null
+  /**
+   * The room an unresolved HAZARD encounter is bound to, or null.
+   *
+   * The exact mirror of `encounterRoomId`, one room-feature over. Set when the
+   * player enters a room holding a bloom or a snare (GDD 2.8's verb hazards),
+   * cleared the moment they Force / Endure / Avoid / Dodge their way out of it.
+   * While it is set the menu IS the hazard: `legalActions` returns that
+   * hazard's two verbs and nothing else, because a bloom fills the room and
+   * there is no slipping past it the way there is past a creature.
+   *
+   * A pit never sets this. It has no options, by design, and still resolves the
+   * instant you walk in (`ENTRY_HAZARDS`).
+   *
+   * Generation puts at most one feature in a room, so this and
+   * `encounterRoomId` can never both be live.
+   */
+  readonly hazardRoomId: RoomId | null
   /** Every action taken, in order. With the seed, this replays the run exactly. */
   readonly actionLog: readonly Action[]
 }
@@ -344,6 +378,9 @@ export type NarrationBeat =
   | 'braveOverride'
   | 'creatureWanders'
   | 'creatureFound'
+  | 'hazardBlocks'
+  | 'hazardCleared'
+  | 'spoilsTaken'
   | 'heartTaken'
   | 'wumpusEscalates'
   | 'confusedSettles'

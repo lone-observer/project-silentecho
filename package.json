@@ -17,6 +17,7 @@
     "tame": "tsx scripts/tame.ts",
     "turn": "tsx scripts/turn.ts",
     "prose": "tsx scripts/prose.ts",
+    "hazard": "tsx scripts/hazard.ts",
     "devlog": "tsx scripts/devlog.ts"
   },
   "dependencies": {

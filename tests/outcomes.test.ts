@@ -71,10 +71,29 @@ import {
   visionWordsIn,
 } from '../src/engine/data/outcomes.ts'
 
-const ALL_ACTION_KINDS: readonly ActionKind[] = [
-  'move', 'listen', 'search', 'force', 'sneak', 'fight', 'tame',
-  'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
-]
+/**
+ * Every ActionKind, written out.
+ *
+ * `as const` and NOT `: readonly ActionKind[]`, which is what it carried until
+ * 1g and which quietly disarmed the guard below: annotating the array as
+ * `readonly ActionKind[]` makes `(typeof ALL_ACTION_KINDS)[number]` evaluate to
+ * `ActionKind` itself, so `ActionKind extends ActionKind` held no matter what
+ * the list actually contained. Adding `endure`, `avoid` and `dodge` to the
+ * union compiled clean against a list that named none of them. Inferred, the
+ * guard bites.
+ */
+const ALL_ACTION_KINDS = [
+  'move', 'listen', 'search', 'force', 'endure', 'avoid', 'dodge', 'sneak',
+  'fight', 'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
+] as const
+
+// Compile-time guard, in both directions: every ActionKind is listed, and
+// nothing is listed that is not an ActionKind.
+type _KindsCovered = ActionKind extends (typeof ALL_ACTION_KINDS)[number] ? true : never
+const _kindsCovered: _KindsCovered = true
+void _kindsCovered
+const _kindsReal: readonly ActionKind[] = ALL_ACTION_KINDS
+void _kindsReal
 
 const DIFFICULTIES: readonly Difficulty[] = ['drowsing', 'stirring', 'hunting', 'ravening']
 
@@ -163,7 +182,11 @@ describe('coverage — the lookup is total', () => {
     }
     expect(holes).toEqual([])
     expect(cells).toBe(ARCHETYPES.length * NARRATED_ACTIONS.length * BAND_ORDER.length)
-    expect(cells).toBe(432)
+    // 6 archetypes x 16 narrated verbs x 6 bands. Was 432 through 1f, when 12
+    // of the 13 verbs were narrated and FORCE was deferred. 1g adds ENDURE,
+    // AVOID and DODGE to the union and writes FORCE, so all 16 are narrated and
+    // DEFERRED_ACTIONS is empty.
+    expect(cells).toBe(576)
   })
 
   it('covers every entry hazard, band by band', () => {
@@ -458,27 +481,39 @@ describe('use — the reducer speaks only from the table', () => {
       }
     }
 
-    // The six beats neither policy reaches, and why. Each is a line no
-    // automated check protects — if you add one to this list, you are saying
-    // out loud that it is unverified.
+    // The beats neither policy reaches, and why. Each is a line no automated
+    // check protects — if you add one to this list, you are saying out loud
+    // that it is unverified.
     //
-    //   grellhoundGrowls/Reveals  needs a tamed grellhound ALIVE next to the
-    //                             Wumpus, or adjacent to a hazard
-    //   goblinScrounges           needs a tamed goblin and a 10% roll
-    //   skittishUpkeep            needs a mixed-success tame
-    //   braveOverride             a natural 20 on a tame that also succeeds
-    //   actionUnavailable         only an agent asking for something illegal
+    //   grellhoundGrowls  needs a tamed grellhound ALIVE within radius 2 of
+    //                     the Wumpus
+    //   goblinScrounges   needs a tamed goblin and a 10% roll
+    //   braveOverride     a natural 20 on a tame that also succeeds
+    //   actionUnavailable only an agent asking for something illegal
     //
-    // FOUR OF THE SIX NEED A COMPANION, which neither of these policies ever
-    // tames. That is the observation worth carrying to 1g: the companion system
-    // is the least-exercised part of the reducer, and its prose is currently
-    // verified by nothing but the table-shape assertions above.
+    // THREE OF THE FOUR STILL NEED A COMPANION, and neither policy ever tames
+    // deliberately. The companion system remains the least-exercised part of
+    // the reducer — carried to 1i, whose heuristic bot should tame on purpose.
+    //
+    // WAS SIX BEATS, IS NOW FOUR, and nobody aimed at either of the two that
+    // came off. Making bloom and snare cost a verb changed what these policies
+    // spend a turn on, which changed where the RNG stream lands, which got a
+    // grellhound and a skittish companion tamed somewhere in the 320 runs.
+    // `grellhoundReveals` and `skittishUpkeep` are now genuinely exercised.
+    //
+    // That is the ledger doing exactly its job: coverage here is stated rather
+    // than assumed, so a change three modules away that silently improved it
+    // showed up as a failing test instead of as nothing at all. Note also which
+    // direction it moved — an incidental RNG shift can take a beat OFF this
+    // list as easily as it could have put one on, and only one of those two
+    // gets noticed if the list is not asserted in both directions.
     const unreached: NarrationBeat[] = [
       'grellhoundGrowls',
       'grellhoundReveals',
       'goblinScrounges',
       'skittishUpkeep',
       'braveOverride',
+      'spoilsTaken',
       'actionUnavailable',
     ]
     for (const beat of unreached) {
@@ -489,7 +524,7 @@ describe('use — the reducer speaks only from the table', () => {
     }
     // Everything else the sweep does see is genuinely covered by the
     // source-of-truth assertion above.
-    expect(observed.size).toBeGreaterThanOrEqual(20)
+    expect(observed.size).toBeGreaterThanOrEqual(25)
   })
 
   it('never ships an unsubstituted slot to the player', () => {

@@ -55,8 +55,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 3 | 2026-09-17 | Docs and hygiene | — | docs | 118 → 118 | — | — | — |
 | 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | +2631 / −59 | — | 7 |
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
-| 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | — | — | 6 |
-| | | **Total** | **6.0 h** | | **239** | **+9,617 / −185** | **—** | **28** |
+| 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
+| | | **Total** | **6.0 h** | | **239** | **+13,438 / −365** | **—** | **28** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 

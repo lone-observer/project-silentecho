@@ -167,7 +167,68 @@ export const STATUS = {
  * invariant exists and why a portal — which relocates rather than harms — is not
  * one of these.
  */
-export const ENTRY_HAZARDS: readonly HazardKind[] = ['pit', 'sporeBloom', 'snareCarving'] as const
+export const ENTRY_HAZARDS: readonly HazardKind[] = ['pit'] as const
+
+/**
+ * Hazards that open a VERB CHOICE instead of resolving themselves.
+ *
+ * GDD 2.8, built in step 1g. Bloom and snare used to sit in `ENTRY_HAZARDS`
+ * alongside the pit: one fixed stat, one roll, no decision, the moment you
+ * crossed the threshold. They now dispatch through `legalActions` exactly the
+ * way a creature encounter does, and the coverage matrix is the point —
+ *
+ *   | hazard  | options                | covers        | no option |
+ *   | creature| FIGHT / TAME / SNEAK   | STR, INT, AGI | —         |
+ *   | bloom   | FORCE / ENDURE         | STR, INT      | AGI       |
+ *   | snare   | AVOID / DODGE          | INT, AGI      | STR       |
+ *   | pit     | none                   | —             | all       |
+ *
+ * — so that every build has a hazard type it is weak against and no single
+ * stat is a free pass through the whole labyrinth.
+ *
+ * THE PIT IS NOT HERE, and that is the design rather than an omission: it is
+ * the only instant-loss check in the game, a pit-free route to the Heart is
+ * guaranteed at every difficulty (CLAUDE.md 3), and giving it a verb would make
+ * the one absolute thing in the labyrinth negotiable.
+ *
+ * PORTALS ARE ABSENT FROM BOTH LISTS on purpose. Standing in a portal room does
+ * nothing to you; ENTER PORTAL is a choice and its roll is ACTION_DC.enterPortal.
+ */
+export const VERB_HAZARDS: readonly HazardKind[] = ['sporeBloom', 'snareCarving'] as const
+
+/** An action that answers a hazard. GDD 2.7, 2.8. */
+export type HazardVerb = 'force' | 'endure' | 'avoid' | 'dodge'
+
+export const HAZARD_VERBS: readonly HazardVerb[] = ['force', 'endure', 'avoid', 'dodge'] as const
+
+/**
+ * Which verbs each hazard offers, in menu order.
+ *
+ * This table IS the coverage matrix above. `legalActions` reads it rather than
+ * branching on the hazard kind, so adding a hazard type means adding a row here
+ * and nowhere else — and `HAZARD_VERB_STAT` below is what makes the "stat with
+ * no option" column true rather than aspirational.
+ */
+export const VERBS_FOR_HAZARD: Partial<Record<HazardKind, readonly HazardVerb[]>> = {
+  sporeBloom: ['force', 'endure'],
+  snareCarving: ['avoid', 'dodge'],
+}
+
+/**
+ * The stat each hazard verb tests.
+ *
+ * MUST agree with `ACTION_STAT` below; `tests/tuning.test.ts` asserts it, for
+ * the same reason `ACTION_STAT` is asserted against `ENCOUNTER_STAT` in
+ * creatures.ts — two tables describing one fact is exactly the drift CLAUDE.md
+ * 2.4 warns about. This one exists so the coverage matrix can be checked as
+ * data instead of by reading a comment.
+ */
+export const HAZARD_VERB_STAT: Record<HazardVerb, StatKey> = {
+  force: 'str', //  shoulder through it
+  endure: 'int', // know what it is doing to you and stand there anyway
+  avoid: 'int', //  read the mechanism before it triggers
+  dodge: 'agi', //  wriggle free after it does
+}
 
 export const HAZARD_DC: Partial<Record<HazardKind, number>> = {
   // Easy, not Moderate. A pit is the only instant-loss check in the game, a
@@ -177,14 +238,14 @@ export const HAZARD_DC: Partial<Record<HazardKind, number>> = {
   // that is the right BALANCE number is for 1g's sim; it is a defensible
   // correctness floor until something measures it.
   pit: DC.easy,
-  sporeBloom: DC.easy,
-  snareCarving: DC.easy,
+  // Bloom and snare are deliberately absent since 1g: they no longer roll a
+  // save on entry, they offer a verb, and a verb's DC lives in ACTION_DC with
+  // every other verb's. Leaving a second, unused difficulty for them here is
+  // how the two would drift apart the first time one was tuned.
 }
 
 export const HAZARD_STAT: Partial<Record<HazardKind, StatKey>> = {
-  pit: 'agi', //          dodging the lip
-  sporeBloom: 'agi', //   holding your breath through it
-  snareCarving: 'int', // spotting it before it closes
+  pit: 'agi', // dodging the lip. The only hazard that still tests a stat you did not choose.
 }
 
 /**
@@ -204,34 +265,153 @@ export interface HazardOutcome {
   readonly oilLoss: number
   readonly extraTurns: number
   readonly applies: StatusEffect | null
+  /**
+   * Turns the status in `applies` lasts. Read ONLY when `applies` is non-null.
+   *
+   * A per-band duration rather than the single `STATUS.confusedTurns` constant
+   * because ENDURE's whole cost model is that margin shortens Confused instead
+   * of shortening the clock — the variable Force spends on turns, Endure spends
+   * here. `STATUS.confusedTurns` remains the baseline these rows are written
+   * against, not a value any of them has to equal.
+   */
+  readonly statusTurns: number
+  /**
+   * Oil flasks paid out for clearing the hazard. GDD 2.8.
+   *
+   * The first GAIN this struct has ever carried — until 1g a HazardOutcome
+   * could only ever cost you something. Flasks, not raw oil, so the reward
+   * behaves exactly like ambient loot and the player still chooses when to
+   * spend it; `OIL.flaskValue` is what one is worth.
+   *
+   * PAYS AT strongSuccess AND ABOVE, AND NOWHERE ELSE. Measured, not guessed —
+   * `npm run hazard -- cost` and `SWEEP=300 npm run hazard -- oil`; the full
+   * distribution is in PHASE-1-PROGRESS's 1g notes.
+   *
+   * The first pass paid at mixed-or-better, which is the band a clearing
+   * happens at. At starting stats that is a 60% chance of four oil against an
+   * expected cost of 0.65 — **+1.75 oil per bloom walked into**, which turns
+   * every hazard in the labyrinth into an oil farm and inverts the thing it was
+   * supposed to be. Narrowing to strongSuccess+ takes that to +0.15, and
+   * one-in-five at stat 8 rising to nearly one-in-two at 18 keeps it a
+   * progression curve rather than a lottery.
+   *
+   * WHY NOT criticalSuccess ONLY, which would make the oil ledger unambiguously
+   * negative: it is 0% at starting stats. That is the exact shape of the bug
+   * the 1d sweep found in `TAME_OUTCOMES.brave` — a gate that reads as a rare
+   * reward and is arithmetically unreachable, so the mechanic never fires and
+   * nobody notices for three steps. Not making that mistake twice.
+   *
+   * WHAT THE NUMBERS COULD NOT SATISFY, stated plainly rather than fudged: GDD
+   * 2.8 asks for the reward to be smaller than the average failure cost. A
+   * flask is `OIL.flaskValue` = 4, a third of the lamp; the average failure
+   * here costs well under one oil-equivalent. NO reachable probability makes
+   * four smaller than that, so the constraint as written is unsatisfiable while
+   * the reward is a whole flask, and pretending otherwise would have meant
+   * quietly choosing an unreachable band. What IS true, and is the thing the
+   * constraint was reaching for, is that hazards are heavily net-negative in
+   * the currency that decides runs: turns. Making the verbs free was measured
+   * at +12.5 points of escape rate. See PHASE-1-PROGRESS.
+   */
+  readonly rewardFlasks: number
 }
 
+/**
+ * What a hazard does to you on ENTRY, band by band — pits only, now.
+ *
+ * MECHANICS ONLY; the prose lives in data/outcomes.ts (`HAZARD_NARRATION`),
+ * keyed by the same bands. The two tables must agree: a pit at `failure` is
+ * fatal here, so the failure line there has to end the run.
+ */
 export const HAZARD_OUTCOMES: Partial<Record<HazardKind, Record<OutcomeBand, HazardOutcome>>> = {
   pit: {
-    criticalFailure: { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    failure:         { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    criticalFailure: { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    failure:         { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
     // The signature band, at its most literal: you caught the lip. It cost you
     // a point of health and the lamp gutters.
-    mixed:           { fatal: false, damage: 1, oilLoss: 2, extraTurns: 0, applies: null },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+    mixed:           { fatal: false, damage: 1, oilLoss: 2, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    // A pit pays NOTHING for being survived, at any band, and that is the point
+    // of it. There is nothing in the hole to earn: you did not beat it, you
+    // failed to fall in. Every other hazard can be cleared and rewards it.
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
   },
-  sporeBloom: {
-    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 0, applies: 'confused' },
-    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused' },
-    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+}
+
+/**
+ * What each hazard VERB costs and earns, band by band. GDD 2.8, step 1g.
+ *
+ * Read the two bloom rows together — they are one decision, written twice:
+ *
+ *   FORCE  loud, STR. Confused ALWAYS applies, at full duration, whatever you
+ *          roll. What margin buys is TIME: two turns, or one on a strong
+ *          success. You pay in blindness for the chance to pay less in clock.
+ *   ENDURE quiet, INT. Time is FLAT at two turns — standing through a bloom
+ *          never gets faster. What margin buys is the Confused duration, and it
+ *          never reaches zero. INT answers a bloom; it never walks out clean.
+ *
+ * That floor of 1 is deliberate and it is the whole reason this table is shaped
+ * this way. As first specified, INT covered Creature (Tame), Bloom (Endure) and
+ * Snare (Avoid) — full coverage, no weak matchup, while STR and AGI were each
+ * walled out of a hazard, and INT already owns taming, the game's central
+ * mechanic. Letting a clean Endure cancel Confused outright would have made INT
+ * the safe generalist stat. Shortening it instead keeps the answer real and the
+ * cost real. See claude/design-decisions.md, 17 Sep 2026.
+ *
+ * And the snare rows, which are a cleaner split because nothing lingers:
+ *
+ *   AVOID  INT. You see it coming, so failure means it still closes on you and
+ *          eats the clock — the snare's own currency (it delays, it does not
+ *          kill).
+ *   DODGE  AGI. You react after it triggers, so failure costs blood as well as
+ *          time, and success is faster than reading your way round it.
+ *
+ * `extraTurns` is ON TOP of the action's base cost of 1.
+ */
+export const HAZARD_VERB_OUTCOMES: Record<HazardVerb, Record<OutcomeBand, HazardOutcome>> = {
+  // ---- spore bloom -------------------------------------------------------
+  force: {
+    // Two turns and a lungful, plus the bloom takes a piece of you on the way.
+    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
+    failure:         { fatal: false, damage: 0, oilLoss: 1, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    // Cleared, and it cost you nothing but the time — but no flask. The reward
+    // gate sits a band higher than the clearing does, deliberately; see
+    // HazardOutcome.rewardFlasks.
+    mixed:           { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    // GDD 2.8: "margin sets how many turns it costs (2, or 1 on a strong
+    // success)". This row and the one below it ARE that sentence.
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused', statusTurns: 2, rewardFlasks: 1 },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused', statusTurns: 2, rewardFlasks: 1 },
   },
-  snareCarving: {
-    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 2, applies: null },
-    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: null },
-    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null },
+  endure: {
+    // extraTurns is 1 in EVERY row: flat, by design. Enduring never buys clock.
+    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
+    failure:         { fatal: false, damage: 0, oilLoss: 1, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
+    mixed:           { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    // The floor. Never 0 — see the header.
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 1, rewardFlasks: 1 },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 1, rewardFlasks: 1 },
+  },
+  // ---- snare-carving -----------------------------------------------------
+  avoid: {
+    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 2, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
+  },
+  dodge: {
+    // You are already in it when you start reacting, so the bottom costs blood
+    // where AVOID's only costs time.
+    criticalFailure: { fatal: false, damage: 2, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    failure:         { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    mixed:           { fatal: false, damage: 1, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
+    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
   },
 }
 
@@ -264,7 +444,23 @@ export const ACTION_DC: Record<ActionKind, number> = {
   move: DC.trivial,
   listen: DC.trivial,
   search: DC.easy,
-  force: DC.moderate,
+  // The four hazard verbs all sit at Easy, and they sit at the SAME Easy.
+  //
+  // Easy because that is where the hazard saves they replace already sat, for
+  // the reason given above HAZARD_DC — a hazard you can be forced into must not
+  // be authored at a DC that punishes a route you had no way to avoid. (FORCE
+  // was at Moderate through 1f; that was a placeholder for a door-forcing verb
+  // that never existed. GDD 2.7 settles what FORCE is actually for.)
+  //
+  // The same Easy for both options on a hazard because the CHOICE is not meant
+  // to be between an easy answer and a hard one — it is between two cost models
+  // (see HAZARD_VERB_OUTCOMES). Making one verb cheaper to roll as well as
+  // cheaper to pay would collapse the decision into a single right answer for
+  // whichever stat you happened to raise.
+  force: DC.easy,
+  endure: DC.easy,
+  avoid: DC.easy,
+  dodge: DC.easy,
   sneak: DC.easy,
   fight: DC.moderate,
   tame: DC.moderate,
@@ -288,7 +484,12 @@ export const ACTION_STAT: Record<ActionKind, StatKey> = {
   move: 'agi',
   listen: 'int',
   search: 'int',
+  // These four MUST equal HAZARD_VERB_STAT; tests/tuning.test.ts asserts it.
+  // They are the coverage matrix: bloom has no AGI answer, snare has no STR one.
   force: 'str',
+  endure: 'int',
+  avoid: 'int',
+  dodge: 'agi',
   sneak: 'agi',
   fight: 'str',
   tame: 'int',
@@ -352,7 +553,21 @@ export const SCENT_BY_ACTION: Record<ActionKind, number> = {
   move: 1,
   listen: 0.5,
   search: 1.5,
+  // The hazard verbs split loud/quiet on exactly the fight/tame line, decided
+  // 18 Sep 2026 and written into GDD 2.10's scent paragraph.
+  //
+  // FORCE is the loud half: you shoulder through a bloom and the labyrinth
+  // hears it. Placed between FLEE (2) and FIGHT (4) — louder than running,
+  // quieter than a brawl, because a bloom does not shriek back.
   force: 3,
+  // ENDURE, AVOID and DODGE are the quiet half, anchored to values that already
+  // exist rather than inventing a third tier. ENDURE is SNEAK-quiet because you
+  // do not move at all; AVOID and DODGE are TAME-quiet because you do, carefully
+  // or quickly. Nothing here may rise above TAME without reopening the
+  // fast-and-loud-vs-slow-and-quiet invariant (CLAUDE.md 3).
+  endure: 0.25,
+  avoid: 0.5,
+  dodge: 0.5,
   sneak: 0.25,
   fight: 4,
   tame: 0.5,
@@ -553,17 +768,40 @@ export interface FightOutcome {
   readonly driven: boolean
   readonly damage: number
   readonly extraScent: number
+  /**
+   * Oil flasks taken off what you drove away. GDD 2.8, step 1g.
+   *
+   * FIGHT is in the hazard-reward pass and the other three encounter options
+   * are not, and that asymmetry is the whole point rather than an oversight: a
+   * successful TAME already pays out a companion, which is the richer prize;
+   * SNEAK and FLEE do not clear anything, they get you past it. Paying FIGHT in
+   * oil is what stops "tame is strictly better" from being true once taming
+   * costs a turn more (CLAUDE.md 3 — if one option is ever strictly better,
+   * fix the costs, do not remove the choice).
+   *
+   * Rides on `driven`: you are paid for clearing the room, not for surviving it.
+   */
+  readonly rewardFlasks: number
 }
 
 export const FIGHT_OUTCOMES: Record<OutcomeBand, FightOutcome> = {
   // 4 + 2 = 6 — a botched fight is the loudest thing short of taking the Heart.
-  criticalFailure: { driven: false, damage: 2, extraScent: 2 },
-  failure:         { driven: false, damage: 1, extraScent: 0 },
+  criticalFailure: { driven: false, damage: 2, extraScent: 2, rewardFlasks: 0 },
+  failure:         { driven: false, damage: 1, extraScent: 0, rewardFlasks: 0 },
   // The signature band: you won, and it cost you a point of health.
-  mixed:           { driven: true,  damage: 1, extraScent: 0 },
-  success:         { driven: true,  damage: 0, extraScent: 0 },
-  strongSuccess:   { driven: true,  damage: 0, extraScent: 0 },
-  criticalSuccess: { driven: true,  damage: 0, extraScent: 0 },
+  mixed:           { driven: true,  damage: 1, extraScent: 0, rewardFlasks: 0 },
+  // FIGHT's gate is set to match the hazard verbs' — strongSuccess and above —
+  // and it is the one reward number in this pass that NOTHING MEASURED IT.
+  // Neither sweep policy ever fights, so `earned driving off a creature` came
+  // back 0.00 per run at every difficulty and every setting tried. Aligning it
+  // with the hazards is the conservative choice, not an observed one; the
+  // argument for mixed+ instead is that TAME pays its companion from mixed up,
+  // and a FIGHT that pays a band later is a FIGHT that is worse at the band
+  // where most wins happen. 1i's heuristic bot has to fight and tame on purpose
+  // before anyone can settle this.
+  success:         { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 0 },
+  strongSuccess:   { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 1 },
+  criticalSuccess: { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 1 },
 }
 
 export interface SneakOutcome {
@@ -655,7 +893,37 @@ export const HAZARD_COUNTS: Record<HazardKind, readonly [number, number]> = {
 }
 
 export const POPULATION = {
-  oilFlasks: [8, 12] as const,
+  /**
+   * Ambient oil flasks on the floor. Was [8, 12] through 1f; cut in 1g, and cut
+   * together with the hazard reward rather than on its own, because the two are
+   * one number wearing two hats — oil income — and sizing either alone solves
+   * for it while breaking the other.
+   *
+   * MEASURED, not chosen. `SWEEP=300 npm run hazard -- oil stirring`, with the
+   * reward paying at strongSuccess-or-better, varying only this pair:
+   *
+   *   ambient   found/run   earned/run   EARNED share   escape%   oil left, 18+ turn runs
+   *   [8, 12]      0.47        0.22          32.0%       18.7%          4.83
+   *   [5,  8]      0.31        0.23          42.5%       20.0%          4.77
+   *   [3,  5]      0.18        0.23          55.7%       20.3%          4.24
+   *
+   * (Forager policy — the only one that searches. A router never picks an
+   * ambient flask up at all, so its earned share is 100% at every setting.)
+   *
+   * [3, 5] is the first setting where the economy actually leans on EARNED oil
+   * rather than found oil, which is what Gautham asked for, and the win rate and
+   * the oil budget's shape are flat across the whole range — the cost of the cut
+   * is inside the noise at n=300. The lever is genuinely free; what it changes
+   * is where oil comes from, not how much of it there is.
+   *
+   * THE HONEST CAVEAT: a flask on the floor is only found by a player standing
+   * on it who then spends a turn and a point of oil on SEARCH. At [3, 5] over a
+   * 100-room map against a ~12-room path, blind searching finds almost nothing,
+   * which makes SEARCH weaker — and SEARCH is already one of the five verbs 1f
+   * found rolls for nearly nothing. If 1i's sim says SEARCH has stopped being
+   * worth a turn, this number is the first place to look, not the last.
+   */
+  oilFlasks: [3, 5] as const,
   creatures: [8, 12] as const,
   /** Graves from the player's own earlier runs. GDD 2.16 */
   maxGraves: 4,

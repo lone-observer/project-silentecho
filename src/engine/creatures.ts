@@ -173,6 +173,12 @@ export interface EncounterResult {
   readonly revealedRooms: readonly RoomId[]
   /** SNEAK: you slipped past. FLEE: you got out. Where to, if so. */
   readonly movedTo: RoomId | null
+  /**
+   * Oil flasks earned. FIGHT only, and only when the creature was driven off —
+   * see `FightOutcome.rewardFlasks` for why the other three options pay nothing.
+   * resolve.ts puts them in the inventory; creatures.ts never touches state.
+   */
+  readonly rewardFlasks: number
 }
 
 /**
@@ -200,6 +206,7 @@ export function resolveEncounter(
     companionReleased: null,
     revealedRooms: [] as readonly RoomId[],
     movedTo: null,
+    rewardFlasks: 0,
   }
 
   // The Quiet One dampens everything you do, including how loudly you fail.
@@ -237,6 +244,10 @@ export function resolveEncounter(
         scent: (SCENT_BY_ACTION.fight + out.extraScent) * quiet,
         damage: out.damage,
         creatureRemains: !out.driven,
+        // Gated on `driven` as well as on the table, so a band that ever paid
+        // out without clearing the room would be a compile-visible mistake in
+        // FIGHT_OUTCOMES rather than a silent free flask.
+        rewardFlasks: out.driven ? out.rewardFlasks : 0,
       }
     }
 
