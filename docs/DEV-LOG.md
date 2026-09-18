@@ -57,8 +57,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
 | 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | +2987 / −203 | — | 8 |
-| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 280 (+14) | — | — | 11 |
-| | | **Total** | **9.0 h** | | **280** | **+19,391 / −761** | **—** | **47** |
+| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 280 (+14) | +2311 / −49 | — | 11 |
+| | | **Total** | **9.0 h** | | **280** | **+21,702 / −810** | **—** | **47** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
