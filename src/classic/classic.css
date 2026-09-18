@@ -1,0 +1,417 @@
+/*
+ * Classic mode — plain text.
+ *
+ * NO CRT SKIN HERE, DELIBERATELY. GDD 2.14 mentions a green-phosphor/amber
+ * scanline treatment in the same breath as classic mode, and `docs/ROADMAP.md`
+ * schedules it for Phase 1.5. This is the Phase 1 version: legible type, a dark
+ * ground, and one accent.
+ *
+ * The palette has exactly one alarming colour and it belongs to the Wumpus
+ * (GDD 2.17). `--violet` is used in precisely one place — a doorway leaking a
+ * stench — and nothing else in the UI may take it.
+ */
+
+:root {
+  --ground: #0e1a1c;
+  --panel: #122124;
+  --rule: #23383c;
+  --ink: #d8e0dd;
+  --dim: #7d8f8c;
+  --amber: #f2b155;
+  --violet: #b9a2e0;
+  --warn: #e0a45c;
+  --font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.classic {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px;
+  gap: 12px;
+}
+
+/* --- masthead and status ------------------------------------------------ */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 10px;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.masthead .run-id {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+}
+
+.status .chunk {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.status .chunk .label {
+  color: var(--dim);
+}
+
+.status .chunk.warn .value {
+  color: var(--warn);
+}
+
+/* --- two columns -------------------------------------------------------- */
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 860px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  padding: 12px;
+}
+
+.panel + .panel {
+  margin-top: 12px;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* --- room and doorways -------------------------------------------------- */
+
+.room-heading {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--amber);
+}
+
+.room-heading .entrance {
+  margin-left: 10px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.doorways {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.doorways li {
+  display: flex;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.doorways .dir {
+  flex: 0 0 4.5em;
+  color: var(--dim);
+}
+
+.doorways .quiet,
+.doorways .unsensed {
+  color: var(--dim);
+}
+
+.doorways .unsensed {
+  font-style: italic;
+}
+
+.doorways li.alarming .sense {
+  color: var(--violet);
+}
+
+/* --- roll breakdown ----------------------------------------------------- */
+
+.roll .sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.roll .die {
+  color: var(--amber);
+}
+
+.roll .mod .src {
+  color: var(--dim);
+}
+
+/*
+ * Structural punctuation, dimmed but still legible. It was `--rule` until a
+ * screenshot showed `=` and `vs` vanishing into the panel at normal contrast —
+ * a roll breakdown the player has to squint at defeats the reason CLAUDE.md 4
+ * makes the engine label every modifier in the first place.
+ */
+.roll .op {
+  color: #4e6a6b;
+}
+
+.roll .verdict {
+  margin-top: 6px;
+}
+
+.roll .verdict .margin {
+  color: var(--dim);
+}
+
+.roll .verdict .band {
+  color: var(--amber);
+}
+
+.roll .verdict.bad .band {
+  color: var(--warn);
+}
+
+.roll .flag {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+/* --- menu --------------------------------------------------------------- */
+
+.menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu button {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  border-color: var(--rule);
+  background: #17292d;
+  outline: none;
+}
+
+.menu .key {
+  flex: 0 0 1.6em;
+  color: var(--amber);
+}
+
+.menu .dc {
+  margin-left: auto;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* --- log ---------------------------------------------------------------- */
+
+.log {
+  overflow-y: auto;
+  max-height: 62vh;
+}
+
+.log .turn {
+  padding: 8px 0;
+}
+
+.log .turn + .turn {
+  border-top: 1px solid var(--rule);
+}
+
+.log .turn-head {
+  color: var(--dim);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.log p {
+  margin: 2px 0;
+}
+
+.log .tone-roll,
+.log .tone-effect,
+.log .tone-move {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.log .tone-epitaph {
+  color: var(--amber);
+  font-style: italic;
+}
+
+/* --- title and ending --------------------------------------------------- */
+
+.centred {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.card {
+  width: min(560px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  padding: 24px;
+}
+
+.card h1 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.card .sub {
+  margin: 0 0 20px;
+  color: var(--dim);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.field label {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.field input,
+.field select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  padding: 7px 9px;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 1px solid var(--amber);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.actions button {
+  background: none;
+  border: 1px solid var(--rule);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.actions button:hover,
+.actions button:focus-visible {
+  border-color: var(--amber);
+  color: var(--amber);
+  outline: none;
+}
+
+.actions button.primary {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.ending-line {
+  margin: 0 0 18px;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.replay {
+  margin-top: 18px;
+}
+
+.replay summary {
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.replay pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  color: var(--dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

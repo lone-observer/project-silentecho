@@ -118,8 +118,8 @@
       },
       "costUsd": null,
       "commits": [
-      "2a25e07"
-    ],
+        "2a25e07"
+      ],
       "landed": "GDD 2.17 information model. Phase 1 progress note. Remote branch hygiene; main pushed. Dev log and generator. Token usage is folded into session 2.",
       "defects": [],
       "effectiveTokens": null
@@ -310,7 +310,10 @@
         "cacheWrite": 1005534
       },
       "costUsd": null,
-      "commits": [],
+      "commits": [
+        "2a25e07",
+        "00b6cea8"
+      ],
       "landed": "Bloom and snare stop auto-resolving and become verb encounters, the same shape as the creature encounter. ENTRY_HAZARDS is now ['pit'] and nothing else; VERB_HAZARDS, VERBS_FOR_HAZARD and HAZARD_VERB_STAT are the coverage matrix as data, so GDD 2.8's promise that every stat has exactly one hazard it cannot answer is checkable rather than aspirational. FORCE, ENDURE, AVOID and DODGE are real ActionKinds wired through legalActions and resolve.ts: GameState gained hazardRoomId as the exact mirror of encounterRoomId, and the menu while a hazard is live is that hazard's two verbs and nothing else — no MOVE, no FLEE, because a bloom fills the chamber and there is nothing to slip past. HAZARD_VERB_OUTCOMES holds two inverted cost models: Force's turn cost scales with margin while Confused applies unconditionally; Endure's turn cost is flat while margin shortens Confused to a floor of one turn it never goes below, which is what stops INT being the generalist stat that answers everything. HazardOutcome gained statusTurns and rewardFlasks — the first gain the struct has ever carried. Reward and ambient loot were sized together and measured, not guessed: one flask at strongSuccess-or-better (mixed-or-better was +1.75 oil per bloom walked into, an oil farm), and POPULATION.oilFlasks 8-12 -> 3-5, the first setting where the economy leans on earned oil rather than found. Prose written in the same pass as the mechanic: 24 beats, 48 strings, plus hazardBlocks, hazardCleared and spoilsTaken; HAZARD_NARRATION's bloom and snare rows deleted as dead content. FORCE's prose was written too and DEFERRED_ACTIONS is now empty — a deliberate deviation from the 18 Sep decision, flagged in PHASE-1-PROGRESS, because a deferred verb is only defensible while the player cannot choose it. scripts/hazard.ts is the visualiser, four panels including the oil-economy sweep. tests/hazards.test.ts adds 27 tests with eleven assertions mutation-checked.",
       "defects": [
         {
@@ -344,6 +347,75 @@
         {
           "what": "`npm run sim` has never existed. package.json declares \"sim\": \"tsx scripts/sim.ts\" and scripts/sim.ts is not in the repo, so the command errors - while CLAUDE.md 5 instructs every session that touches balance to run it and report the actual number, and ROADMAP's Phase 1 exit criteria list its output. Every balance read so far has come from a per-step visualiser sweep instead, which is a different thing and a weaker one. Recorded rather than fixed: the harness belongs to 1i",
           "foundBy": "eye"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "date": "2026-09-18",
+      "label": "Phase 1h — text (classic) renderer",
+      "hours": null,
+      "surface": "cowork",
+      "steps": [
+        "1h"
+      ],
+      "tests": {
+        "before": 266,
+        "after": 280
+      },
+      "tokens": {
+        "input": 468,
+        "output": 263258,
+        "cacheRead": 57811192,
+        "cacheWrite": 805826
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "The game is playable start to finish in a browser. src/classic/ renders the five things GDD 2.14 names - room, directional tells listed per doorway, a numbered action menu, the roll breakdown, an event log - plus a title screen taking a seed and a difficulty and an end screen carrying the run record as seed + actionLog. src/state/run.ts holds startRun and takeAction, both pure with no React in them, so tests/classic.test.ts drives the renderer's real action path rather than a parallel one. view.ts is the screen as data (room heading, doorway rows, status chunks, roll parts) and is assertable without a DOM; lines.ts is eventsToLines, total over the GameEvent union with a never check, and is the projection AgentView.log wants - its wumpusMoved case is deliberately silent because that event carries the Wumpus's true room id, with a mutation-checked test that no line ever contains it. No prose was written: no sentence added to data/outcomes.ts and none inlined in the renderer, and a new test asserts every narration on screen is character-for-character the string the engine emitted. Two engine additions, both for text parity rather than convenience: ARCHETYPE_WORD (six title-case nouns, the missing peer of HAZARD_WORD and CREATURE_WORD, because the archetype is a fact the diorama shows and text could not say) and exporting resolve.ts's existing TELL_TEXT/tellText (needed on turn 1 before any tell event exists, and already the declared shape of AgentView.tells). A doorway renders in three states rather than two - sensed-and-silent, out of lamp range, suppressed by Confused - because collapsing the last two lets a player read darkness as safety, which breaks CLAUDE.md 3's darkness invariant at the presentation layer; the sensed set is re-derived in the renderer because the engine throws it away, flagged as the engine gap to close first. Status line is four chunks plus three conditional ones with oil level and band as one fact, per GDD 2.17. tests/tuning.test.ts's vacuous compile-time guard fixed with as const plus an assertion in the other direction, mutation-checked. Explicitly not built: CRT skin, WUMPUS easter egg, epitaph, known-path map, anything agent-related.",
+      "defects": [
+        {
+          "what": "The engine computes which doorways it looked at and then throws it away. tellsFor returns the tells it found and nothing about the ones it did not check, so 'nothing is through that door', 'your lamp does not reach that far' and 'you are too Confused to tell' reach every renderer as the same absence. A renderer that collapses them breaks CLAUDE.md 3's darkness-restricts-range-never-honesty invariant at the presentation layer without touching engine code, because the player reads silence as safety - and range and Confused have different counterplay, so it also points them at the wrong lever. Re-derived in view.ts's sensedDirections, duplicating the restricted branch inside getTells; the diorama and AgentView will each duplicate it again",
+          "foundBy": "eye"
+        },
+        {
+          "what": "Fortune cannot be spent by anyone, and the Policy.spendFortune hook scheduled for 1j has nothing to attach to. GDD 2.5 spends Fortune after seeing a roll; applyAction rolls at step 1 and resolves the whole turn before returning, so the roll is only visible in the events, by which time the outcome is applied. The status line shows Fortune and there is no way to spend it - for a human, a heuristic policy or an LLM - and EVALS.md's required 'Fortune spend rate and timing' metric has nothing to measure. This is a change to applyAction's signature, which every test and visualiser calls, not a one-line Policy addition",
+          "foundBy": "eye"
+        },
+        {
+          "what": "npm run devlog silently zeroes the churn column when git is unreachable. churnOf shells out to git show and the git() helper catches every failure and returns an empty string, so every line count becomes a dash, the total becomes +0 / -0, and the script exits 0 printing 'devlog: wrote docs/DEV-LOG.md'. Same shape as the two close-out failures already recorded - the stale scratch-path clobber in 1d and the empty commits field - a write that reports success and carries the wrong content",
+          "foundBy": "eye"
+        },
+        {
+          "what": "DEV-LOG.md is stale against dev-log.json: the commits field is no longer empty for 1e, 1f and 1g, but session 7's Lines column still reads dash in the generated table, so devlog was never re-run after the follow-up commit populated the field. The checklist item caught the field and missed the artefact it feeds. Separately, 1g's commits lists 2a25e07, which is session 3's 'Docs and hygiene' commit - either wrong or double-counting that diff; unverifiable from this session, check with git show -s --oneline 2a25e07",
+          "foundBy": "eye"
+        },
+        {
+          "what": "Every doorway read 'beyond your senses' on the end screen at Lamp 6 of 12. A finished run carries no standing senses forward, correctly, and the panel then explained that absence as a failed lamp - the screen telling the player something untrue about a perfectly bright doorway. The suite was green",
+          "foundBy": "played it"
+        },
+        {
+          "what": "The roll breakdown rendered '+ Agility -1': a literal plus separator in front of a modifier that already carries its own sign. The log line had it right from the start, so the two panels showing the same roll disagreed",
+          "foundBy": "played it"
+        },
+        {
+          "what": "The ending panel said 'turn 15 of 20' over a log whose last entry was '14 - Move S'. finish() advances the clock by the action's turn cost before committing (1e), so state.turn is one past the turn a run ended on. Both numbers are correct and printing them together is not",
+          "foundBy": "played it"
+        },
+        {
+          "what": "The = and vs in the roll breakdown were invisible at normal contrast (--rule on --panel). CLAUDE.md 4 makes the engine label every modifier so the player can read them, which a panel they have to squint at defeats",
+          "foundBy": "played it"
+        },
+        {
+          "what": "TELL_TEXT is the one piece of prose still living in code (resolve.ts) and no test has ever looked at it: outcomes.test.ts's source-of-truth sweep reads narration, oilChanged and companionLost events, and tell events are not in spokenText. So the seven tell strings have no lit/dark variants, and stench's 'pallid' and freshChisel's 'fresh chisel marks' describe an appearance - which is what 1f's dark-register rule exists to keep out of a lamp-less room. Neither word is in VISION_WORDS, so moving the table alone would not catch them",
+          "foundBy": "eye"
+        },
+        {
+          "what": "The menu says 'Move N' and the doorway list six lines above says 'north'. legalActions builds move labels from the compass letter; DIRECTION_WORD exists because, in its own comment, compass letters read badly in a sentence. One line in resolve.ts, left alone because changing an engine-owned label is not a rendering step's call",
+          "foundBy": "played it"
+        },
+        {
+          "what": "A test asserting the doorway range restriction failed, and the renderer was right: LISTEN buys the full set of tells back for exactly one turn (GDD 2.8.1), so all four doorways stay reported while the player is choosing what to do with what they paid a turn to learn. The assertion as first written asked the screen to throw that away one beat early",
+          "foundBy": "test"
         }
       ]
     }

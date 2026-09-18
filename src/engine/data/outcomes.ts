@@ -187,6 +187,35 @@ export const CREATURE_WORD: Record<CreatureKind, string> = {
   quietOne: 'Quiet One',
 }
 
+/**
+ * What a room is CALLED. A noun dictionary, not a description.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS THE ONLY THING 1h ADDED HERE. CLAUDE.md 2.3
+ * requires every fact a player can learn from any renderer to be expressible as
+ * text. The archetype is such a fact — the diorama shows you that the floor is
+ * under water — so the text renderer has to be able to say it, and the three
+ * tables above establish that a noun the renderers share lives in this file.
+ *
+ * It is deliberately NOT a room description. There is no standing "what this
+ * chamber looks like" prose anywhere in the engine, and 1h did not write any:
+ * that is a real gap (GDD 2.14 lists room description among the five things
+ * classic mode renders, and `AgentView.room` is typed `string` for it), but
+ * filling it is authoring a new table, which is a content step's job and not a
+ * rendering step's. Flagged in PHASE-1-PROGRESS rather than quietly built.
+ *
+ * No slot names one of these, so it is not in `Slots` and `fill` never reaches
+ * it. Title case because it renders as a heading, the way `CREATURE_WORD` keeps
+ * the Quiet One's capitals for the opposite reason.
+ */
+export const ARCHETYPE_WORD: Record<RoomArchetype, string> = {
+  hewnChamber: 'Hewn Chamber',
+  floodedGallery: 'Flooded Gallery',
+  fungalGrotto: 'Fungal Grotto',
+  collapsedShrine: 'Collapsed Shrine',
+  carvedHall: 'Carved Hall',
+  heartChamber: 'The Heart Chamber',
+}
+
 const SLOT_PATTERN = /\{([a-zA-Z]+)\}/g
 
 export function fill(text: string, slots: Slots = {}): string {

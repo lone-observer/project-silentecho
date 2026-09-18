@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 18 Sep 2026, end of step 1g (the hazard-verb redesign). Sessions are now one per step — see below.
+**Last updated:** 18 Sep 2026, end of step 1h (the text renderer). Sessions are now one per step — see below.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -17,8 +17,8 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1e · resolve | **done** | `src/engine/resolve.ts`, `scripts/turn.ts`, both SEND fixes implemented |
 | 1f · outcomes table | **done** | `src/engine/data/outcomes.ts`, `scripts/prose.ts`, `tests/outcomes.test.ts` |
 | 1g · hazard-verb redesign | **done** | `src/engine/data/tuning.ts` (`VERB_HAZARDS`, `HAZARD_VERB_OUTCOMES`), `resolve.ts`, `scripts/hazard.ts`, `tests/hazards.test.ts`. Bloom and snare are verb encounters; `FORCE`/`ENDURE`/`AVOID`/`DODGE` are real `ActionKind`s; reward and ambient flask count both measured and set. |
-| 1h · text (classic) renderer | **next** | reads the full event stream against every table above; budget it like 1e/1f, not like 1d, per the cost note above |
-| 1i · hazard-reward rebalance | queued | human playtest pass on the 1h text renderer, then rebalance the hazard-verb reward magnitudes and turn costs against played feel, not just sim data. Gated on 1h — there is no way to play the game until then. |
+| 1h · text (classic) renderer | **done** | `src/classic/` (`Classic.tsx`, `Title.tsx`, `view.ts`, `lines.ts`, `labels.ts`, `classic.css`), `src/state/run.ts`, `tests/classic.test.ts`. The game is playable start to finish in a browser at `npm run dev`. Two small engine additions, both flagged below. `tests/tuning.test.ts`'s vacuous guard fixed. |
+| 1i · hazard-reward rebalance | **next** | human playtest pass on the 1h text renderer, then rebalance the hazard-verb reward magnitudes and turn costs against played feel, not just sim data. **Unblocked — 1h ships something to play.** |
 | 1j · agent harness core | queued | `AgentView` adapter + a "can't see through walls" leakage test, the `Policy` interface (with the Fortune-spend hook — see `docs/EVALS.md`), `random` + `heuristic` policies, run-batch infra |
 | 1k · LLM integration + benchmark run | queued | OpenRouter wiring, the fixed prompt (`docs/AGENT-PROMPT.md`), the model roster, scoring/report script, the actual n=100 batches, the human baseline |
 
@@ -26,7 +26,7 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 
 **18 Sep, a step inserted after 1g landed.** 1g's own reward numbers came from sim sweeps, not play — and 1g's findings gave real reason to distrust sim-only tuning here: the oil ledger alone can't be made net-negative without a reward smaller than a whole flask (1g's "not yet decided" list), a 12.5-point swing in escape rate went in without anyone having played it, and whether the bloom choice (`FORCE` vs `ENDURE`) is a real decision or noise is explicitly unresolved. Gautham wants to actually play the text-rendered game and get a feel for the actions before locking the reward numbers in further, rather than tuning a second time from sweep data alone. That inserts as **1i**, after 1h (nothing to play before then) and before the agent-harness work (1j, was 1i) — no sense building the harness against reward numbers about to move. The old 1i and 1j shift to 1j and 1k. This is not a reopening of the oil-farming fix from 1g (strongSuccess-or-better already closed that) — it's a second pass with a different kind of evidence.
 
-266 tests. `npm test`, `npm run typecheck`, both clean.
+280 tests. `npm test`, `npm run typecheck`, `npm run build` all clean.
 
 ## One session per step
 
@@ -60,6 +60,14 @@ Practical rule for 1g and beyond: **estimate a step's cost from the number of mo
 The new driver is **empirical tuning, which is a loop**. 1g could not pick the reward magnitude by reading a table: it had to write the visualiser, run a sweep, read a number, change one constant, run the sweep again, and do that across two parameters and four difficulties, plus a controlled counterfactual. Each of those is a turn, each turn carries the same ~290k of context, and none of them writes any code. A step that *measures* something costs the width of the engine multiplied by however many times it has to go round.
 
 Practical rule, extending the one above: **estimate context width from the number of modules the output must be correct against, and estimate turn count from whether the step can be reasoned to an answer or has to be measured to one.** 1h (text renderer) is wide but not a loop. 1j and 1k are both — the harness is wide *and* the benchmark is a measurement loop by definition, so budget them above this session rather than at it.
+
+**Sixth measurement, from 1h — and the rule predicted it correctly for the first time.** Step 1h ran **234 assistant turns and 58.9M effective tokens: 252k per turn**, against 1g's 293k, 1f's 283k and 1e's 270k. Peak context 370k. The split was 98.2% cache reads, 1.4% cache writes, 0.4% output, 468 raw input tokens. (Harvested at close-out, so the close-out's own turns are partly uncounted — the same convention every figure above uses.)
+
+The rule from 1g said: **width from the number of modules the output must be correct against, turn count from whether the step can be reasoned to an answer or has to be measured to one.** It predicted 1h as "wide but not a loop", and both halves landed. Wide: 1h had to hold `types.ts`, `resolve.ts`'s public surface, `outcomes.ts`'s helpers, `tuning.ts`'s oil bands, `wumpus.ts`'s `getTells` and GDD 2.14/2.17/2.8.1 at once — the same ~190k of source and spec, and per-turn cost duly landed in the same band as 1e/1f/1g. Not a loop: 234 turns against 1g's 272, and the extra over 1f's 193 went on **playing the game and fixing what that turned up**, not on sweeping a parameter.
+
+Per-turn cost is now 270k → 283k → 293k → 252k across four consecutive wide steps. **Treat ~250–300k/turn as the settled rate for a step that must be correct against the whole engine, and predict the bill from the turn count alone.**
+
+**One new cost note, for 1j and 1k.** This session had no shell on the author's machine, so every file crossed the bridge as a staged copy and came back as a commit. That is workable and it is not free: it rules out running `git`, which is why the `commits` field is *still* not closed out (1h finding 4) and why `npm run devlog` could not be run here at all (1h finding 3). **If a step's close-out has to touch git, open that session somewhere with a shell on the repo.**
 
 Starting fresh is only cheap because this repo can orient a session that knows nothing. That is what `CLAUDE.md`, `docs/GDD.md` and this file are for — keep them current, and the cost of closing a session stays near zero.
 
@@ -122,12 +130,15 @@ What they found:
 - **`scripts/turn.ts` identified oil events and catch checks by comparing prose.** It worked until 1f gave every beat a second variant, at which point it would have kept working in the lamplight and silently started mislabelling every oil event in the run the moment the player's lamp got low. Same lesson as Panel B above, one layer down: identity belongs on an id, not on an appearance. Events now carry `NarrationBeat`.
 
 - **A status expired on the turn that applied it.** `scripts/hazard.ts` Panel C, first run. Statuses land at step 3 and are ticked at step 7 of the same turn, once per turn consumed — so a Confused applied by a two-turn `FORCE` was decremented twice and gone before the player read a single suppressed tell. `FORCE`'s one unconditional cost cost nothing at four of six bands; `ENDURE`'s entire margin-shortens-the-duration mechanic did nothing at any band; and a strongSuccess `FORCE` (one turn) left the player blind where a plain success (two turns) did not — **a better roll punished**. Every test passed before and after. The transcript printed `confused for 2 turn(s)` and `confused for 0 turn(s)` back to back, one line apart, which is the entire diagnosis.
-- **The "compile-time guard" on the action list guarded nothing.** `tests/outcomes.test.ts` declared `const ALL_ACTION_KINDS: readonly ActionKind[] = [...]` and then asserted `ActionKind extends (typeof ALL_ACTION_KINDS)[number]`. Annotating the array as `readonly ActionKind[]` makes that index type evaluate to `ActionKind`, so the guard read `ActionKind extends ActionKind` and held no matter what the list contained. Adding three verbs to the union compiled clean against a list naming none of them. Fixed with `as const` plus a second assertion in the other direction. `tests/tuning.test.ts` has the same pattern and the same hole — **left for whoever opens 1h**, noted below.
+- **The "compile-time guard" on the action list guarded nothing.** `tests/outcomes.test.ts` declared `const ALL_ACTION_KINDS: readonly ActionKind[] = [...]` and then asserted `ActionKind extends (typeof ALL_ACTION_KINDS)[number]`. Annotating the array as `readonly ActionKind[]` makes that index type evaluate to `ActionKind`, so the guard read `ActionKind extends ActionKind` and held no matter what the list contained. Adding three verbs to the union compiled clean against a list naming none of them. Fixed with `as const` plus a second assertion in the other direction. `tests/tuning.test.ts` had the same pattern and the same hole — **fixed in 1h**, and mutation-checked: dropping `endure`/`avoid`/`dodge` from the list is now a compile error.
+- **A finished run explained a bright doorway as a failed lamp.** `npm run dev`, first played run. Once a run ends the renderer carries no standing senses forward — correctly — and the doorway panel then rendered that absence as "beyond your senses" at Lamp 6 of 12. Three more of the same kind in 1h finding 7; the suite was green for all four.
 - **A MOVE-only walker deadlocks on a hazard.** Two test policies filtered the menu to `move` and stopped when it came back empty, which is now what standing in a bloom looks like. Trivial to fix in a test; the point is that **1j's heuristic bot cannot be written as "pick the move that reduces distance"** — it has to answer hazards, and choosing between two cost models is a real decision rather than plumbing.
 - **A test that passed by luck for two steps.** "binds the encounter to ENTERING a room" asserted unconditionally that a `creatureEncounter` event leaves the flag set. Drift can walk the creature out of the room at step 7 of the same turn, in which case clearing the flag is correct — and 1g changed how many turns an action costs, which moved the RNG, and one seed finally did it. The rule was always conditional; the test just never said so.
 - **A suite that was green or red depending on CPU speed.** `tests/outcomes.test.ts`'s source-of-truth sweep drives hundreds of seeded runs and sits just under vitest's 5s default on a fast desktop, over it on slower hardware. `testTimeout` is now 30s in `vite.config.ts`. A test whose result depends on the machine is not measuring what it claims to.
 
-Build the equivalent tool for each remaining step. It has paid for itself every time.
+**`npm run dev`** — the game. Not a visualiser and not in the same category as the six above, but it earns a line here for the same reason they do: it found four defects on its first run that 280 green tests did not (1h finding 7), and every one of them was a case of the screen telling the player something untrue. The suite checks that the renderer reproduces what the engine said; only looking at it checks whether what the player *reads* is true.
+
+Build the equivalent tool for each remaining step. It has paid for itself every time. **And for anything with a screen, open the screen.**
 
 ## What 1d landed
 
@@ -304,6 +315,71 @@ Two readings and they are not exclusive. One: the difference is real but too sma
 
 **6. Oil is not a binding constraint at any difficulty, and the reason is that runs do not last.** Mean net consumption is 4.3–5.1 against a 12-point lamp; 0–2% of runs ever reach Dark; ~40–50% never leave Bright. But mean survival is 10.8–12.6 turns, because 57–64% of runs end with the Wumpus. **Oil is correctly sized for a run that lasts 20 turns and almost no run does.** Any future read of the oil numbers has to say which population it is describing, or it is measuring how early runs end.
 
+## What 1h landed
+
+**The game is playable.** `npm run dev`, a seed, a difficulty, and a run start to finish in text — room, doorways with their tells, a numbered menu, the roll broken out, a log, an ending. That is the Phase 1 exit criterion this step existed for, and 1i is unblocked.
+
+- **`src/classic/`** — `Classic.tsx` (the screen), `Title.tsx` (seed + difficulty), `view.ts` (the screen as data: room heading, doorway rows, status chunks, roll parts — no React, so it is assertable), `lines.ts` (`eventsToLines`), `labels.ts` (band names and the signed-number helper), `classic.css`.
+- **`src/state/run.ts`** — `startRun` and `takeAction`, both pure, plus a thin zustand store holding one of them. The test drives the same two functions the screen calls; there is no test-only action path.
+- **`tests/classic.test.ts`** — 14 tests, taking the suite from 266 to 280. Four assertions mutation-checked: the Wumpus-position leak, the renderer-authored-prose guard, Confused-still-senses, and range-restriction-ignored. The `tuning.test.ts` fix was mutation-checked too — dropping the three 1g verbs from the list is now a compile error where it used to compile clean.
+- **`tests/tuning.test.ts`** — the vacuous compile-time guard 1g left for this step, fixed the same way (`as const` plus an assertion in the other direction). It had been silently not checking `endure`, `avoid` and `dodge` against `ACTION_DC` and `SCENT_BY_ACTION` since 1g added them.
+- **Two engine additions, both small, both deliberate** — see the next section.
+
+### The two engine changes, and why a rendering step made them
+
+The brief said to flag new prose rather than write it, and that held: **no sentence was added to `data/outcomes.ts` and none was written into the renderer.** Two things were added anyway, and both are load-bearing for text parity rather than convenience.
+
+- **`ARCHETYPE_WORD` in `data/outcomes.ts`.** A room's archetype is a fact the player learns from the diorama by looking at the floor, so CLAUDE.md 2.3 requires text to be able to say it, and there was no way to say it — `HAZARD_WORD`, `CREATURE_WORD` and `DIRECTION_WORD` exist for exactly this and there was no archetype row. Six title-case nouns, no sentences, no slot.
+- **`TELL_TEXT` and `tellText` exported from `resolve.ts`.** Already written, already the engine's words; the renderer needs standing tells on turn 1, before any `tell` event exists. Also required by `AgentView.tells`, which is already declared as `{ direction, kind, text }` — a second copy in a renderer would be two tables to drift apart.
+
+### Decisions taken in 1h, all reversible
+
+- **The doorway list IS the tells display.** GDD 2.17 puts information next to the thing it concerns, and `Tell` is direction-keyed, so each exit renders as one row carrying whatever leaks through it. There is no separate "tells" panel and no compass rose.
+- **A doorway has three states, not two.** Sensed-and-silent, out of lamp range, and suppressed by Confused are rendered differently. See finding 1 — this is the one place the renderer writes words about the world, and it is because the engine cannot currently express the distinction.
+- **The status line is four chunks plus up to three conditional ones.** Oil level and band are one fact (`Lamp 9 · bright`), per GDD 2.17. Companion, carrying-Heart and Confused are absent rather than present-and-empty. Asserted in `tests/classic.test.ts`, not just intended.
+- **Nothing on the screen is tinted alarming except a doorway leaking a stench.** GDD 2.17's "exactly one alarming signal". A low lamp and low health are `warn`, a different register. There is a test that `alarming` is set for the stench and for nothing else.
+- **The log groups by turn and hides the tell lines.** They are the same four facts the doorway panel already shows, restated every turn. `eventsToLines` still produces them, so the projection stays total over the event union and `AgentView.log` can make its own call.
+- **`eventsToLines` is its own module.** It fell out naturally, as the brief guessed it might: `AgentView.log` is `readonly string[]` and wants the identical projection. It is in `src/classic/` for now because it has one consumer; hoist it when it has two.
+- **The run record is on the end screen.** `seed + actionLog` as copyable JSON, plus "same labyrinth again". No save system, and 1i's playtest can reproduce anything it finds for the price of a paste.
+- **No CRT skin, no `WUMPUS` egg, no epitaph, no map, no agent anything.** All Phase 1.5 or 1j, all left alone.
+
+### 1h findings
+
+**1. The engine computes which doorways it looked at and then throws it away.** `tellsFor` returns the tells it found and nothing about the doorways it did not check, so *"there is nothing through that door"*, *"your lamp does not reach that far"* and *"you are too Confused to tell"* all arrive at every renderer as the same absence.
+
+That distinction is not cosmetic. CLAUDE.md 3 says darkness restricts the RANGE of tells and never their honesty — but a renderer that shows an out-of-range doorway the same way it shows a silent one has broken that at the presentation layer without touching a line of engine code, because the player reads silence as safety. Range and Confused are also different mechanics with different counterplay (LISTEN buys range back for a turn; Confused runs out on its own clock), so collapsing them tells the player to pull the wrong lever.
+
+1h re-derives the sensed set in `view.ts`'s `sensedDirections`, duplicating the `restricted` logic inside `getTells`. **The diorama and `AgentView` will each have to duplicate it again.** The fix is for the engine to emit the set — a field on `tellsFor`'s return, or a `sensed` event — and it is an engine change, so it is here rather than done.
+
+**2. Fortune cannot be spent, by anyone, and the hook 1j is scheduled to add has nothing to attach to.** GDD 2.5 spends Fortune *after seeing a roll*. `dice.ts` has `rerollWithFortune` and `bumpBandWithFortune`. 1e decided the reducer never spends it because that is a two-phase interaction and therefore a renderer concern, and `resolve.ts`'s own comments say 1j's `Policy.spendFortune` "will be handed whatever the reducer produced".
+
+**There is no seam to hand it anything.** `applyAction` rolls at step 1 and resolves the whole turn before returning; the roll is visible only in the events, by which time the outcome is already applied. So the status line shows `Fortune 2` and there is no way to spend it — for a human, a heuristic policy, or an LLM. `docs/EVALS.md` requires "Fortune spend rate and timing" as a metric and it currently has nothing to measure.
+
+This is a reducer API change (a two-phase `beginAction`/`commitAction`, or a spend intent passed in), not a `Policy` change, and it is bigger than the one line 1j's entry implies. **Flagging the size rather than picking the shape** — it touches `applyAction`'s signature, which every test and every visualiser calls.
+
+**3. `npm run devlog` silently zeroes the churn column when git is unavailable.** `churnOf` shells out to `git show`; `git()` catches every failure and returns `''`. Run it anywhere the repo history is not reachable and every line count becomes `—`, the total becomes `+0 / −0`, and the script exits 0 printing *"devlog: wrote docs/DEV-LOG.md — 7 sessions, 36 defects"*. Found by running it in a container that had the working tree but not `.git`.
+
+This is the same shape as the two close-out failures already recorded — the stale-scratch-path clobber in 1d and the empty `commits` field — **a write that reports success and carries the wrong content.** It should fail loudly on a git error rather than treating "no history" as "no changes".
+
+**4. `DEV-LOG.md` is stale against `dev-log.json`, which is what the empty-`commits` problem turned into.** The `commits` field is no longer empty — 1e, 1f and 1g all have hashes. But session 7's Lines column reads `—` in the generated table, which means the table was generated *before* the follow-up commit populated the field and `npm run devlog` was never re-run afterwards. The checklist item caught the field and missed the artefact it feeds.
+
+Also worth a look: **1g's `commits` lists `2a25e07`, which is session 3's commit** ("Docs and hygiene"). Either it is wrong, or 1g's churn double-counts session 3's diff. 1h could not check it — no git in the container — so it is recorded for whoever has the repo in front of them: `git show -s --oneline 2a25e07`.
+
+**5. The menu says `Move N` and the doorway above it says `north`.** `legalActions` builds its move labels from the compass letter; `DIRECTION_WORD` exists because, in its own comment, "compass letters read badly in a sentence". Both spellings are now on screen at once, six lines apart. It is small, it is a one-line change in `resolve.ts`, and it is a label rather than prose — left alone because changing an engine-owned label is not a rendering step's call. **Worth settling in 1i, where someone is actually reading the screen.**
+
+**6. `TELL_TEXT` is the one piece of prose still living in code, and no test has ever looked at it.** `tests/outcomes.test.ts`'s source-of-truth sweep reads `narration`, `oilChanged` and `companionLost` events; `tell` events are not in `spokenText`, so their strings have never been checked against any table. Two consequences: the seven tell strings have no lit/dark variants at all, and `stench`'s *"pallid"* and `freshChisel`'s *"fresh chisel marks"* describe an APPEARANCE — which is exactly what 1f's dark-register rule exists to keep out of a lamp-less room. Neither word is in `VISION_WORDS`, so moving the table alone would not catch them. Content step, not a rendering one.
+
+**7. Four defects that only showed up in a browser, none of which a test would have caught.** Recorded because the ratio is the point — the suite was green for all four.
+
+| what | why no test saw it |
+|---|---|
+| Every doorway read *"beyond your senses"* on the end screen, at Lamp 6 | `takeAction` carries no senses forward past a finished run, correctly; the panel then explained that absence as a failed lamp. The screen was lying about a bright doorway. |
+| The roll breakdown rendered `+ Agility −1` | A literal `+` separator in front of a modifier that carries its own sign. The log line had it right from the start; the two panels disagreed. |
+| The ending said *"turn 15 of 20"* over a log whose last entry was *"14 · Move S"* | `finish` advances the clock by the action's turn cost before committing (1e), so `state.turn` is one past the turn the run ended on. Both numbers are correct; printing them together is not. |
+| `=` and `vs` in the roll breakdown were invisible at normal contrast | `--rule` on `--panel`. CLAUDE.md 4 makes the engine label every modifier *so the player can read them*. |
+
+**Build the equivalent habit for the next renderer: open it and play it.** The suite went 280 green through all four of these.
+
 ## 1d findings — three real defects, none of them in 1d's own code
 
 **All three are now fixed.** Finding 3 landed in `generate.ts` during the 1d session; findings 1 and 2 were decided by the PM session on 17 Sep and implemented in the 1e session the same day. What follows is kept as the reasoning, with the measured after-numbers appended to each.
@@ -441,10 +517,17 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 
 ## Carried forward into 1h / 1i / 1j / 1k
 
-1g's own inherited list is done: bloom and snare are verb encounters, the four verbs exist and are narrated, the reward and the ambient flask count are both measured and set. What the next sessions inherit — **1g additions are marked NEW**:
+1g's own inherited list is done. 1h's is done too: the text renderer exists, it writes no prose, and `tests/tuning.test.ts`'s guard is fixed. What the next sessions inherit — **1h additions are marked NEW-1h**:
 
-- **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so 1g's adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls. **1f makes `AgentView.log` nearly free:** every narration now carries a `NarrationBeat`, so the log is a typed stream rather than strings to be reassembled, and the text renderer and the agent view read the same beats.
-- **The text renderer must not write prose.** Everything it needs is in `data/outcomes.ts`, and `tests/outcomes.test.ts` fails the build if a sentence appears in the engine. The same rule should hold for the renderer: if a line is missing, add a beat, do not inline a string.
+- **NEW-1h — the engine cannot say which doorways it looked at** (1h finding 1). `view.ts`'s `sensedDirections` duplicates the `restricted` branch inside `getTells` because `tellsFor` returns found tells and nothing else. The diorama and `AgentView` will each duplicate it a third and fourth time. **This is the one engine gap 1h would fix first** — a renderer that cannot tell "nothing is there" from "you cannot sense that far" breaks the darkness invariant at the presentation layer, and every renderer has to get it right independently today.
+- **NEW-1h — Fortune is unspendable and `Policy.spendFortune` has nothing to attach to** (1h finding 2). `applyAction` resolves the whole turn in one call; there is no seam between the roll landing and the outcome applying. 1j's entry below describes this as a hook on `Policy`; it is a change to `applyAction`'s signature, which every test and visualiser calls. **Budget it as reducer work, and decide the shape before 1j opens.** `docs/EVALS.md`'s "Fortune spend rate and timing" metric has nothing to measure until it exists.
+- **NEW-1h — `eventsToLines` is the projection `AgentView.log` wants.** It lives in `src/classic/lines.ts`. It is total over the `GameEvent` union and ends in a `never` check, and its `wumpusMoved` case is the one that matters: that event carries the Wumpus's true room id, so **`AgentView.log` cannot be `events.map(e => e.text)`**. There is already a mutation-checked test that no line ever contains the Wumpus's room. Hoist the module out of `classic/` when the agent view becomes its second consumer.
+- **NEW-1h — `TELL_TEXT` is untested prose in `resolve.ts`** (1h finding 6), with no dark variants and two appearance words in it. Content step.
+- **NEW-1h — the move label and the doorway label disagree on screen** (`Move N` vs `north`, 1h finding 5). One line in `resolve.ts`. Settle it in 1i, with the screen in front of you.
+- **NEW-1h — `npm run devlog` zeroes the churn column instead of failing when git is unreachable** (1h finding 3), and `DEV-LOG.md` is currently stale against `dev-log.json` (1h finding 4). Both are close-out-ritual defects of the same family already recorded twice.
+- **NEW-1h — three noun dictionaries now live in three files.** `ACTION_LABEL` in `resolve.ts`, `ARCHETYPE_WORD`/`CREATURE_WORD`/`HAZARD_WORD`/`DIRECTION_WORD` in `data/outcomes.ts`, `BAND_LABEL` in `src/classic/labels.ts`. One renderer can live with that; the diorama will want all three, and that is when it stops being a preference.
+- **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so the adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls. **1f makes `AgentView.log` nearly free:** every narration now carries a `NarrationBeat`, so the log is a typed stream rather than strings to be reassembled, and the text renderer and the agent view read the same beats.
+- ~~**The text renderer must not write prose.**~~ **Held, 1h.** No sentence was added to `data/outcomes.ts` and none was inlined in the renderer. `tests/classic.test.ts` now asserts the other direction too: every narration on screen is character-for-character the string the engine emitted. The two exceptions are named in 1h finding 1 and both exist because the engine cannot express the fact at all.
 - **Five verbs roll for nothing** — see 1f finding 2. Either the top bands earn a gift or four verbs stop rolling. Deliberately untouched by 1g (it was scoped out of this step); it is 1j/1k's sim to arbitrate. Note that 1g has now built the machinery a gift would use — `rewardFlasks` on an outcome row — so the cheap version of this is a data change rather than a mechanic.
 - **The pit DC is still a correctness floor, not a balance number.** Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it. (The bloom and snare DCs are no longer "hazard DCs" at all: they are the verbs' `ACTION_DC` entries, and 1g measured what they produce.)
 - **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If a 1g sim number contradicts a 1d sweep number, this is the first place to look.
@@ -472,7 +555,11 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **NEW — whether the dark prose register should move to Guttering.** 1f chose Ember on the arithmetic that a clean 20-turn run ends there. Measured, runs reaching turn 18+ end at 3.5–5.2 oil, which is Guttering (1g finding 4). The decision was made on a number and the number is wrong; the choice may still be right.
 - **NEW — whether oil should bind at all.** 0–2% of runs reach Dark, 40–50% never leave Bright, and the reason is that 57–64% of runs end with the Wumpus around turn 12 (1g finding 6). Oil is sized for a run that lasts and almost none do. Either that is fine — oil is the *dawdling* tax and dawdlers die to the Wumpus first — or the lamp is decorative below Guttering. Needs human play to answer, not a sim.
 
-**These four bullets — the turn-cost price, the bloom-choice question, the dark-register threshold, and whether oil binds — are what step 1i exists to answer.** All four say "needs human play" or "nobody has played it"; none of them are 1j/1k's to arbitrate first.
+- **NEW-1h — what shape the Fortune seam takes.** 1h finding 2: Fortune is unspendable by anyone because `applyAction` resolves a whole turn in one call. Two candidate shapes — a two-phase `beginAction`/`commitAction`, or a spend intent passed into `applyAction` — and they differ in what they cost everything that already calls the reducer. **Decide before 1j opens**, because `docs/EVALS.md`'s Fortune metric depends on it and the retrofit gets more expensive with every test written against the current signature.
+- **NEW-1h — whether the engine should emit the sensed doorway set.** 1h finding 1. Today every renderer re-derives it and the darkness invariant is only as safe as the last renderer to get it right. The question is not whether to fix it but where: a field on `tellsFor`'s return, or an event.
+- **NEW-1h — whether `Move N` should read `Move north`.** 1h finding 5. A one-line label change in `resolve.ts`; on screen next to a doorway list that says "north". Left for whoever is reading the screen in 1i.
+
+**These four bullets — the turn-cost price, the bloom-choice question, the dark-register threshold, and whether oil binds — are what step 1i exists to answer.** All four say "needs human play" or "nobody has played it"; none of them are 1j/1k's to arbitrate first. **1h unblocked all four: there is now something to play.**
 - **A genuinely INT-weak trap** (a mimic or fake-treasure-room — forceable by STR, dodgeable by AGI, a real cost for an INT build trusting its read of the room), to fully close the per-stat coverage matrix the hazard redesign above sets up. New content, deferred alongside creature difficulty tiers — not part of the hazard-verb step.
 - **The stone-grub's chew/dig-through-terrain mechanic**, retired from v1 but slated to return. Separate from `FORCE`. Whenever it's built, it will hit the same "terrain never drifts within a run" tension the bloom-spread question above is already parked against — decide the two together, not separately.
 - **A known-path map render — explicitly deferred.** Prompted by a look at a reference game (Wumpin, itch.io) that pairs its text with a force-directed node-graph of discovered rooms. The graph-layout approach is wrong for this game (it's a real grid with real directions, not an arbitrary topology), but a fixed-grid render of *only what's been discovered* is a plausible text-renderer nice-to-have — not now, not for 1.5. Gate it on data: build it only if telemetry shows players or bots actually getting lost. That requires a "lostness" metric that doesn't exist yet — see `docs/OBSERVABILITY.md`.

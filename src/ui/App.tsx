@@ -1,22 +1,14 @@
 /**
- * Phase 0 placeholder. The text renderer arrives in Phase 1, the diorama in Phase 4.
+ * The shell. Classic mode is the whole of it until the diorama lands in Phase 4
+ * — at which point this is where the GDD 2.14 toggle between the two goes, and
+ * both read the same engine over the same seed.
  */
-export function App() {
-  return (
-    <main
-      style={{
-        minHeight: '100vh',
-        display: 'grid',
-        placeItems: 'center',
-        background: '#0E1A1C',
-        color: '#F2B155',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        letterSpacing: '0.08em',
-      }}
-    >
-      <h1 style={{ fontWeight: 500, fontSize: 'clamp(1.25rem, 5vw, 2rem)' }}>
-        Project Silent Echo
-      </h1>
-    </main>
-  )
+
+import { Classic } from '../classic/Classic.tsx'
+import { Title } from '../classic/Title.tsx'
+import { useRun } from '../state/run.ts'
+
+export function App(): React.JSX.Element {
+  const run = useRun((s) => s.run)
+  return run === null ? <Title /> : <Classic run={run} />
 }

@@ -56,8 +56,9 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 4 | 2026-09-17 | Phase 1d — creatures | 2 h | 1d, 1b-fix | 118 → 180 (+62) | +2631 / −59 | — | 7 |
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
-| 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | — | — | 8 |
-| | | **Total** | **9.0 h** | | **266** | **+16,404 / −558** | **—** | **36** |
+| 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | +2987 / −203 | — | 8 |
+| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 280 (+14) | — | — | 11 |
+| | | **Total** | **9.0 h** | | **280** | **+19,391 / −761** | **—** | **47** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -65,13 +66,14 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| visualiser | 13 | 36% |
-| eye | 10 | 28% |
-| tests | 4 | 11% |
-| mutation check | 3 | 8% |
-| test | 3 | 8% |
-| probe | 2 | 6% |
-| tooling | 1 | 3% |
+| eye | 15 | 32% |
+| visualiser | 13 | 28% |
+| played it | 5 | 11% |
+| tests | 4 | 9% |
+| test | 4 | 9% |
+| mutation check | 3 | 6% |
+| probe | 2 | 4% |
+| tooling | 1 | 2% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -111,6 +113,17 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-18 | The suite was green or red depending on CPU speed: outcomes.test.ts's source-of-truth sweep drives hundreds of seeded runs and sat just under vitest's 5s default on a fast desktop and over it on slower hardware. testTimeout is now 30s | test |
 | 2026-09-18 | The first sweep's hazard policy chose FORCE and AVOID 164 times out of 164, never ENDURE or DODGE. Not a finding about the verbs - a finding about the metric: a value function denominated in oil cannot see a shorter Confused or speed-over-caution, so it proves only that it is an oil-maximising policy while half the mechanic goes unmeasured. A second `quiet` policy exists because of this | visualiser |
 | 2026-09-18 | `npm run sim` has never existed. package.json declares "sim": "tsx scripts/sim.ts" and scripts/sim.ts is not in the repo, so the command errors - while CLAUDE.md 5 instructs every session that touches balance to run it and report the actual number, and ROADMAP's Phase 1 exit criteria list its output. Every balance read so far has come from a per-step visualiser sweep instead, which is a different thing and a weaker one. Recorded rather than fixed: the harness belongs to 1i | eye |
+| 2026-09-18 | The engine computes which doorways it looked at and then throws it away. tellsFor returns the tells it found and nothing about the ones it did not check, so 'nothing is through that door', 'your lamp does not reach that far' and 'you are too Confused to tell' reach every renderer as the same absence. A renderer that collapses them breaks CLAUDE.md 3's darkness-restricts-range-never-honesty invariant at the presentation layer without touching engine code, because the player reads silence as safety - and range and Confused have different counterplay, so it also points them at the wrong lever. Re-derived in view.ts's sensedDirections, duplicating the restricted branch inside getTells; the diorama and AgentView will each duplicate it again | eye |
+| 2026-09-18 | Fortune cannot be spent by anyone, and the Policy.spendFortune hook scheduled for 1j has nothing to attach to. GDD 2.5 spends Fortune after seeing a roll; applyAction rolls at step 1 and resolves the whole turn before returning, so the roll is only visible in the events, by which time the outcome is applied. The status line shows Fortune and there is no way to spend it - for a human, a heuristic policy or an LLM - and EVALS.md's required 'Fortune spend rate and timing' metric has nothing to measure. This is a change to applyAction's signature, which every test and visualiser calls, not a one-line Policy addition | eye |
+| 2026-09-18 | npm run devlog silently zeroes the churn column when git is unreachable. churnOf shells out to git show and the git() helper catches every failure and returns an empty string, so every line count becomes a dash, the total becomes +0 / -0, and the script exits 0 printing 'devlog: wrote docs/DEV-LOG.md'. Same shape as the two close-out failures already recorded - the stale scratch-path clobber in 1d and the empty commits field - a write that reports success and carries the wrong content | eye |
+| 2026-09-18 | DEV-LOG.md is stale against dev-log.json: the commits field is no longer empty for 1e, 1f and 1g, but session 7's Lines column still reads dash in the generated table, so devlog was never re-run after the follow-up commit populated the field. The checklist item caught the field and missed the artefact it feeds. Separately, 1g's commits lists 2a25e07, which is session 3's 'Docs and hygiene' commit - either wrong or double-counting that diff; unverifiable from this session, check with git show -s --oneline 2a25e07 | eye |
+| 2026-09-18 | Every doorway read 'beyond your senses' on the end screen at Lamp 6 of 12. A finished run carries no standing senses forward, correctly, and the panel then explained that absence as a failed lamp - the screen telling the player something untrue about a perfectly bright doorway. The suite was green | played it |
+| 2026-09-18 | The roll breakdown rendered '+ Agility -1': a literal plus separator in front of a modifier that already carries its own sign. The log line had it right from the start, so the two panels showing the same roll disagreed | played it |
+| 2026-09-18 | The ending panel said 'turn 15 of 20' over a log whose last entry was '14 - Move S'. finish() advances the clock by the action's turn cost before committing (1e), so state.turn is one past the turn a run ended on. Both numbers are correct and printing them together is not | played it |
+| 2026-09-18 | The = and vs in the roll breakdown were invisible at normal contrast (--rule on --panel). CLAUDE.md 4 makes the engine label every modifier so the player can read them, which a panel they have to squint at defeats | played it |
+| 2026-09-18 | TELL_TEXT is the one piece of prose still living in code (resolve.ts) and no test has ever looked at it: outcomes.test.ts's source-of-truth sweep reads narration, oilChanged and companionLost events, and tell events are not in spokenText. So the seven tell strings have no lit/dark variants, and stench's 'pallid' and freshChisel's 'fresh chisel marks' describe an appearance - which is what 1f's dark-register rule exists to keep out of a lamp-less room. Neither word is in VISION_WORDS, so moving the table alone would not catch them | eye |
+| 2026-09-18 | The menu says 'Move N' and the doorway list six lines above says 'north'. legalActions builds move labels from the compass letter; DIRECTION_WORD exists because, in its own comment, compass letters read badly in a sentence. One line in resolve.ts, left alone because changing an engine-owned label is not a rendering step's call | played it |
+| 2026-09-18 | A test asserting the doorway range restriction failed, and the renderer was right: LISTEN buys the full set of tells back for exactly one turn (GDD 2.8.1), so all four doorways stay reported while the player is choosing what to do with what they paid a turn to learn. The assertion as first written asked the screen to throw that away one beat early | test |
 
 <!-- devlog:end -->
 

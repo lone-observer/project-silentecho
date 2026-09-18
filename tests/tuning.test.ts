@@ -16,10 +16,10 @@ import type { Action, ActionKind, CreatureKind, HazardKind, WumpusTier } from '.
  * creature or hazard, TypeScript forces it into these arrays and the tests
  * below then force it into every tuning table.
  */
-const ALL_ACTIONS: readonly ActionKind[] = [
-  'move', 'listen', 'search', 'force', 'sneak', 'fight',
-  'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
-]
+const ALL_ACTIONS = [
+  'move', 'listen', 'search', 'force', 'endure', 'avoid', 'dodge', 'sneak',
+  'fight', 'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
+] as const
 const ALL_CREATURES: readonly CreatureKind[] = [
   'goblin', 'lumewing', 'grellhound', 'quietOne',
 ]
@@ -27,9 +27,27 @@ const ALL_HAZARDS: readonly HazardKind[] = ['pit', 'sporeBloom', 'snareCarving',
 const ALL_TIERS: readonly WumpusTier[] = [1, 2, 3, 4]
 
 // Compile-time guard: these arrays must stay in step with the unions.
+//
+// `ALL_ACTIONS` IS `as const` AND NOT `readonly ActionKind[]`, AND THAT IS THE
+// WHOLE POINT. Annotating it as `readonly ActionKind[]` makes
+// `(typeof ALL_ACTIONS)[number]` evaluate to `ActionKind` itself, so the
+// assertion below reads `ActionKind extends ActionKind` and holds no matter
+// what the array contains. This file shipped that way from 1a: the array named
+// thirteen verbs, 1g added `endure`, `avoid` and `dodge` to the union, and this
+// compiled clean against a list naming none of them — which meant the three
+// coverage tests below silently stopped checking the three newest verbs against
+// `ACTION_DC` and `SCENT_BY_ACTION`.
+//
+// Same defect, same fix, as `tests/outcomes.test.ts` (1g). The second assertion
+// is what makes it bite in both directions: the first says every `ActionKind`
+// is listed, the second says nothing is listed that is not an `ActionKind`, so
+// neither a missing verb nor a typo'd one compiles.
 type _ActionsCovered = Action['kind'] extends (typeof ALL_ACTIONS)[number] ? true : never
 const _actionsCovered: _ActionsCovered = true
 void _actionsCovered
+
+const _actionsReal: readonly ActionKind[] = ALL_ACTIONS
+void _actionsReal
 
 describe('oil bands', () => {
   it('cover 0..OIL.max with no gaps and no overlaps', () => {

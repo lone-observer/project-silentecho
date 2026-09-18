@@ -1507,7 +1507,26 @@ export function tellsFor(state: GameState, listening = false): Tell[] {
   })
 }
 
-const TELL_TEXT: Record<Tell['kind'], string> = {
+/**
+ * What each tell smells, sounds or feels like.
+ *
+ * THIS IS THE ONE PIECE OF PROSE STILL LIVING IN CODE, and 1h is flagging it
+ * rather than moving it. CLAUDE.md 2.4 puts prose in `data/`, and
+ * `tests/outcomes.test.ts`'s source-of-truth sweep is what enforces that — but
+ * that sweep reads `narration`, `oilChanged` and `companionLost` events only,
+ * so a `tell` event's text has never been checked against any table. Two
+ * consequences, both noted in PHASE-1-PROGRESS for a content step to settle:
+ * these seven strings have no lit/dark variants, and `stench`'s "pallid" and
+ * `freshChisel`'s "marks" describe an APPEARANCE that GDD 2.8.1's dark register
+ * should not be able to offer. Moving the table is a content change; 1h only
+ * made it reachable.
+ *
+ * Exported because a renderer needs the standing tells on the very first turn,
+ * before any action has produced a `tell` event, and because `AgentView.tells`
+ * is already declared as `{ direction, kind, text }` — so 1j needs exactly this
+ * and a second copy in a renderer would be two tables to drift apart.
+ */
+export const TELL_TEXT: Record<Tell['kind'], string> = {
   stench: 'a pallid, heavy stench',
   draft: 'a cold draft',
   sweetness: 'something sweet',
@@ -1517,7 +1536,7 @@ const TELL_TEXT: Record<Tell['kind'], string> = {
   metallic: 'iron and old coin',
 }
 
-function tellText(tell: Tell): string {
+export function tellText(tell: Tell): string {
   return `${tell.direction}: ${TELL_TEXT[tell.kind]}.`
 }
 
