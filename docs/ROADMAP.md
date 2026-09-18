@@ -34,9 +34,9 @@ Types, seeded RNG, dice resolver, engine-isolation guard, empty React shell.
 
 The largest phase. Everything except pictures.
 
-Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · **the hazard verbs (`FORCE`/`ENDURE`/`AVOID`/`DODGE`)** · text renderer · agent/sim harness.
+Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, companions, `SEND` · world drift (GDD §2.9.1: wandering creatures, spreading blooms, the Heart-carrying scent multiplier) · the outcomes data table · **the hazard verbs (`FORCE`/`ENDURE`/`AVOID`/`DODGE`)** · text renderer · **a human playtest pass to rebalance the hazard rewards** · agent/sim harness.
 
-**`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1i**, and until it does, "the sim says" means "a visualiser sweep says".
+**`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1j**, and until it does, "the sim says" means "a visualiser sweep says".
 
 **The agent interface is a Phase 1 deliverable, built to `docs/EVALS.md` requirements** — pluggable policies, fixed seed sets, full per-turn logging, no state leakage, resumable batches. `npm run sim` is one policy among several. Building it as a one-off script means rebuilding it in week 5.
 
