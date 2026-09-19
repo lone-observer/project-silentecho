@@ -240,7 +240,16 @@ export interface Companion {
    * clears Strong Success even at INT 18.
    */
   readonly brave: boolean
-  /** Mixed-success tames are skittish: they flee if the player takes damage. */
+  /**
+   * Mixed-success tames are skittish: they bolt on a CRITICAL FAILURE unless the
+   * player spends a Fortune point (`skittishBolts`, gated on
+   * `COMPANION.skittishFleesOnCriticalFailure`).
+   *
+   * This read "they flee if the player takes damage" until 1i part 2, which was
+   * the rule until 18 Sep 2026 and describes a mechanic that cannot fire: health
+   * and damage were retired with the economy rewrite (GDD 2.6), and the trigger
+   * moved to the critical band in 1i part 1 without this comment moving with it.
+   */
   readonly skittish: boolean
 }
 
@@ -483,7 +492,13 @@ export type NarrationBeat =
   | 'skittishUpkeep'
   | 'foundFlask'
   | 'caughtBreath'
+  // The grellhound's warning, one beat per band of `GRELLHOUND_WARNING`.
+  // `grellhoundGrowls` is the middle band and kept its name through the 1i part 2
+  // rework; the other two are the escalation either side of it. All three now
+  // carry a `{direction}`, because the warning does.
+  | 'grellhoundEars'
   | 'grellhoundGrowls'
+  | 'grellhoundBarks'
   | 'grellhoundReveals'
   // 'carvingsWarn' retired 18 Sep 2026: it was READ's adjacent-hazard reveal,
   // and READ is gone. The grellhound still has its own version of the beat.

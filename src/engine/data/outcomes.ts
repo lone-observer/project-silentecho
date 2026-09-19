@@ -1636,9 +1636,34 @@ export const NOTES: Record<NoteBeat, Beat> = {
     lit: 'You catch your breath.',
     dark: 'You catch your breath.',
   },
+  /**
+   * The grellhound's warning, one beat per band of `GRELLHOUND_WARNING`
+   * (3 / 2 / 1 rooms). GDD 2.9, reworked in 1i part 2.
+   *
+   * ALL THREE NAME A DOORWAY, which is the new part — the passive used to be a
+   * bare "it growls" with no direction in it, fired at the same radius the free
+   * mandatory stench already covers directionally, and therefore said nothing
+   * the player did not have. The escalation is what makes the hound an
+   * early-warning SYSTEM rather than a light that is on, and `grellhoundEars`
+   * at three rooms is the only one of the three carrying something the player
+   * could not have had for nothing.
+   *
+   * The hound is blind (GDD 2.9), so none of this is it looking at anything.
+   * What the dark variants move is who is doing the perceiving: in the dark the
+   * player stops reading the animal and starts feeling it, which is 2.8.1's
+   * channel-not-fact rule applied to the one companion made out of senses.
+   */
+  grellhoundEars: {
+    lit: 'The grellhound stops. Its ears come up, and it holds them toward the {direction} doorway.',
+    dark: 'The grellhound stops against your leg. You feel its ears come up, held toward the {direction} doorway.',
+  },
   grellhoundGrowls: {
-    lit: 'The grellhound growls, low and steady, and does not stop.',
-    dark: 'The grellhound growls, low and steady, and does not stop.',
+    lit: 'The grellhound growls, low and steady, and does not stop. It has squared itself to the {direction} doorway.',
+    dark: 'The grellhound growls, low and steady, and does not stop. You find it by the sound, squared to the {direction} doorway.',
+  },
+  grellhoundBarks: {
+    lit: 'The grellhound barks once, hard, and puts itself between you and the {direction} doorway.',
+    dark: 'The grellhound barks once, hard, and shoves in against your knees, between you and the {direction} doorway.',
   },
   // Radius 1, honest, and available before the player chooses — GDD 2.9.1.
   grellhoundReveals: {

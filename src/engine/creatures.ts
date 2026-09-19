@@ -36,7 +36,8 @@ import type {
 } from './types.ts'
 import { DIRECTIONS } from './types.ts'
 import type { Rng } from './rng.ts'
-import { activeHazardOf } from './wumpus.ts'
+import { activeHazardOf, stenchDirections, wumpusDistance } from './wumpus.ts'
+import type { GrellhoundWarningBand } from './data/tuning.ts'
 import {
   ACTION_DC,
   COMPANION,
@@ -44,6 +45,7 @@ import {
   ENCOUNTER,
   FIGHT_OUTCOMES,
   FLEE_OUTCOMES,
+  grellhoundWarningFor,
   SCENT_BY_ACTION,
   SNEAK_OUTCOMES,
   sendScentFor,
@@ -291,15 +293,36 @@ export interface CompanionSenses {
    */
   readonly revealedHazards: readonly { readonly direction: Direction; readonly hazard: HazardKind }[]
   /**
-   * The grellhound growls when the Wumpus reaches radius 2.
+   * The grellhound's escalating warning, or null with nothing in range.
    *
    * This is not a nicety. The fairness guarantee (GDD 2.10) is only that a
-   * player who HOLDS STILL is warned; moving into a room adjacent to the Wumpus
-   * gets no warning at all. The growl buys back exactly the turn that movement
-   * costs you, which is why the grellhound is load-bearing and why it is on the
+   * player who HOLDS STILL is warned; walking into a room adjacent to the
+   * Wumpus gets no warning at all. The hound buys back exactly the turn that
+   * movement costs you, which is why it is load-bearing and why it is on the
    * do-not-cut list in the roadmap.
+   *
+   * IT CARRIES A DIRECTION NOW, and it used to be a bare boolean. That boolean
+   * was the whole of what 1i part 2 opened this file to fix: it fired at radius
+   * 2, which is where the universal mandatory stench floor fires as well
+   * (GDD 2.10, 18 Sep 2026), and the floor is directional and free. A hound
+   * saying "something is near" where the game already says "it is north" is not
+   * a passive, it is a duplicate. `raisedEars` at radius 3 is the band that
+   * tells the player something they could not otherwise know; the two inner
+   * bands are the same fact arriving with more urgency, which is narration
+   * rather than information — written down here so nobody re-derives it later
+   * as a finding.
    */
-  readonly wumpusGrowl: boolean
+  readonly wumpusWarning: {
+    readonly band: GrellhoundWarningBand
+    /**
+     * The doorways that lead toward it, from `stenchDirections` — the same
+     * shortest-path rule the mandatory stench uses, at a wider radius. More than
+     * one doorway can honestly lead toward one Wumpus, and the hound reports
+     * every one of them rather than choosing: choosing would be the engine
+     * inventing a preference and calling it a tell (GDD 2.4).
+     */
+    readonly directions: readonly Direction[]
+  } | null
 }
 
 export function companionSenses(
@@ -308,7 +331,7 @@ export function companionSenses(
   playerRoomId: RoomId,
   wumpusRoomId: RoomId,
 ): CompanionSenses {
-  const none: CompanionSenses = { lanternRadiusBonus: 0, revealedHazards: [], wumpusGrowl: false }
+  const none: CompanionSenses = { lanternRadiusBonus: 0, revealedHazards: [], wumpusWarning: null }
   if (companion === null) return none
 
   if (companion.kind === 'lumewing') {
@@ -325,31 +348,28 @@ export function companionSenses(
       const hazard = room ? activeHazardOf(room) : null
       if (hazard) revealed.push({ direction, hazard })
     }
+
+    // Both halves come out of wumpus.ts rather than out of a second BFS in this
+    // file: the distance picks the band, and the doorways are the SAME
+    // shortest-path rule the mandatory stench uses, asked at a wider radius.
+    // Two implementations of "which doorway leads toward it" is one of them
+    // being wrong eventually, and it would be this one — it only fires with a
+    // hound alive and the Wumpus close, which is not where anyone is looking.
+    const radius = COMPANION.grellhoundWarningRadius
+    const distance = wumpusDistance(labyrinth, playerRoomId, wumpusRoomId, radius)
+    const band = distance === null ? null : grellhoundWarningFor(distance)
+
     return {
       ...none,
       revealedHazards: revealed,
-      wumpusGrowl: withinRadius(labyrinth, playerRoomId, COMPANION.grellhoundWarningRadius).includes(wumpusRoomId),
+      wumpusWarning:
+        band === null
+          ? null
+          : { band, directions: stenchDirections(labyrinth, playerRoomId, wumpusRoomId, radius) },
     }
   }
 
   return none
-}
-
-function withinRadius(labyrinth: Labyrinth, from: RoomId, radius: number): RoomId[] {
-  const seen: Record<RoomId, number> = { [from]: 0 }
-  const queue: RoomId[] = [from]
-  for (let head = 0; head < queue.length; head++) {
-    const id = queue[head] as RoomId
-    const d = seen[id] as number
-    if (d >= radius) continue
-    for (const n of neighbourIds(labyrinth, id)) {
-      if (seen[n] === undefined) {
-        seen[n] = d + 1
-        queue.push(n)
-      }
-    }
-  }
-  return Object.keys(seen)
 }
 
 /**

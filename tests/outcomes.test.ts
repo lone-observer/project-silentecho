@@ -521,44 +521,80 @@ describe('use — the reducer speaks only from the table', () => {
     //   goblinScrounges   needs a tamed goblin and a 10% roll
     //   braveOverride     a natural 20 on a tame that also succeeds
     //   actionUnavailable only an agent asking for something illegal
+    //   grellhoundEars    all three need a tamed grellhound ALIVE while the
+    //   grellhoundGrowls  Wumpus is inside three rooms. `grellhoundReveals`
+    //   grellhoundBarks   only needs the hound and an adjacent hazard, and is
+    //                     reached — which is what says the gap is the Wumpus's
+    //                     proximity rather than the tame.
+    //   lampBurnsDown     NOT MERELY UNREACHED — unreachable. Nothing in the
+    //                     reducer emits it at all: it was the passive burn's
+    //                     line, the burn was retired in part 1, and part 1 kept
+    //                     the beat deliberately ("a flask spilling and a lamp
+    //                     guttering still need words"). `tests/resolve.test.ts`
+    //                     asserts a multi-turn action does NOT emit it. By the
+    //                     standard 1g applied to `HAZARD_NARRATION`'s dead rows
+    //                     that makes it dead content; keeping or cutting it is
+    //                     a content call and is flagged in PHASE-1-PROGRESS
+    //                     rather than taken here. Found by this assertion on
+    //                     the turn it was made total.
+    //   heartThrustUpon   the bad ENTER PORTAL branch (GDD 2.8.1), written in
+    //                     part 1. Needs a policy that steps into a portal AND
+    //                     rolls under it; neither of these two does the first.
+    //                     Also found by making the ledger total — it has been
+    //                     unverified since the day it was written.
     //
-    // WAS SEVEN BEATS, IS NOW THREE, and the movement is worth reading rather
-    // than just updating. Three came OFF the list because the 1i economy gave
-    // these policies longer runs to spend: 50 turns instead of 20 means a
-    // grellhound tamed early is still alive when the Wumpus closes, so
-    // `grellhoundGrowls` and `grellhoundReveals` finally fire, and `spoilsTaken`
-    // with them. That is the turn-cap change showing up somewhere nobody aimed
-    // it — the companion system has been the least-exercised part of the reducer
-    // since 1d, and it is less so now for free.
+    // THE LIST IS NOW THE COMPLEMENT OF WHAT THE SWEEP SEES, ASSERTED BOTH WAYS,
+    // and that changed in 1i part 2 because the one-way version had already let
+    // three things through. Part 1's close-out recorded `grellhoundGrowls` as
+    // having come OFF this list — "50 turns instead of 20 means a grellhound
+    // tamed early is still alive when the Wumpus closes". Re-measured at the
+    // start of part 2, against part 1's own committed code: it is not reached,
+    // and had not been. Nothing failed, because a beat that stops being reached
+    // — or never started — is invisible to a check that only asserts the listed
+    // ones stay unreached. The previous comment even said so — "only one of
+    // those two gets noticed if the list is not asserted in both directions" —
+    // and then did not assert it.
     //
-    // NOTHING CAME ON, which is the half worth checking rather than assuming.
-    // `SEARCH_FIND_BAND` moved from mixed-or-better to success-or-better in this
-    // step — GDD 2.7's "finds loot at lower reliability", the price of SEARCH
-    // being FOCUS's cheap sibling — and a sweep with a narrower route policy
-    // does lose `foundFlask` to it. These two still reach it, so it stays
-    // verified; the near miss is flagged in PHASE-1-PROGRESS as the first place
-    // to look if SEARCH stops being worth a turn.
+    // So the assertion below is totality: every beat the engine can speak is
+    // either seen by the sweep or named here with a reason. Coverage can now
+    // only move by editing this list, in either direction. Making it total
+    // immediately added `lampBurnsDown` and `heartThrustUpon` to the list, both
+    // of which had been unverified without anybody having said so.
     //
-    // That is the ledger doing exactly its job: coverage here is stated rather
-    // than assumed, so a change three modules away that silently improved it
-    // showed up as a failing test instead of as nothing at all. Note also which
-    // direction it moved — an incidental shift can take a beat OFF this list as
-    // easily as put one on, and only one of those two gets noticed if the list
-    // is not asserted in both directions.
+    // `SEARCH_FIND_BAND` moved to success-or-better in part 1 and a narrower
+    // route policy would lose `foundFlask` to it; these two still reach it, and
+    // the near miss is flagged in PHASE-1-PROGRESS as the first place to look if
+    // SEARCH stops being worth a turn.
     const unreached: NarrationBeat[] = [
       'goblinScrounges',
       'braveOverride',
       'actionUnavailable',
+      'grellhoundEars',
+      'grellhoundGrowls',
+      'grellhoundBarks',
+      'lampBurnsDown',
+      'heartThrustUpon',
     ]
-    for (const beat of unreached) {
+
+    // Every beat that can ride on a `narration` or `oilChanged` event. Built
+    // from the tables rather than written out, so a new beat joins the ledger by
+    // existing and someone has to say which side of it it is on.
+    const everyBeat: NarrationBeat[] = [
+      ...(Object.keys(NOTES) as NarrationBeat[]),
+      ...(Object.keys(ENDINGS) as NarrationBeat[]),
+      'actionOutcome',
+      'hazardOutcome',
+    ]
+
+    for (const beat of everyBeat) {
       expect(
         observed.has(beat),
-        `${beat} is now reached by the sweep — remove it from the unreached list`,
-      ).toBe(false)
+        observed.has(beat)
+          ? `${beat} is now reached by the sweep — take it off the unreached list`
+          : `${beat} is no longer reached by the sweep — put it on the unreached list, with the reason`,
+      ).toBe(!unreached.includes(beat))
     }
-    // Everything else the sweep does see is genuinely covered by the
-    // source-of-truth assertion above.
-    expect(observed.size).toBeGreaterThanOrEqual(25)
+    expect(observed.size).toBe(everyBeat.length - unreached.length)
   })
 
   it('never ships an unsubstituted slot to the player', () => {

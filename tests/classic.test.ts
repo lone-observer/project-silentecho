@@ -653,21 +653,33 @@ describe('classic renderer — getting around', () => {
   })
 
   /**
-   * The display rule from 1f finding 2: MOVE and LISTEN have no banded
-   * consequence above a critical failure, so their breakdown panel is noise.
-   * The roll still happens and still reaches the log — this is about which
-   * panel opens.
+   * The display rule from 1f finding 2: MOVE and FOCUS have no banded
+   * consequence above a critical failure — the band moves what the action COST
+   * and nothing about what it produced — so their breakdown panel is noise. The
+   * roll still happens and still reaches the log; this is about which panel
+   * opens.
+   *
+   * IT SAID `listen` UNTIL 1i PART 2 AND PASSED THE WHOLE TIME, which is the
+   * part worth recording. `LISTEN` was retired in part 1, so the second half of
+   * the `||` matched nothing a renderer could ever be handed and every FOCUS
+   * fell through to the `else` branch — which asserts the opposite, and held,
+   * because `INERT_ABOVE_CRIT_FAIL` was equally stale. The test agreed with the
+   * constant it was checking rather than with the game. The `focuses` counter
+   * is what stops that recurring: the sweep now has to have SEEN a FOCUS roll
+   * before its verdict on FOCUS rolls means anything.
    */
-  it('marks a MOVE or LISTEN roll inconsequential unless it critically failed', () => {
+  it('marks a MOVE or FOCUS roll inconsequential unless it critically failed', () => {
     let inert = 0
     let loud = 0
+    let focuses = 0
     for (const difficulty of DIFFICULTIES) {
       for (let seed = 1; seed <= 20; seed++) {
         const { run } = drive(seed, difficulty)
         for (const turn of run.turns) {
           const roll = turn.roll
           if (roll === null) continue
-          if (roll.action === 'move' || roll.action === 'listen') {
+          if (roll.action === 'focus') focuses += 1
+          if (roll.action === 'move' || roll.action === 'focus') {
             const isCrit = roll.band === 'criticalFailure'
             expect(roll.consequential).toBe(isCrit)
             if (isCrit) loud += 1
@@ -680,6 +692,7 @@ describe('classic renderer — getting around', () => {
     }
     expect(inert, 'never saw an ordinary walk').toBeGreaterThan(50)
     expect(loud, 'never saw a clumsy one').toBeGreaterThan(0)
+    expect(focuses, 'the sweep never focused — the FOCUS half asserts nothing').toBeGreaterThan(0)
   })
 })
 

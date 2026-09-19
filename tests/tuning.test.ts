@@ -2,8 +2,14 @@ import { describe, it, expect } from 'vitest'
 import {
   ACTION_DC,
   BAND_OIL_MULTIPLIER,
+  COMPANION,
+  COMPANION_FREE_VERB,
+  companionWaivesOil,
   DIFFICULTY,
+  GRELLHOUND_WARNING,
+  grellhoundWarningFor,
   HAZARD_COUNTS,
+  isStatAgnostic,
   OIL,
   OIL_BANDS,
   OIL_PRICE,
@@ -12,11 +18,12 @@ import {
   SCENT_BY_ACTION,
   TAME_DC,
   wumpusReach,
+  WUMPUS,
   WUMPUS_TIERS,
   oilBandFor,
 } from '../src/engine/data/tuning.ts'
 import type { Action, ActionKind, CreatureKind, HazardKind, WumpusTier } from '../src/engine/types.ts'
-import { BAND_ORDER } from '../src/engine/types.ts'
+import { BAND_ORDER, DC } from '../src/engine/types.ts'
 
 /**
  * Exhaustive lists, derived from the union types. If someone adds an action,
@@ -171,6 +178,71 @@ describe('the oil price model (GDD 2.6, 2.8.1)', () => {
 
   it('leaves DROP HEART free at every band (GDD 2.9.1)', () => {
     for (const band of BAND_ORDER) expect(oilCostFor('dropHeart', band)).toBe(0)
+  })
+
+  /**
+   * The companion discount table, and the reason it is a flat zero rather than
+   * a waiver of the losing bands only. GDD 2.9, 1i part 2.
+   *
+   * The tempting implementation is `min(0, oilCostFor())` — keep the top-band
+   * payouts, remove every way to lose — and it makes the verb's expectation
+   * strictly positive, which is the anti-farming assertion above rebuilt out of
+   * a companion instead of a multiplier. A goblin can DISARM one bloom after
+   * another. What this file can check is the table's own property: every band of
+   * a waived verb prices at zero. The REDUCER's half of it — that the charge
+   * site and the spoils beat both go through the discount — is mutation-checked
+   * in `tests/resolve.test.ts`, which is where the two could disagree.
+   */
+  it('makes a waived verb free, never profitable, at every band', () => {
+    for (const [creature, action] of Object.entries(COMPANION_FREE_VERB)) {
+      const kind = creature as CreatureKind
+      for (const band of BAND_ORDER) {
+        const price = companionWaivesOil(kind, action) ? 0 : oilCostFor(action, band)
+        expect(price, `${creature} ${action} ${band}`).toBe(0)
+      }
+      // And it waives exactly one verb, for exactly that companion.
+      for (const other of ALL_ACTIONS) {
+        if (other === action) continue
+        expect(companionWaivesOil(kind, other), `${creature} should not waive ${other}`).toBe(false)
+      }
+    }
+    expect(companionWaivesOil(null, 'disarm')).toBe(false)
+    expect(companionWaivesOil('grellhound', 'disarm')).toBe(false)
+  })
+
+  it('discounts the price and never the odds (GDD 2.9)', () => {
+    // The discount must not have leaked into the roll. Every waived verb keeps
+    // its DC and its stat-agnostic membership exactly as it had them.
+    expect(COMPANION_FREE_VERB.goblin).toBe('disarm')
+    expect(COMPANION_FREE_VERB.lumewing).toBe('focus')
+    expect(ACTION_DC.disarm).toBe(DC.moderate)
+    expect(isStatAgnostic('disarm')).toBe(true)
+    expect(isStatAgnostic('focus')).toBe(false)
+  })
+
+  /**
+   * The grellhound's warning bands. GDD 2.9, reworked 1i part 2.
+   *
+   * The assertion that matters is the last one: the outer band has to sit
+   * STRICTLY beyond the free mandatory stench floor, because everything inside
+   * that floor is information the player already has for nothing (GDD 2.10).
+   * A table whose widest band is 2 is a passive that does nothing, which is the
+   * state this rework found.
+   */
+  it('escalates the grellhound warning and reaches past the free stench floor', () => {
+    const distances = GRELLHOUND_WARNING.map((b) => b.maxDistance)
+    expect(distances).toEqual([...distances].sort((a, b) => a - b))
+    expect(new Set(distances).size, 'two bands at one distance is one dead band').toBe(distances.length)
+
+    for (const { maxDistance, band } of GRELLHOUND_WARNING) {
+      expect(grellhoundWarningFor(maxDistance)).toBe(band)
+    }
+    expect(grellhoundWarningFor(0), 'standing in it is a catch, not a warning').toBeNull()
+    expect(grellhoundWarningFor(COMPANION.grellhoundWarningRadius + 1)).toBeNull()
+
+    // Derived, so the radius and the outermost band cannot disagree.
+    expect(COMPANION.grellhoundWarningRadius).toBe(Math.max(...distances))
+    expect(COMPANION.grellhoundWarningRadius).toBeGreaterThan(WUMPUS.mandatoryStenchRadius)
   })
 
   /**

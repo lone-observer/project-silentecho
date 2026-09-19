@@ -22,8 +22,10 @@ import {
   replayRun,
   tellsFor,
 } from '../src/engine/resolve.ts'
-import { ENCOUNTER_STAT, encounterOptions } from '../src/engine/creatures.ts'
+import { companionSenses, ENCOUNTER_STAT, encounterOptions } from '../src/engine/creatures.ts'
 import { createWumpus } from '../src/engine/wumpus.ts'
+import { distancesFrom } from '../src/engine/generate.ts'
+import { DIRECTION_WORD } from '../src/engine/data/outcomes.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
 import type {
   Action, Companion, CreatureKind, Difficulty, Direction,
@@ -756,5 +758,170 @@ describe('tells, as the reducer serves them', () => {
     expect(
       tellsFor(carried).flatMap((d) => d.tells).some((t) => t.kind === 'metallic'),
     ).toBe(false)
+  })
+})
+
+// ===========================================================================
+// Companion buffs — GDD 2.9, built in 1i part 2
+// ===========================================================================
+
+/** The player standing in a live, unanswered hazard encounter. */
+function hazardState(seed: number, hazard: 'sporeBloom' | 'snareCarving'): GameState {
+  const state = run(seed)
+  const here = state.player.roomId
+  const withHazard = patchRoom(state, here, { hazard, hazardCleared: false, creature: null })
+  return { ...withHazard, hazardRoomId: here }
+}
+
+const withCompanion = (state: GameState, kind: CreatureKind | null): GameState => ({
+  ...state,
+  player: {
+    ...state.player,
+    companion: kind === null ? null : { kind, brave: false, skittish: false },
+  },
+})
+
+/** The oil the ACTION cost, read off the event stream rather than off the table. */
+function priceCharged(events: readonly GameEvent[]): number {
+  return events
+    .filter((e) => e.kind === 'oilChanged' && (e.beat === 'lampGutters' || e.beat === 'lampBrightens'))
+    .reduce((sum, e) => sum + (e.kind === 'oilChanged' ? e.delta : 0), 0)
+}
+
+describe('a companion that waives a verb (GDD 2.9)', () => {
+  /**
+   * MUTATION-CHECKED. Reverting the charge site to `oilCostFor` fails this.
+   *
+   * Read off `oilChanged` rather than off `player.oil`, because a goblin also
+   * scrounges at step 7 and a test that watched the lamp would be measuring two
+   * mechanics at once — and would pass for the wrong reason on the 10% of turns
+   * the scrounge fires.
+   */
+  it('charges a goblin-assisted DISARM nothing, at every band it can roll', () => {
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const base = hazardState(seed, 'snareCarving')
+      const disarm = legalActions(base).find((m) => m.action.kind === 'disarm')
+      expect(disarm, `seed ${seed} should offer DISARM in a snare`).toBeDefined()
+      if (!disarm) continue
+
+      const alone = act(withCompanion(base, null), disarm.action)
+      const helped = act(withCompanion(base, 'goblin'), disarm.action)
+
+      expect(priceCharged(alone.events), `seed ${seed} unassisted`).not.toBe(0)
+      expect(priceCharged(helped.events), `seed ${seed} with a goblin`).toBe(0)
+
+      // THE DISCOUNT IS ON THE PRICE, NOT THE ODDS. Same roll, same band, same
+      // DC — the goblin is no better at taking a snare apart than you are.
+      const rollOf = (events: readonly GameEvent[]) =>
+        events.find((e) => e.kind === 'roll')
+      expect(rollOf(helped.events)).toEqual(rollOf(alone.events))
+    }
+  })
+
+  it('charges a lumewing-assisted FOCUS nothing, and only FOCUS', () => {
+    const base = run(7)
+    const focus = legalActions(base).find((m) => m.action.kind === 'focus')
+    const move = legalActions(base).find((m) => m.action.kind === 'move')
+    expect(focus).toBeDefined()
+    expect(move).toBeDefined()
+    if (!focus || !move) return
+
+    expect(priceCharged(act(withCompanion(base, null), focus.action).events)).not.toBe(0)
+    expect(priceCharged(act(withCompanion(base, 'lumewing'), focus.action).events)).toBe(0)
+    // The moth pays for doorways, not for walking.
+    expect(priceCharged(act(withCompanion(base, 'lumewing'), move.action).events)).not.toBe(0)
+    // And it is the moth's discount, not everyone's.
+    expect(priceCharged(act(withCompanion(base, 'grellhound'), focus.action).events)).not.toBe(0)
+  })
+
+  /**
+   * MUTATION-CHECKED, and the reason `oilCostWith` exists rather than two lines
+   * at the charge site. The spoils beat asks "did this hand oil back" to decide
+   * whether to say so. Asked of the price LIST it says yes at a top band even
+   * when the companion waived the charge — the engine announcing a payout the
+   * player never received, which is a text-parity failure (CLAUDE.md 2.3) of
+   * exactly the kind that only ever turns up by reading a run.
+   */
+  it('never narrates spoils a waived verb did not hand back', () => {
+    const base = hazardState(3, 'snareCarving')
+    const disarm = legalActions(base).find((m) => m.action.kind === 'disarm')
+    expect(disarm).toBeDefined()
+    if (!disarm) return
+
+    // A natural 20 against DISARM's Moderate DC is a strong success, which is a
+    // band that pays — so the unassisted run is the control that proves the
+    // beat can fire here at all.
+    const cleared = (events: readonly GameEvent[]) =>
+      events.some((e) => e.kind === 'narration' && e.beat === 'hazardCleared')
+
+    const alone = act(withCompanion(base, null), disarm.action, fixedD20(20))
+    expect(cleared(alone.events), 'the control never reached a paying band').toBe(true)
+    expect(priceCharged(alone.events)).toBeGreaterThan(0)
+
+    const helped = act(withCompanion(base, 'goblin'), disarm.action, fixedD20(20))
+    expect(cleared(helped.events)).toBe(false)
+    expect(priceCharged(helped.events)).toBe(0)
+  })
+})
+
+describe('the grellhound warning, through the reducer (GDD 2.9)', () => {
+  /**
+   * The text-parity half of the rework (CLAUDE.md 2.3): a fact the player can
+   * learn has to be expressible from the event stream, so the warning has to
+   * arrive as narration carrying its direction — not as a flag a renderer is
+   * left to phrase.
+   */
+  it('speaks the band and the doorway, one line per direction', () => {
+    const base = run(4)
+    const here = base.player.roomId
+    const distances = distancesFrom(base.labyrinth, here)
+    const three = Object.keys(distances).sort().find((id) => distances[id] === 3)
+    expect(three, 'seed 4 should have a room three away').toBeDefined()
+    if (!three) return
+
+    const state = withCompanion(wumpusAt(base, three), 'grellhound')
+    const senses = companionSenses(state.labyrinth, state.player.companion, here, three)
+    expect(senses.wumpusWarning?.band).toBe('raisedEars')
+
+    // REST: the player does not move, so the distance the hound reports is the
+    // distance the assertion set up. The Wumpus is resting on a cooldown of 99.
+    const { events } = act(state, { kind: 'rest' })
+    const spoken = events.filter((e) => e.kind === 'narration' && e.beat === 'grellhoundEars')
+    expect(spoken).toHaveLength(senses.wumpusWarning?.directions.length ?? 0)
+    for (const direction of senses.wumpusWarning?.directions ?? []) {
+      expect(
+        spoken.some((e) => e.kind === 'narration' && e.text.includes(DIRECTION_WORD[direction])),
+        `no line named ${direction}`,
+      ).toBe(true)
+    }
+
+    // And the free floor said nothing at three rooms — which is the whole
+    // reason the outer band is worth a companion slot.
+    expect(tellsFor(state).flatMap((d) => d.tells).some((t) => t.kind === 'stench')).toBe(false)
+  })
+
+  it('escalates as it closes, and says nothing without a hound', () => {
+    const base = run(4)
+    const here = base.player.roomId
+    const distances = distancesFrom(base.labyrinth, here)
+    const beats: Record<number, string> = { 3: 'grellhoundEars', 2: 'grellhoundGrowls', 1: 'grellhoundBarks' }
+
+    for (const [distance, beat] of Object.entries(beats)) {
+      const room = Object.keys(distances).sort().find((id) => distances[id] === Number(distance))
+      expect(room, `seed 4 should have a room ${distance} away`).toBeDefined()
+      if (!room) continue
+      const state = wumpusAt(base, room)
+
+      const withHound = act(withCompanion(state, 'grellhound'), { kind: 'rest' })
+      expect(
+        withHound.events.some((e) => e.kind === 'narration' && e.beat === beat),
+        `${distance} rooms away should speak ${beat}`,
+      ).toBe(true)
+
+      const alone = act(withCompanion(state, null), { kind: 'rest' })
+      expect(
+        alone.events.some((e) => e.kind === 'narration' && String(e.beat).startsWith('grellhound')),
+      ).toBe(false)
+    }
   })
 })

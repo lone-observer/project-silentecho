@@ -10,7 +10,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { createRng } from '../src/engine/rng.ts'
-import { generateLabyrinth, roomIdAt } from '../src/engine/generate.ts'
+import { distancesFrom, generateLabyrinth, roomIdAt } from '../src/engine/generate.ts'
+import { getTells } from '../src/engine/wumpus.ts'
 import {
   canSend,
   canTame,
@@ -306,7 +307,7 @@ describe('companion passives', () => {
     const s = companionSenses(l, companion({ kind: 'lumewing' }), l.entranceId, l.heartRoomId)
     expect(s.lanternRadiusBonus).toBe(COMPANION.lumewingLanternBonus)
     expect(s.revealedHazards).toHaveLength(0)
-    expect(s.wumpusGrowl).toBe(false)
+    expect(s.wumpusWarning).toBeNull()
   })
 
   it('the grellhound reveals every adjacent hazard, honestly and exhaustively', () => {
@@ -331,26 +332,95 @@ describe('companion passives', () => {
     expect(s.revealedHazards).toEqual(truth)
   })
 
-  it('the grellhound growls at radius 2 — the turn of warning that movement costs you', () => {
+  it('the grellhound escalates 3 / 2 / 1, and says nothing at four rooms', () => {
     const l = lab(4)
     const here = l.entranceId
-    const neighbour = DIRECTIONS.map((d) => (l.rooms[here] as Room).exits[d]).find((x) => x !== undefined)
-    expect(neighbour).toBeDefined()
-    if (!neighbour) return
-
     const hound = companion({ kind: 'grellhound' })
-    expect(companionSenses(l, hound, here, neighbour).wumpusGrowl).toBe(true)
-    expect(COMPANION.grellhoundWarningRadius).toBe(2)
+    const distances = distancesFrom(l, here)
 
-    // A companion that is not a grellhound never growls.
-    expect(companionSenses(l, companion({ kind: 'goblin' }), here, neighbour).wumpusGrowl).toBe(false)
-    expect(companionSenses(l, null, here, neighbour).wumpusGrowl).toBe(false)
+    const at = (distance: number): RoomId | undefined =>
+      Object.keys(distances).sort().find((id) => distances[id] === distance)
+
+    for (const [distance, band] of [
+      [1, 'urgentBark'],
+      [2, 'lowGrowl'],
+      [3, 'raisedEars'],
+    ] as const) {
+      const room = at(distance)
+      expect(room, `seed 4 should have a room ${distance} away`).toBeDefined()
+      if (!room) continue
+      const warning = companionSenses(l, hound, here, room).wumpusWarning
+      expect(warning?.band, `at ${distance} rooms`).toBe(band)
+      // Every band carries a doorway. A warning with no direction in it is the
+      // thing this rework existed to stop being.
+      expect(warning?.directions.length, `at ${distance} rooms`).toBeGreaterThan(0)
+    }
+
+    const far = at(COMPANION.grellhoundWarningRadius + 1)
+    expect(far).toBeDefined()
+    if (far) expect(companionSenses(l, hound, here, far).wumpusWarning).toBeNull()
+
+    // Nothing else warns, and neither does an empty collar.
+    const near = at(1) as RoomId
+    expect(companionSenses(l, companion({ kind: 'goblin' }), here, near).wumpusWarning).toBeNull()
+    expect(companionSenses(l, null, here, near).wumpusWarning).toBeNull()
+  })
+
+  /**
+   * MUTATION-CHECKED, and it is the assertion that states what the 1i part 2
+   * rework actually bought. Dropping `grellhoundWarningRadius` back to 2 fails
+   * this and nothing else in the suite.
+   *
+   * The universal mandatory stench floor is radius 2 and already directional
+   * (GDD 2.10), free to everyone. So inside two rooms the hound repeats the
+   * game; the OUTER band is the only place it says something new. This asserts
+   * both halves on real geometry: at three rooms `getTells` reports no stench
+   * and the hound reports a direction anyway, and at two the two agree exactly
+   * rather than merely both being non-empty — a hound pointing at a different
+   * doorway from the stench would be one of them lying (CLAUDE.md 3).
+   */
+  it('radius 3 is the new information, and inside 2 it agrees with the free stench', () => {
+    const hound = companion({ kind: 'grellhound' })
+    let checkedOuter = 0
+    let checkedInner = 0
+
+    for (let seed = 1; seed <= 25; seed += 1) {
+      const l = lab(seed)
+      const here = l.entranceId
+      const distances = distancesFrom(l, here)
+      const stenchOf = (wumpusRoomId: RoomId): string[] =>
+        getTells(l, here, wumpusRoomId, { confused: false, resolved: [...DIRECTIONS] })
+          .filter((s) => s.tells.some((t) => t.kind === 'stench'))
+          .map((s) => s.direction)
+          .sort()
+
+      for (const id of Object.keys(distances).sort()) {
+        const distance = distances[id] as number
+        const warning = companionSenses(l, hound, here, id).wumpusWarning
+        const stench = stenchOf(id)
+
+        if (distance === 3) {
+          expect(stench, `seed ${seed}: the free floor should not reach 3`).toHaveLength(0)
+          expect(warning?.band).toBe('raisedEars')
+          expect(warning?.directions.length).toBeGreaterThan(0)
+          checkedOuter += 1
+        } else if (distance === 1 || distance === 2) {
+          expect([...(warning?.directions ?? [])].sort(), `seed ${seed}, ${distance} away`)
+            .toEqual(stench)
+          checkedInner += 1
+        }
+      }
+    }
+
+    // The sweep has to have reached both cases, or it asserted nothing.
+    expect(checkedOuter).toBeGreaterThan(0)
+    expect(checkedInner).toBeGreaterThan(0)
   })
 
   it('no companion means no senses at all', () => {
     const l = lab(1)
     const s = companionSenses(l, null, l.entranceId, l.heartRoomId)
-    expect(s).toEqual({ lanternRadiusBonus: 0, revealedHazards: [], wumpusGrowl: false })
+    expect(s).toEqual({ lanternRadiusBonus: 0, revealedHazards: [], wumpusWarning: null })
   })
 })
 

@@ -426,11 +426,19 @@ export interface RollPart {
  * Verbs whose band changes nothing except at the very bottom.
  *
  * Measured against `resolve.ts`, not assumed — this is 1f finding 2, which
- * `PHASE-1-PROGRESS.md` still carries as open: MOVE and LISTEN have no banded
- * consequence at all beyond `SCENT.criticalFailureBonus`, so five of their six
- * bands are mechanically identical and differ only in prose. SEARCH, READ and
- * REST are NOT here: they are two-valued, and a roll that decides whether you
- * find the flask is a roll worth reading.
+ * `PHASE-1-PROGRESS.md` still carries as open: MOVE and FOCUS have no banded
+ * consequence beyond the price of the turn and `SCENT.criticalFailureBonus`, so
+ * five of their six bands change what the action COST and nothing about what it
+ * produced. A FOCUS always resolves its doorway (GDD 2.8.1 — one that sometimes
+ * came back with nothing would be the probabilistic tell that section rejects),
+ * so its band has no more to say about the outcome than a MOVE's does. SEARCH
+ * and REST are NOT here: they are two-valued, and a roll that decides whether
+ * you find the flask is a roll worth reading.
+ *
+ * IT NAMED `listen` UNTIL 1i PART 2. `LISTEN` was retired by the economy
+ * rewrite in part 1 and this list did not move with it — which fails in the
+ * quiet direction: the entry matches no action any renderer can be handed, so
+ * every FOCUS got a full breakdown panel for a roll that only moved its price.
  *
  * This drives display only. The roll still happens, a critical failure is still
  * loud, and the line is still in the log. What it stops is a full breakdown
@@ -441,7 +449,7 @@ export interface RollPart {
  * If the roll itself is ever cut for these two verbs, this constant is the list
  * to cut, and this comment is the reasoning to re-read first.
  */
-const INERT_ABOVE_CRIT_FAIL: readonly string[] = ['move', 'listen'] as const
+const INERT_ABOVE_CRIT_FAIL: readonly string[] = ['move', 'focus'] as const
 
 export interface RollView {
   readonly action: string

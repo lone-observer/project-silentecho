@@ -100,6 +100,7 @@ import {
 import {
   ACTION_DC,
   ACTION_STAT,
+  companionWaivesOil,
   DEFAULT_DIFFICULTY,
   DIFFICULTY,
   disarmClears,
@@ -123,7 +124,7 @@ import {
   VERB_HAZARDS,
   VERBS_FOR_HAZARD,
 } from './data/tuning.ts'
-import type { HazardVerb } from './data/tuning.ts'
+import type { GrellhoundWarningBand, HazardVerb } from './data/tuning.ts'
 import type { EndingBeat, NoteBeat, Slots } from './data/outcomes.ts'
 import {
   companionLossText,
@@ -189,6 +190,43 @@ function dark(d: Draft): boolean {
 
 function note(d: Draft, beat: NoteBeat, slots: Slots = {}): void {
   d.events.push({ kind: 'narration', text: noteText(beat, dark(d), slots), beat })
+}
+
+/**
+ * What this action costs THIS player, companion included. GDD 2.9, 1i part 2.
+ *
+ * `oilCostFor` is the price list and stays the price list — a pure per-band read
+ * with no idea who is in the room, called from the visualisers and from the
+ * tests that check the curve. The companion discount is a row in
+ * `COMPANION_FREE_VERB` and it is applied HERE, in the one place that knows what
+ * is following the player around.
+ *
+ * BOTH CALLERS GO THROUGH THIS, which is the point of it existing at all rather
+ * than being two lines at the charge site. The second caller is the spoils beat
+ * in `resolveHazardVerb`, which asks "did this hand oil back" to decide whether
+ * to say so — and a beat that answered from the price list while the player was
+ * charged from this function would narrate a payout nobody received. That is a
+ * text-parity failure (CLAUDE.md 2.3) of exactly the kind 1h and 1i keep finding
+ * by reading the screen, and it is cheaper to make the two agree by construction.
+ */
+function oilCostWith(d: Draft, action: ActionKind, band: OutcomeBand): number {
+  if (companionWaivesOil(d.companion?.kind ?? null, action)) return 0
+  return oilCostFor(action, band)
+}
+
+/**
+ * Which line the grellhound's warning speaks in, per band. GDD 2.9, 1i part 2.
+ *
+ * An id-to-id map rather than a table in `data/outcomes.ts`: no prose passes
+ * through here, and the same shape already sits a few hundred lines down where
+ * the upkeep beat is chosen by whether the goblin scrounged. What it does buy is
+ * exhaustiveness — a fourth band added to `GRELLHOUND_WARNING` fails to compile
+ * here until someone has written its sentence.
+ */
+const WARNING_BEAT: Record<GrellhoundWarningBand, NoteBeat> = {
+  raisedEars: 'grellhoundEars',
+  lowGrowl: 'grellhoundGrowls',
+  urgentBark: 'grellhoundBarks',
 }
 
 /**
@@ -698,7 +736,11 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   //
   // An unrolled action (DROP HEART) prices at the `success` band, which for it
   // is zero anyway; `oilCostFor` is what decides that, not this call site.
-  d.oilDelta -= oilCostFor(action.kind, rollResult?.band ?? 'success')
+  //
+  // `oilCostWith` is that same price with the companion discount applied — one
+  // table row (`COMPANION_FREE_VERB`), one branch, and the price list itself
+  // untouched for every other caller (GDD 2.9, 1i part 2).
+  d.oilDelta -= oilCostWith(d, action.kind, rollResult?.band ?? 'success')
 
   applyActionOutcome(state, d, action, rollResult, rng)
 
@@ -865,7 +907,18 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   }
 
   const senses = companionSenses(d.labyrinth, d.companion, d.playerRoomId, wumpus.roomId)
-  if (senses.wumpusGrowl) note(d, 'grellhoundGrowls')
+  if (senses.wumpusWarning !== null) {
+    // ONE LINE PER DOORWAY, the same shape `revealedHazards` has had since 1d,
+    // and for the same reason: `Slots` is a closed set of five nouns with no
+    // list in it (GDD 2.8.1's note on RUN_INTRO), so a warning naming two
+    // doorways is two sentences rather than a sentence with a comma in it that
+    // something would have to assemble. Assembling is the procedural-prose line
+    // CLAUDE.md 6 rules out. Two doorways toward one Wumpus is uncommon and
+    // honest when it happens — both of them do lead that way.
+    for (const direction of senses.wumpusWarning.directions) {
+      note(d, WARNING_BEAT[senses.wumpusWarning.band], { direction })
+    }
+  }
   for (const hazard of senses.revealedHazards) {
     note(d, 'grellhoundReveals', { hazard: hazard.hazard, direction: hazard.direction })
   }
@@ -1257,7 +1310,12 @@ function resolveHazardVerb(
   // Wired rather than deleted because a `NoteBeat` nothing emits is dead content
   // (the standard 1g applied to `HAZARD_NARRATION`'s bloom and snare rows), and
   // `tests/outcomes.test.ts`'s beat ledger is what noticed it had come loose.
-  if (oilCostFor(verb, band) < 0) note(d, 'hazardCleared', { hazard })
+  //
+  // Through `oilCostWith`, not the price list: a goblin makes DISARM free
+  // (GDD 2.9), and free means zero at every band including the two that would
+  // have paid. Asking the price list here would announce spoils the player was
+  // never handed.
+  if (oilCostWith(d, verb, band) < 0) note(d, 'hazardCleared', { hazard })
 
   if (verb === 'disarm' && disarmClears(band)) {
     // GONE, not answered. This is the ONLY thing in the game that changes the

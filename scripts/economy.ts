@@ -33,16 +33,19 @@
 
 import { createRng, rngFromState } from '../src/engine/rng.ts'
 import { distancesFrom, generateLabyrinth } from '../src/engine/generate.ts'
-import { applyAction, createRun, legalActions } from '../src/engine/resolve.ts'
+import { applyAction, createRun, legalActions, tellsFor } from '../src/engine/resolve.ts'
+import { companionSenses } from '../src/engine/creatures.ts'
 import { statModifier } from '../src/engine/dice.ts'
 import { BAND_ORDER } from '../src/engine/types.ts'
 import type {
-  ActionKind, Difficulty, Direction, GameState, OutcomeBand, RoomId, RunOutcome, StatKey,
+  ActionKind, CreatureKind, Difficulty, Direction, GameState, OutcomeBand, RoomId, RunOutcome,
+  StatKey,
 } from '../src/engine/types.ts'
 import type { LegalAction } from '../src/engine/resolve.ts'
 import {
-  ACTION_DC, BAND_OIL_MULTIPLIER, DIFFICULTY, HAZARD_VERB_OUTCOMES, isStatAgnostic,
+  ACTION_DC, BAND_OIL_MULTIPLIER, COMPANION, DIFFICULTY, HAZARD_VERB_OUTCOMES, isStatAgnostic,
   OIL, OIL_BANDS, OIL_PRICE, oilBandFor, oilCostFor, PLAYER, POPULATION, RUN, SCENT_BY_ACTION,
+  WUMPUS,
 } from '../src/engine/data/tuning.ts'
 
 // ---------------------------------------------------------------------------
@@ -115,7 +118,24 @@ function bandOdds(dc: number, mod: number): Record<OutcomeBand, number> {
  * finding, one mechanic along: a value function that cannot see what a verb is
  * for proves only that it cannot see it.
  */
-type Policy = 'router' | 'scholar' | 'forager'
+/**
+ * `houndhandler` is 1i part 2's addition, and it is here for the reason
+ * `scholar` was: a policy that cannot use a mechanic cannot measure it.
+ *
+ * It routes like the others and refuses to step through a doorway it has been
+ * warned about — the "sidesteps into a loop" rule 1d measured as worth roughly
+ * a third of the catch rate. WHERE the warning comes from is the experiment:
+ * with a grellhound it is the hound's `wumpusWarning`, without one it is the
+ * free mandatory stench that every player gets. Panel H runs both and moves the
+ * hound's radius between them.
+ *
+ * It is not a good player. It never spends Fortune, never tames, never FOCUSes,
+ * and sidesteps on a one-line rule. That is deliberate — the thing being
+ * measured is one extra room of warning, so everything else has to be held
+ * still — and it means the absolute rates carry the same tell-ignored-floor
+ * caveat as every other number in this file.
+ */
+type Policy = 'router' | 'scholar' | 'forager' | 'houndhandler'
 
 function route(state: GameState, from: RoomId, to: RoomId): RoomId[] {
   const previous: Record<RoomId, RoomId> = {}
@@ -211,7 +231,62 @@ function choose(policy: Policy, state: GameState, menu: readonly LegalAction[]):
   const planned = moves.find(
     (m) => 'direction' in m.action && exitTo(state, m.action.direction) === next,
   )
+
+  // HOUNDHANDLER: do not walk into a warned doorway if there is another one.
+  //
+  // The rule is one line on purpose (see the policy note above). What it is NOT
+  // is a retreat: 1d measured backing out the way you came as WORSE than
+  // ignoring the warning entirely, because you are walking back down your own
+  // scent into a thing that navigates by scent. Any other doorway, then, and
+  // the planned one only when there is no other.
+  if (policy === 'houndhandler') {
+    const warned = new Set(warnedDirections(state))
+    if (warned.size > 0) {
+      const open = moves.filter((m) => 'direction' in m.action && !warned.has(m.action.direction))
+      if (open.length > 0) {
+        const plannedIsWarned =
+          planned !== undefined && 'direction' in planned.action && warned.has(planned.action.direction)
+        if (plannedIsWarned) {
+          // Of the doorways nobody warned about, the one that loses the least
+          // ground. Sorted by room id first so ties break deterministically.
+          const distances = distancesFrom(state.labyrinth, target)
+          const ranked = [...open].sort((a, b) => {
+            const da = distances[exitTo(state, (a.action as { direction: Direction }).direction) ?? ''] ?? Infinity
+            const db = distances[exitTo(state, (b.action as { direction: Direction }).direction) ?? ''] ?? Infinity
+            return da - db
+          })
+          return ranked[0] as LegalAction
+        }
+      }
+    }
+  }
+
   return planned ?? (moves[0] as LegalAction)
+}
+
+/**
+ * The doorways this player has been warned about, from whichever channel they
+ * actually have. Read through the same functions the renderers read, never
+ * recomputed from the true map — a visualiser that recomputes the rule it is
+ * watching agrees with itself on the day the rule changes (1e, Panel B of
+ * `tame.ts`).
+ */
+function warnedDirections(state: GameState): Direction[] {
+  const hound = companionSenses(
+    state.labyrinth,
+    state.player.companion,
+    state.player.roomId,
+    state.wumpus.roomId,
+  ).wumpusWarning
+  if (hound !== null) return [...hound.directions]
+  return floorDirections(state)
+}
+
+/** The free, always-on, always-directional mandatory stench floor (GDD 2.10). */
+function floorDirections(state: GameState): Direction[] {
+  return tellsFor(state)
+    .filter((d) => d.tells.some((t) => t.kind === 'stench'))
+    .map((d) => d.direction)
 }
 
 function statKeyOf(kind: ActionKind): StatKey {
@@ -243,10 +318,42 @@ interface RunTally {
   readonly reachedHeart: boolean
   readonly turnsInBand: Record<string, number>
   readonly actionCounts: Record<string, number>
+  /** Turns on which this player was warned about at least one doorway. */
+  readonly warnedTurns: number
+  /**
+   * Turns on which the warning said something the free stench floor did not —
+   * the only turns the grellhound's rework can possibly be worth anything.
+   * Zero by construction for a player without a hound.
+   */
+  readonly newInfoTurns: number
 }
 
-function driveRun(policy: Policy, seed: number, difficulty: Difficulty): RunTally {
-  let state = createRun(seed, { difficulty })
+function driveRun(
+  policy: Policy,
+  seed: number,
+  difficulty: Difficulty,
+  /**
+   * A companion the player starts with. Panel H only.
+   *
+   * IT IS A COUNTERFACTUAL AND IT IS LABELLED AS ONE. Handing the player a
+   * grellhound on turn one is not what a run looks like — encounter density is
+   * about one per run (1d) and a quarter of those are hounds, so measuring the
+   * passive through natural acquisition would be measuring encounter density
+   * with a warning radius attached. The question this parameter exists to ask
+   * is narrower and answerable: what is the passive worth to a player who HAS
+   * one? A grellhound draws no randomness at step 7 (`companionUpkeep` only
+   * rolls for a goblin), so granting one does not shift the RNG stream and the
+   * rows below are the same seeds walking the same labyrinths.
+   */
+  companion: CreatureKind | null = null,
+): RunTally {
+  const fresh = createRun(seed, { difficulty })
+  let state: GameState = companion === null
+    ? fresh
+    : {
+        ...fresh,
+        player: { ...fresh.player, companion: { kind: companion, brave: false, skittish: false } },
+      }
   let oilOut = 0
   let oilIn = 0
   let focuses = 0
@@ -254,10 +361,20 @@ function driveRun(policy: Policy, seed: number, difficulty: Difficulty): RunTall
   const turnsInBand: Record<string, number> = {}
   const actionCounts: Record<string, number> = {}
 
+  let warnedTurns = 0
+  let newInfoTurns = 0
+
   for (let guard = 0; guard < 500 && state.outcome === 'inProgress'; guard++) {
     const menu = legalActions(state)
     const pick = choose(policy, state, menu)
     if (pick === null) break
+
+    // Read before the action, which is when a player would read it.
+    const warned = warnedDirections(state)
+    if (warned.length > 0) {
+      warnedTurns += 1
+      if (floorDirections(state).length === 0) newInfoTurns += 1
+    }
 
     turnsInBand[oilBandFor(state.player.oil).name] =
       (turnsInBand[oilBandFor(state.player.oil).name] ?? 0) + 1
@@ -288,7 +405,34 @@ function driveRun(policy: Policy, seed: number, difficulty: Difficulty): RunTall
     reachedHeart,
     turnsInBand,
     actionCounts,
+    warnedTurns,
+    newInfoTurns,
   }
+}
+
+/**
+ * Exact two-sided binomial p for `hits` out of `n` against a fair coin.
+ *
+ * Written out rather than approximated because the counts this panel produces
+ * are small — a normal approximation on n = 20 discordant pairs is exactly the
+ * kind of figure that gets quoted later as if it were measured.
+ */
+function binomialP(hits: number, n: number): number {
+  if (n === 0) return 1
+  const choose = (a: number, b: number): number => {
+    let out = 1
+    for (let i = 0; i < b; i++) out = (out * (a - i)) / (i + 1)
+    return out
+  }
+  const pmf = (k: number): number => choose(n, k) * Math.pow(0.5, n)
+  const observed = pmf(hits)
+  let total = 0
+  for (let k = 0; k <= n; k++) {
+    // 1e-9 so a tie with the observed mass counts, which is what makes this the
+    // conventional two-sided exact test rather than a one-sided one doubled.
+    if (pmf(k) <= observed + 1e-9) total += pmf(k)
+  }
+  return Math.min(1, total)
 }
 
 const mean = (runs: readonly RunTally[], f: (t: RunTally) => number): number =>
@@ -726,6 +870,153 @@ function panelHazardCost(sweep: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Panel H — what is one extra room of warning worth?
+// ---------------------------------------------------------------------------
+
+/**
+ * 1i PART 2's ONE BALANCE QUESTION. The other two buffs are flat discounts on
+ * verbs that are individually cheap; this one hands the player information
+ * earlier, and information changes what they do.
+ *
+ * THE CONTROLLED COMPARISON IS THE RADIUS, not the companion. Three rows, same
+ * seeds, same policy, same evasion rule:
+ *
+ *   no hound        the free radius-2 mandatory stench floor, and nothing else
+ *   hound @ 2       the passive as it shipped from 1g through 1i part 1
+ *   hound @ 3       as built in this step
+ *
+ * The first two rows are the control that makes the third mean anything, and
+ * they should come out IDENTICAL rather than merely close: inside two rooms the
+ * hound reports the same doorways the floor already gives away for nothing
+ * (asserted in tests/creatures.test.ts), and a grellhound draws no randomness at
+ * step 7, so the same seed walks the same labyrinth either way. A difference
+ * between rows one and two is a bug in this panel, not a finding.
+ *
+ * `new info` is the column to read first. If the warning almost never says
+ * anything the floor did not, no swing in the escape rate is attributable to it
+ * however the other columns land.
+ */
+function panelWarning(sweep: number): void {
+  heading(`PANEL H · what is one extra room of warning worth? (${sweep} seeds, houndhandler)`)
+  console.log('  Same seeds, same sidestep rule, three warning channels. The grellhound is')
+  console.log('  granted at turn 1 — a counterfactual, NOT an encounter-density estimate.')
+
+  const original = COMPANION.grellhoundWarningRadius
+  const setRadius = (r: number): void => {
+    ;(COMPANION as { grellhoundWarningRadius: number }).grellhoundWarningRadius = r
+  }
+
+  const rows: { label: string; companion: CreatureKind | null; radius: number }[] = [
+    { label: 'no hound', companion: null, radius: original },
+    { label: `hound @ ${WUMPUS.mandatoryStenchRadius}`, companion: 'grellhound', radius: WUMPUS.mandatoryStenchRadius },
+    { label: `hound @ ${original}`, companion: 'grellhound', radius: original },
+  ]
+
+  for (const difficulty of DIFFICULTIES) {
+    console.log('')
+    console.log(`  ── ${difficulty} ${rule(62)}`)
+    console.log(
+      `     ${pad('channel', 12)}${padLeft('escaped', 9)}${padLeft('caught', 9)}${padLeft('killed', 9)}` +
+      `${padLeft('retreated', 11)}${padLeft('outOfTurns', 12)}` +
+      `${padLeft('turns', 8)}${padLeft('rooms', 8)}${padLeft('warned/run', 12)}${padLeft('new info', 10)}`,
+    )
+    for (const row of rows) {
+      setRadius(row.radius)
+      const runs: RunTally[] = []
+      for (let seed = 1; seed <= sweep; seed++) {
+        runs.push(driveRun('houndhandler', seed, difficulty, row.companion))
+      }
+      console.log(
+        `     ${pad(row.label, 12)}${padLeft(pct(share(runs, (t) => t.outcome === 'escaped')), 9)}` +
+        `${padLeft(pct(share(runs, (t) => t.outcome === 'caught')), 9)}` +
+        `${padLeft(pct(share(runs, (t) => t.outcome === 'killed')), 9)}` +
+        `${padLeft(pct(share(runs, (t) => t.outcome === 'retreated')), 11)}` +
+        `${padLeft(pct(share(runs, (t) => t.outcome === 'outOfTurns')), 12)}` +
+        `${padLeft(num(mean(runs, (t) => t.turns), 1), 8)}` +
+        `${padLeft(num(mean(runs, (t) => t.roomsVisited), 1), 8)}` +
+        `${padLeft(num(mean(runs, (t) => t.warnedTurns), 2), 12)}` +
+        `${padLeft(num(mean(runs, (t) => t.newInfoTurns), 2), 10)}`,
+      )
+    }
+  }
+
+  // THE PAIRED TEST, which is the one this design supports and the unpaired
+  // rates above do not. Every row walks the same seeds, so the question is not
+  // "are two proportions different" — with n in the low hundreds a 5-point
+  // swing sits inside one standard error and nothing could be concluded — but
+  // "of the runs whose OUTCOME MOVED, which way did they move". Discordant
+  // pairs only, and an exact two-sided binomial against a coin.
+  const caughtBy = (
+    difficulty: Difficulty,
+    companion: CreatureKind | null,
+    radius: number,
+  ): boolean[] => {
+    setRadius(radius)
+    return Array.from({ length: sweep }, (_, i) =>
+      driveRun('houndhandler', i + 1, difficulty, companion).outcome === 'caught')
+  }
+
+  const paired = (title: string, left: string, right: string,
+    a: (d: Difficulty) => boolean[], b: (d: Difficulty) => boolean[]): void => {
+    console.log('')
+    console.log(`  ── paired: ${title} ${rule(Math.max(4, 58 - title.length))}`)
+    console.log(
+      `     ${pad('difficulty', 12)}${padLeft(left, 17)}${padLeft(right, 17)}${padLeft('p (2-sided)', 13)}`,
+    )
+    for (const difficulty of DIFFICULTIES) {
+      const before = a(difficulty)
+      const after = b(difficulty)
+      let onlyBefore = 0
+      let onlyAfter = 0
+      for (let i = 0; i < sweep; i++) {
+        if (before[i] === true && after[i] === false) onlyBefore += 1
+        if (before[i] === false && after[i] === true) onlyAfter += 1
+      }
+      console.log(
+        `     ${pad(difficulty, 12)}${padLeft(String(onlyBefore), 17)}${padLeft(String(onlyAfter), 17)}` +
+        `${padLeft(num(binomialP(onlyBefore, onlyBefore + onlyAfter), 4), 13)}`,
+      )
+    }
+  }
+
+  // The rework: one more room of warning, hound in both columns.
+  paired(
+    'which runs changed outcome when the radius went 2 → 3?',
+    'caught @2 only', 'caught @3 only',
+    (d) => caughtBy(d, 'grellhound', WUMPUS.mandatoryStenchRadius),
+    (d) => caughtBy(d, 'grellhound', original),
+  )
+
+  // The premise the rework rests on: at the floor's own radius the hound should
+  // be worth NOTHING, because it repeats the floor. Anything here is the
+  // Confused divergence described below, and nothing else — the two columns
+  // differ only in whether a grellhound is present, and a grellhound draws no
+  // randomness at step 7, so these are the same seeds walking the same rooms.
+  paired(
+    'is a hound at the FLOOR radius worth anything? (it should not be)',
+    'caught, no hound', 'caught, hound @2',
+    (d) => caughtBy(d, null, WUMPUS.mandatoryStenchRadius),
+    (d) => caughtBy(d, 'grellhound', WUMPUS.mandatoryStenchRadius),
+  )
+
+  setRadius(original)
+  console.log('')
+  console.log('  (restored the warning radius)')
+  console.log('  ROWS 1 AND 2 WERE PREDICTED TO MATCH and do not, and the gap is a finding')
+  console.log('  rather than noise: `new info` is 0.3-0.5 per run on row 2, where it should')
+  console.log('  be 0.00 by construction. Every one of those turns is a CONFUSED one —')
+  console.log('  measured, 65 of 65. GDD 2.8.1 says Confused suppresses the stench AND the')
+  console.log('  companion passives ("the exemption is from oil and from FOCUS, not from')
+  console.log('  the spores"); `getTells` implements that and `companionSenses` does not, so')
+  console.log('  the hound keeps talking through a lungful of spores. Pre-dates this step.')
+  console.log('')
+  console.log('  READ THE CAUGHT COLUMN, NOT THE ESCAPED ONE. Escapes also move on how')
+  console.log('  often the sidestep rule blunders back out of the entrance (retreated),')
+  console.log('  which is this policy being crude rather than the warning being worth')
+  console.log('  anything. Being caught less is the effect the warning can actually have.')
+}
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
@@ -739,4 +1030,5 @@ if (mode === 'all' || mode === 'contract') panelContract()
 if (mode === 'all' || mode === 'bloom') panelBloom(sweep)
 if (mode === 'all' || mode === 'heart') panelHeart(sweep)
 if (mode === 'all' || mode === 'hazardcost') panelHazardCost(sweep)
+if (mode === 'all' || mode === 'warning') panelWarning(sweep)
 console.log('')

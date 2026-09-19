@@ -497,7 +497,10 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
     }
 
     const senses = companionSenses(lab, companion, playerId, wumpus.roomId)
-    if (senses.wumpusGrowl) detail.push(`      the grellhound GROWLS — wumpus within ${COMPANION.grellhoundWarningRadius}`)
+    if (senses.wumpusWarning !== null) {
+      const w = senses.wumpusWarning
+      detail.push(`      the grellhound warns [${w.band}] toward ${w.directions.join('/') || '—'} — wumpus within ${COMPANION.grellhoundWarningRadius}`)
+    }
     if (senses.revealedHazards.length) {
       detail.push(`      the grellhound smells: ${senses.revealedHazards.map((h) => `${h.direction} ${h.hazard}`).join(', ')}`)
     }

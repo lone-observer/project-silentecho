@@ -369,13 +369,23 @@ const TELL_FOR_HAZARD: Record<string, TellKind> = {
  *
  * At radius 1 this reduces exactly to the old behaviour, which is what keeps the
  * shape of the fairness guarantee unchanged while the constant moves.
+ *
+ * THE RADIUS IS A PARAMETER, defaulting to the mandatory floor, and that is all
+ * 1i part 2 needed from this file. The grellhound's reworked warning reports the
+ * same honest "it is that way" at a wider radius than the free floor reaches
+ * (`COMPANION.grellhoundWarningRadius`), and a second implementation of
+ * shortest-path-doorways over in `creatures.ts` would be two places for one rule
+ * to be right in — with the companion's copy being the one nobody would notice
+ * going wrong, since it only fires when a hound is alive and the Wumpus is
+ * close. Every existing call site passes nothing and is unaffected.
  */
-function stenchDirections(
+export function stenchDirections(
   labyrinth: Labyrinth,
   playerRoomId: RoomId,
   wumpusRoomId: RoomId,
+  radius: number = WUMPUS.mandatoryStenchRadius,
 ): Direction[] {
-  const reach = withinRadius(labyrinth, playerRoomId, WUMPUS.mandatoryStenchRadius)
+  const reach = withinRadius(labyrinth, playerRoomId, radius)
   const distance = reach[wumpusRoomId]
   if (distance === undefined || distance === 0) return []
 
@@ -387,10 +397,27 @@ function stenchDirections(
     // Distance from the far side of this doorway, measured out to the same
     // radius — a neighbour that is one step nearer the Wumpus is on a shortest
     // path to it, and that is the doorway the stench comes through.
-    const fromNeighbour = withinRadius(labyrinth, neighbourId, WUMPUS.mandatoryStenchRadius)[wumpusRoomId]
+    const fromNeighbour = withinRadius(labyrinth, neighbourId, radius)[wumpusRoomId]
     if (fromNeighbour !== undefined && fromNeighbour === distance - 1) out.push(direction)
   }
   return out
+}
+
+/**
+ * How many rooms away the Wumpus is, or null beyond `radius`.
+ *
+ * Exported for the grellhound, which needs the DISTANCE to pick a warning band
+ * and not merely whether the thing is in range. It measures through doorways
+ * like everything else here, never as grid coordinates — which would see through
+ * walls, and this module's whole job is that nothing does.
+ */
+export function wumpusDistance(
+  labyrinth: Labyrinth,
+  playerRoomId: RoomId,
+  wumpusRoomId: RoomId,
+  radius: number,
+): number | null {
+  return withinRadius(labyrinth, playerRoomId, radius)[wumpusRoomId] ?? null
 }
 
 /**

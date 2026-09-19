@@ -2,7 +2,11 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 18 Sep 2026 — **1i part 1 landed**: the economy-unification design is built and measured. Health is gone, oil is priced per action and scaled by margin, `FOCUS`/`DISARM`/`DROP HEART` are live, turn caps are 50/45/40/35, the Wumpus stench reaches two rooms. 310 tests. The sweep answered all five questions it was given and two of the answers are negative results worth reading (findings 1 and 2 below). 1i **part 2** (companion buff rework) and **1j** (agent harness) are both unblocked.
+**Last updated:** 19 Sep 2026 — **the Confused/grellhound divergence found in 1i part 2 is decided, not just measured.** Gautham's call: the grellhound's senses (and `revealedHazards`) keep firing through Confused as shipped — a kept design choice, tracked, correct only if it becomes game-breaking. GDD 2.9 and this file's "not yet decided" list both updated. **1j** (agent harness) is the next step and is unblocked.
+
+**Previously:** 18 Sep 2026 — **1i part 2 landed**: the three companion buffs are built and measured. The grellhound warns at three rooms with a direction, the goblin makes `DISARM` free and the lumewing makes `FOCUS` free. 319 tests. The measurement found that the pre-rework hound's entire remaining value came from a GDD-vs-code divergence under Confused (finding 2), and making the beat ledger total found three beats nobody had been verifying (finding 4).
+
+**Previously:** 18 Sep 2026 — **1i part 1 landed**: the economy-unification design is built and measured. Health is gone, oil is priced per action and scaled by margin, `FOCUS`/`DISARM`/`DROP HEART` are live, turn caps are 50/45/40/35, the Wumpus stench reaches two rooms. 310 tests. The sweep answered all five questions it was given and two of the answers are negative results worth reading (findings 1 and 2 below). 1i **part 2** (companion buff rework) and **1j** (agent harness) are both unblocked.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -19,7 +23,7 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1g · hazard-verb redesign | **done** | `src/engine/data/tuning.ts` (`VERB_HAZARDS`, `HAZARD_VERB_OUTCOMES`), `resolve.ts`, `scripts/hazard.ts`, `tests/hazards.test.ts`. Bloom and snare are verb encounters; `FORCE`/`ENDURE`/`AVOID`/`DODGE` are real `ActionKind`s; reward and ambient flask count both measured and set. |
 | 1h · text (classic) renderer | **done** | `src/classic/` (`Classic.tsx`, `Title.tsx`, `view.ts`, `lines.ts`, `labels.ts`, `classic.css`), `src/state/run.ts`, `tests/classic.test.ts`. The game is playable start to finish in a browser at `npm run dev`. Two small engine additions, both flagged below. `tests/tuning.test.ts`'s vacuous guard fixed. |
 | 1i part 1 · economy build + rebalance | **done** | Health retired engine-wide; `OIL_PRICE` × `BAND_OIL_MULTIPLIER` through one `oilCostFor`; pit binary; `FOCUS` (per-room cap by difficulty) replacing `LISTEN`/`READ`; `DISARM` (stat-agnostic, permanent) and `DROP HEART` (free); `SEND` roll-keyed; turn caps 50/45/40/35; stench radius 2; `USE` rolled; `ENTER PORTAL`'s bad roll hands you the Heart. `getTells` returns `DoorwaySense[]`, which closes 1h finding 1. `src/classic/` follows. New visualiser `scripts/economy.ts` (7 panels) produced every number below. |
-| 1i part 2 · companion buff rework | **next** | Goblin/Moth(lumewing)/Grellhound passive reworks, parked from the same 18 Sep design thread. Scope not yet written — see "Carried forward" below. |
+| 1i part 2 · companion buff rework | **done** | Goblin: `DISARM` free. Lumewing: `FOCUS` free (the per-room cap is untouched). Both are one `COMPANION_FREE_VERB` row and one branch at the single price hook, via `oilCostWith`. Grellhound: an escalating, directional warning at 3/2/1 — `stenchDirections` generalised to take a radius, `wumpusGrowl: boolean` replaced by `wumpusWarning`, two new beats. Measured at 4–7 points of catch rate (Panel H, new). Three stale leftovers fixed; the beat ledger made total, which found three more. 319 tests. |
 | 1j · agent harness core | queued | `AgentView` adapter + a "can't see through walls" leakage test, the `Policy` interface (with the Fortune-spend hook — see `docs/EVALS.md`), `random` + `heuristic` policies, run-batch infra |
 | 1k · LLM integration + benchmark run | queued | OpenRouter wiring, the fixed prompt (`docs/AGENT-PROMPT.md`), the model roster, scoring/report script, the actual n=100 batches, the human baseline |
 
@@ -567,6 +571,98 @@ It now probes git *before* rendering anything and exits non-zero rather than wri
 
 **If the archetypes feel thinner in play, that is where they went**, and the fix is to give `FOCUS` an archetype axis rather than to bring `LISTEN` back. Noted in `data/outcomes.ts` at the deletion site as well as here.
 
+## What 1i part 2 landed
+
+**Three companion buffs, and only one of them needed the engine.** The goblin's free `DISARM` and the lumewing's free `FOCUS` are one data row and one branch at the single place oil is charged. The grellhound's escalating warning needed new surface in `wumpus.ts`, and the reason is worth keeping: its old passive was a bare yes/no at the same radius as the free, already-directional mandatory stench floor, so making it worth a companion slot meant reaching *past* that floor — which meant asking `stenchDirections` a question it could only answer at one fixed radius.
+
+- **`src/engine/data/tuning.ts`** — `COMPANION_FREE_VERB` (`{ goblin: 'disarm', lumewing: 'focus' }`) and `companionWaivesOil`; `GrellhoundWarningBand`, `GRELLHOUND_WARNING` (3 / 2 / 1) and `grellhoundWarningFor`. `COMPANION.grellhoundWarningRadius` is now *derived* from the table's outermost band rather than being a second number describing the same thing.
+- **`src/engine/wumpus.ts`** — `stenchDirections` takes a `radius` (defaulting to the mandatory floor, so every existing call site is untouched) and is exported; new `wumpusDistance`.
+- **`src/engine/creatures.ts`** — `CompanionSenses.wumpusGrowl: boolean` becomes `wumpusWarning: { band, directions } | null`. The local `withinRadius` is gone: both halves now come from `wumpus.ts`, so "which doorway leads toward it" has one implementation instead of two.
+- **`src/engine/resolve.ts`** — `oilCostWith`, used at **both** places that ask what an action costs; the banded warning emitted at step 7, one narration per doorway, the same shape `revealedHazards` has had since 1d.
+- **`src/engine/data/outcomes.ts`** — `grellhoundEars` and `grellhoundBarks` written; `grellhoundGrowls` rewritten to carry `{direction}`, which it never did.
+- **`src/classic/view.ts`, `src/engine/types.ts`, `docs/ROADMAP.md`** — the three stale leftovers, below.
+- **319 tests**, up from 310. `npm test`, `npm run typecheck`, `npm run build` all clean.
+
+### Decisions taken in 1i part 2, all reversible
+
+- **A waived verb is free at EVERY band, including the two that pay oil back.** The brief said "0 oil regardless of band" and the literal reading is also the only safe one: `min(0, oilCostFor(...))` would keep the payouts while removing every way to lose, which turns the verb's expectation positive — 1i finding 1's oil farm rebuilt out of a companion instead of a multiplier, and a bloom can be `DISARM`ed repeatedly. The cost is that a top-band `DISARM` with a goblin forgoes the +0.25/+0.5 it would have returned. Mutation-checked in `tests/resolve.test.ts`: the `min(0, …)` version fails two assertions.
+- **`oilCostWith` rather than two lines at the charge site**, because there are two callers. The second is the spoils beat in `resolveHazardVerb`, which asks "did this hand oil back" to decide whether to say so — and asked of the price *list* it says yes at a top band even when the companion waived the charge, narrating a payout nobody received. A text-parity failure (CLAUDE.md 2.3), avoided by construction rather than by remembering.
+- **`grellhoundGrowls` kept its name and became the middle band.** The two new beats are the escalation either side. Cheaper than renaming a beat every visualiser keys off, and the middle band is the one the old passive actually was.
+- **One narration per warned doorway**, not one sentence listing them. `Slots` is a closed set of five nouns with no list in it, and assembling a clause is the procedural-prose line CLAUDE.md 6 rules out. Two doorways toward one Wumpus is uncommon and honest when it happens.
+- **The lumewing does NOT lift the per-room `FOCUS` cap**, per the brief. It pays for the looking; it does not buy extra looks.
+
+### The measurement — `npm run economy -- warning`, Panel H, n=300 per cell
+
+The other two buffs are flat discounts on individually cheap verbs and companions are one-at-a-time (`Player.companion` is singular), so the three never stack and only the grellhound had a balance question.
+
+**The policy is new and is named `houndhandler`**: it routes like `router` and refuses to step through a doorway it has been warned about — 1d's "sidesteps into a loop" rule, which 1d measured as worth about a third of the catch rate. Where the warning *comes from* is the experiment. The grellhound is granted on turn 1, which is a **counterfactual and is labelled as one**: encounter density is ~0.6 per run and a quarter of creatures are hounds, so measuring through natural acquisition would measure encounter density with a radius attached. A grellhound draws no randomness at step 7, so all three rows walk the same seeds through the same labyrinths.
+
+| difficulty | channel | escaped | caught | killed | retreated | warned/run | new info |
+|---|---|---|---|---|---|---|---|
+| drowsing | no hound | 57.3% | 19.0% | 15.7% | 2.7% | 2.76 | 0.00 |
+| | hound @ 2 | 60.7% | 12.3% | 18.0% | 3.7% | 3.47 | 0.40 |
+| | **hound @ 3** | 51.3% | **7.0%** | 15.7% | 19.0% | 4.55 | 3.35 |
+| stirring | no hound | 38.0% | 42.0% | 14.7% | 5.3% | 3.83 | 0.00 |
+| | hound @ 2 | 41.0% | 35.3% | 17.0% | 6.7% | 5.06 | 0.57 |
+| | **hound @ 3** | 40.7% | **31.3%** | 16.7% | 10.7% | 6.24 | 3.10 |
+| hunting | no hound | 26.0% | 48.3% | 20.7% | 4.7% | 3.54 | 0.00 |
+| | hound @ 2 | 27.0% | 43.7% | 22.7% | 4.7% | 4.72 | 0.58 |
+| | **hound @ 3** | 25.3% | **38.0%** | 24.7% | 9.3% | 6.27 | 2.46 |
+| ravening | no hound | 24.7% | 46.7% | 22.3% | 6.0% | 3.50 | 0.00 |
+| | hound @ 2 | 26.0% | 42.3% | 22.7% | 7.3% | 4.56 | 0.57 |
+| | **hound @ 3** | 25.7% | **35.0%** | 25.7% | 11.7% | 5.46 | 2.26 |
+
+**The paired test is the one that counts**, because every row walks the same seeds: a 5-point difference between two proportions at n=300 sits close to one standard error and nothing could be concluded from the rates alone. Discordant pairs only, exact two-sided binomial:
+
+| difficulty | caught @2 only | caught @3 only | p |
+|---|---|---|---|
+| drowsing | 26 | 10 | 0.0113 |
+| stirring | 26 | 14 | 0.0807 |
+| hunting | 28 | 11 | 0.0095 |
+| ravening | 30 | 8 | 0.0005 |
+
+### 1i part 2 findings
+
+**1. The radius-3 warning is worth 4 to 7 points of catch rate, and it is not inside noise.** Same direction at all four difficulties, p ≤ 0.011 at three of them; stirring is marginal (0.08) and is the one to re-check rather than quote. The mechanism engages: the outer band fires 2.3 to 3.4 times per run, which is `new info` minus what the floor already gave.
+
+**It does NOT raise the escape rate, and the reason is the policy rather than the buff.** `retreated` climbs 3 to 15 points wherever dodging rises — the sidestep rule will happily walk out of the entrance without the Heart, which ends the run. Pits go up a little too, for the same reason: dodging puts you in rooms you did not plan to enter. Both are facts about a one-line policy. **Do not read the escaped column here**; read `caught`, which is what the warning can actually act on. A bot that knows not to leave empty-handed is 1j's.
+
+**2. The pre-rework grellhound was NOT worth nothing — and everything it was worth came from a divergence between the GDD and the code.** Rows 1 and 2 above were predicted to be *identical*: inside two rooms the hound reports the doorways the free floor already gives away, so a hound at radius 2 should change nothing. They are not identical, and the paired test on them is close to one-directional:
+
+| difficulty | caught, no hound | caught, hound @2 | p |
+|---|---|---|---|
+| drowsing | 21 | 1 | 0.0000 |
+| stirring | 20 | 0 | 0.0000 |
+| hunting | 14 | 0 | 0.0001 |
+| ravening | 13 | 0 | 0.0002 |
+
+Thirteen to twenty-one runs in three hundred saved from the Wumpus, and almost none lost. **Every one of those turns is a Confused turn — measured directly, 65 of 65.** GDD 2.8.1 says the companion passives are exempt from oil and from `FOCUS` but *not* from the spores, and 2.8.2 says a Confused player receives no tells at all. `getTells` implements that; `companionSenses` does not. So the free stench goes silent under a lungful of spores and the hound keeps talking, and that gap is the whole of what the "largely superseded" passive was still buying.
+
+**Decided, 19 Sep, directly by Gautham: leave it.** The grellhound's senses (and `revealedHazards`) keep firing through Confused rather than going silent with the stench. Explicit call, not a default — track it, and revisit only if it reads as game-breaking rather than merely generous. GDD 2.9 updated to describe this as the shipped behaviour rather than an open question.
+
+**3. Oil-free `DISARM` and `FOCUS` cannot reopen the oil farm, and the reason is structural rather than empirical.** They waive a charge; they never change a payout. `oilCostWith` returns exactly 0 for a waived verb at every band, so the best possible outcome of attempting one is that it cost nothing — an expectation of 0 against the −1.69 and −0.28 the price table gives them unassisted. No sequence of good rolls on either verb is a source of oil, which is the property `tests/tuning.test.ts` has asserted by shape since part 1 and which `tests/resolve.test.ts` now asserts through the reducer. The version that *would* have farmed is written down in both the code comment and the mutation check, because it is the obvious implementation and someone will reach for it.
+
+**4. The beat ledger was one-directional, and it had already let three things through.** `tests/outcomes.test.ts` records which narration beats a sweep reaches. Part 1's close-out recorded `grellhoundGrowls` as having come *off* the unreached list — "50 turns instead of 20 means a grellhound tamed early is still alive when the Wumpus closes". Re-measured at the start of this step against part 1's own committed code: it is not reached, and it had not been. Nothing failed, because the assertion only checked that *listed* beats stay unreached; a beat that stops being reached, or never started, was invisible. The previous comment said so in as many words — "only one of those two gets noticed if the list is not asserted in both directions" — and then did not assert it.
+
+The ledger is now **total**: every beat the engine can speak is either seen by the sweep or named in the list with a reason, asserted both ways. Making it total immediately added two more:
+
+- **`heartThrustUpon`** — the bad `ENTER PORTAL` branch, written in part 1, unverified since the day it was written. Neither sweep policy enters a portal.
+- **`lampBurnsDown`** — not merely unreached but **unreachable**. Nothing in the reducer emits it; it was the passive burn's line, part 1 retired the burn and kept the beat deliberately ("a flask spilling and a lamp guttering still need words"), and `tests/resolve.test.ts` asserts a multi-turn action does *not* emit it. By the standard 1g applied to `HAZARD_NARRATION`'s dead rows that is dead content. Kept, because part 1 kept it on purpose and deleting prose is a content call — but it is now on a list that says out loud that it is unverified.
+
+This is the same shape as 1h finding 4 and 1i finding 6, one layer up: **a check that reports success while carrying less coverage than it claims.** The fix is the same one — make it verify its own inputs, or refuse.
+
+**5. Three stale leftovers, all found by reading rather than by any test.** None is a design question.
+
+| what | why no test saw it |
+|---|---|
+| `INERT_ABOVE_CRIT_FAIL` in `src/classic/view.ts` still read `['move', 'listen']` | `LISTEN` was retired in part 1, so the second entry matched no action any renderer could be handed — and every `FOCUS` therefore got a full roll-breakdown panel for a roll whose band only moves the price. **The test passed the whole time**, because it was checking `move`/`listen` too: it agreed with the stale constant rather than with the game. Both now say `focus`, and the test counts the FOCUS rolls it saw so a sweep that never focuses cannot pass by vacuity. |
+| `Companion.skittish` in `src/engine/types.ts` read "they flee if the player takes damage" | Health was retired on 18 Sep and the trigger moved to a critical failure in part 1; the comment did not move with it. Comment-only. A doc comment describing a mechanic that cannot fire is worse than none, because the type is where the next person looks first. |
+| `docs/ROADMAP.md` claimed **246 authored cells** | Re-counted from `npm run prose` Panel A: it is **186** (108 room-led + 78 subject-led), still total over all 576 triples, `DEFERRED_ACTIONS` still empty. The criterion is met; the number moved because retiring `LISTEN`/`READ` took 144 strings and `FOCUS` gave 12 back, and 1g had already cut the hazard axis to the pit alone. The roadmap's visualiser list also gained `economy`. The "a full run is playable start to finish in text" checkbox is untouched — nobody played one in this session. |
+
+**6. The bridge carried a stale file twice, and reported success both times.** Two of the files written to the repo from this session — `scripts/economy.ts` and `tests/outcomes.test.ts` — landed as an *earlier* revision than the one that was sent, with the write reporting success. Caught by checksumming every written file against the source, not by anything failing: the economy script failed to compile in a way that pointed at it, and `tests/outcomes.test.ts` had silently gone on running its old assertions, so the totality ledger in finding 4 was "verified" against a copy that did not contain it and had to be re-run.
+
+This is the 1d clobber exactly (`PHASE-1-PROGRESS`, "Doc lock" — *"the copy can read the previous contents of that path rather than the bytes just written to it"*), and the documented fix works: **stage each revision to a fresh path and read it back.** Everything after that point in this session was written to a numbered path and checksum-verified on the far side. Worth promoting from a docs-only warning to a general one — it is not specific to `docs/`, and a test file that silently reverts is a worse failure than a doc that does, because the suite goes green.
+
 ## 1d findings — three real defects, none of them in 1d's own code
 
 **All three are now fixed.** Finding 3 landed in `generate.ts` during the 1d session; findings 1 and 2 were decided by the PM session on 17 Sep and implemented in the 1e session the same day. What follows is kept as the reasoning, with the measured after-numbers appended to each.
@@ -731,10 +827,20 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - ~~**NEW — the FIGHT oil reward is the one number in 1g that nothing measured.**~~ **Dissolved, 1i.** The question was whether FIGHT should pay a band earlier than the hazard verbs, since TAME pays its companion from mixed up. Folding the reward into the per-band oil delta makes FIGHT and TAME the same curve, so there is no longer a gate to disagree about; the fight/tame asymmetry lives where CLAUDE.md 3 wants it, in the turn cost and the scent. Original entry below.
 - **NEW — the FIGHT oil reward is the one number in 1g that nothing measured.** `earned driving off a creature` came back 0.00 per run at every difficulty and every setting tried, because no policy fights. Its gate was aligned with the hazard verbs' (strongSuccess+) as the conservative choice, not an observed one. The argument for mixed+ instead is that TAME pays its companion from mixed up, so a FIGHT that pays a band later is worse exactly where most wins happen — and that is the asymmetry the reward was added to correct. Settle it with a bot that fights.
 - **NEW — `tests/tuning.test.ts` has a compile-time guard that guards nothing.** Same bug fixed in `tests/outcomes.test.ts` this session: `const ALL_ACTIONS: readonly ActionKind[] = [...]` makes `(typeof ALL_ACTIONS)[number]` evaluate to `ActionKind`, so the guard reads `ActionKind extends ActionKind` and is vacuously true. Adding three verbs to the union compiled clean against a list naming none of them. One-line fix (`as const`, plus an assertion in the other direction); left undone only to keep 1g's diff to its own subject.
+- ~~**NEW — 1i part 2's scope, sketched but not written down anywhere else.**~~ **Closed, 1i part 2** — and two of the three guesses in it were right. The goblin's dismantle-charge idea did NOT turn out to be already answered by `DISARM` existing; it became a discount ON `DISARM`, which is a different thing. The lumewing's proposed tell-range extension was checked against the current lantern-radius passive as instructed and deliberately not built: the moth pays for looking, and lifting the per-room `FOCUS` cap is the larger decision the brief ring-fenced. The grellhound was correctly identified as the one clearly still open, and the reason given — "its passive having been mostly subsumed by the universal radius-2 stench floor" — was right on paper and wrong in fact; see finding 2. Original entry below.
+
 - **NEW — 1i part 2's scope, sketched but not written down anywhere else.** From the same 18 Sep design thread: the Goblin's dismantle-charge idea is now naturally `DISARM` (§2.7) once that verb exists, so it may already be answered rather than needing its own rework. The Moth's (lumewing) proposed tell-range extension was raised but never confirmed against the current lantern-radius passive — check before building. The Grellhound's escalating-warning rework (radius 3/2/1, more detail as the Wumpus closes) is the one clearly still open, and it's now also the fix for the Grellhound's passive having been mostly subsumed by the universal radius-2 stench floor (§2.10) — without this rework the Grellhound's tame is a weaker pick than it used to be. None of this is spec'd to build yet; write the actual scope when part 2 opens.
+- ~~**NEW-1i-part-2 — a Confused player's companion keeps talking, and that divergence was the grellhound's only remaining value.**~~ **Decided, 19 Sep.** GDD 2.8.1 says the companion informational passives are exempt from oil and from `FOCUS` but not from the spores; `getTells` implements that and `companionSenses` does not. Measured at 13–21 runs in 300 saved from the Wumpus, entirely on Confused turns (finding 2). Gautham's call: keep the divergence as shipped — track it, correct only if it becomes game-breaking. Not a patch, a kept design choice.
+- **NEW-1i-part-2 — `lampBurnsDown` is a beat nothing can emit.** Part 1 kept it on purpose when the passive burn was retired. By the standard 1g applied to `HAZARD_NARRATION`'s dead rows it is dead content; it is now on the unreached ledger saying so out loud. Emit it or cut it, next time someone is in `data/outcomes.ts`.
+- **NEW-1i-part-2 — `heartThrustUpon` has never been verified by any sweep.** Written in part 1, reached by neither sweep policy, because neither enters a portal. It is the bad `ENTER PORTAL` branch, which is the one place the game hands the player the Heart without being asked — exactly the branch you would want a sweep to have walked. **1j's heuristic bot should take a portal.**
+- **NEW-1i-part-2 — the grellhound is now measurably worth a companion slot, and nothing measures how often you get one.** The warning is worth 4–7 points of catch rate to a player who HAS a hound; Panel H grants one on turn 1 because encounter density (~0.6 per run, a quarter of them hounds) would otherwise be the thing being measured. That is the same hole `SEND` sat in through 1d–1f and `DISARM` sits in now. It is not evidence the buff is wrong; it is the absence of any run-level estimate of what it is worth in practice.
+- **NEW-1i-part-2 — a bridge write reported success and carried an older revision, twice** (finding 6). The 1d fix — stage each revision to a fresh path, read it back — works and was used for the rest of the session. Worth reading as a general rule rather than a docs-only one: a test file that silently reverts is worse than a doc that does, because the suite goes green over it.
+
 - **Archetype-specific death beats, together with the epitaph.** GDD §2.17 argues the last line of a run carries more weight than any line inside it, and §2.16's epitaph is the literal last thing a failed run produces. Neither exists yet. Scope them as one piece of work, not two.
 
 ## Not yet decided
+
+- **NEW-1i-part-2 — does a top-band `DISARM` with a goblin feel like a buff?** It is free rather than profitable, so it forgoes the +0.25/+0.5 the band would have paid. Correct by construction (anything else farms — finding 3) and slightly odd to read, since the best possible roll and a plain success cost the same nothing. Nobody has played it.
 
 - All three 1d findings are now fixed and closed.
 - **Whether the top three bands should earn anything for MOVE, LISTEN, SEARCH, READ, REST, USE and SEND.** GDD §2.6 promises "a small gift" at Strong Success and none of these implement one; USE and SEND do not read the band at all. 1f wrote the prose honestly around this (texture, never claim) rather than papering it. 1g's sim decides whether to add the gifts or stop rolling. See 1f finding 2.

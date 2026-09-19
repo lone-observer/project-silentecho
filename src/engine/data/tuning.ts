@@ -378,6 +378,40 @@ export function oilCostFor(action: ActionKind, band: OutcomeBand): number {
   return quantizeOil(OIL_PRICE[action] * BAND_OIL_MULTIPLIER[band])
 }
 
+/**
+ * One verb each companion does for free. GDD 2.9, built in 1i part 2.
+ *
+ * A DISCOUNT ON THE PRICE, NOT A CHANGE TO THE ODDS. The roll, the DC and
+ * `STAT_AGNOSTIC_ACTIONS` membership are all untouched — the goblin has taken
+ * plenty of traps apart and is no better at it than you are, it simply does not
+ * cost you lamp oil to let it try. Same for the lumewing and a doorway.
+ *
+ * WHY THIS IS A TABLE HERE RATHER THAN AN ARGUMENT TO `oilCostFor`. That
+ * function is a pure per-band price read, called from two places and from every
+ * visualiser; a companion argument would put a creature into the price table's
+ * signature and make every caller decide what to pass. Content is data
+ * (CLAUDE.md 2.4), so the discount is a row, and `resolve.ts` checks it once at
+ * the single call site where oil is actually charged.
+ *
+ * ZERO AT EVERY BAND, INCLUDING THE TWO THAT PAY. Read literally — a waived
+ * charge, not a waived payout. That costs the player the +0.25/+0.5 a top-band
+ * DISARM would have returned, which looks like a buff with a sting in it until
+ * you price the alternative: `min(0, oilCostFor(...))` would keep the payouts
+ * while removing every way to lose, making the expected value of the verb
+ * strictly positive. That is 1i finding 1's oil farm rebuilt out of a companion
+ * instead of a multiplier, and a bloom you can DISARM repeatedly is an income.
+ * Flat zero cannot farm anything, by construction.
+ */
+export const COMPANION_FREE_VERB: Partial<Record<CreatureKind, ActionKind>> = {
+  goblin: 'disarm',
+  lumewing: 'focus',
+}
+
+/** True when this companion waives this verb's oil entirely. See COMPANION_FREE_VERB. */
+export function companionWaivesOil(companion: CreatureKind | null, action: ActionKind): boolean {
+  return companion !== null && COMPANION_FREE_VERB[companion] === action
+}
+
 // ---------------------------------------------------------------------------
 // Status effects — GDD 2.8.2
 // ---------------------------------------------------------------------------
@@ -1002,6 +1036,43 @@ export function sendDecoyTurnsFor(band: OutcomeBand, carryingHeart: boolean): nu
   return carryingHeart ? pair.carryingHeart : pair.alone
 }
 
+/**
+ * The grellhound's warning, escalating as the thing closes. GDD 2.9, 1i part 2.
+ *
+ * WHAT THE REWORK IS ACTUALLY BUYING, because it is not the escalation. The
+ * universal mandatory stench floor is radius 2 and already directional
+ * (`WUMPUS.mandatoryStenchRadius`, `stenchDirections`), free to every player
+ * with or without a companion — so at radius 2 and 1 this table reports doorways
+ * the game has already named. THE NEW INFORMATION IS ENTIRELY THE OUTER BAND:
+ * one room past where the free floor reaches at all. Everything inside it is
+ * earlier, louder narration of a fact the player already had, which is worth
+ * having and is not what makes the tame worth a companion slot.
+ *
+ * Bands rather than one boolean because the hound is the game's early-warning
+ * system and a warning that says the same thing at three rooms and at one is not
+ * a warning system, it is a light that is on. Ordered nearest-first; read it
+ * with `grellhoundWarningFor`.
+ */
+export type GrellhoundWarningBand = 'urgentBark' | 'lowGrowl' | 'raisedEars'
+
+export const GRELLHOUND_WARNING: readonly {
+  readonly maxDistance: number
+  readonly band: GrellhoundWarningBand
+}[] = [
+  { maxDistance: 1, band: 'urgentBark' },
+  { maxDistance: 2, band: 'lowGrowl' },
+  { maxDistance: 3, band: 'raisedEars' },
+] as const
+
+/** Which band a Wumpus at this many rooms produces, or null for out of range. */
+export function grellhoundWarningFor(distance: number): GrellhoundWarningBand | null {
+  if (distance <= 0) return null
+  for (const row of GRELLHOUND_WARNING) {
+    if (distance <= row.maxDistance) return row.band
+  }
+  return null
+}
+
 export const COMPANION = {
   /**
    * Skittish companions bolt on a CRITICAL FAILURE — the band where the world
@@ -1067,16 +1138,17 @@ export const COMPANION = {
   goblinScroungeChance: 0.1,
   goblinScroungeOil: 1,
   /**
-   * Radius at which the grellhound growls.
+   * How far the grellhound's warning reaches. DERIVED from `GRELLHOUND_WARNING`
+   * so the outermost band and the radius cannot disagree — adding a fourth band
+   * widens the query that feeds it, rather than requiring someone to remember
+   * that two numbers describe one thing.
    *
-   * LARGELY SUBSUMED as of 18 Sep 2026: the universal mandatory stench floor is
-   * now radius 2 as well (`WUMPUS.mandatoryStenchRadius`), so this passive gives
-   * the player almost nothing the base game does not. Left at 2 rather than
-   * raised here, because raising it is the companion rework parked in 1i part 2
-   * (escalating detail at 3/2/1), and moving it in this step would be building
-   * half of that against numbers still in motion. Flagged in PHASE-1-PROGRESS.
+   * It was 2 and was doing nothing there: the mandatory stench floor moved to 2
+   * on 18 Sep 2026 and is directional already, so the hound's whole passive was
+   * a second copy of a free tell. Raised to 3 in 1i part 2, which is where the
+   * value is — see `GRELLHOUND_WARNING`.
    */
-  grellhoundWarningRadius: 2,
+  grellhoundWarningRadius: Math.max(...GRELLHOUND_WARNING.map((b) => b.maxDistance)),
   /** Multiplier on the player's scent output while the Quiet One follows. */
   quietOneScentMultiplier: 0.5,
 } as const

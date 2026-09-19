@@ -38,13 +38,13 @@ Labyrinth generation · Wumpus scent AI (all 4 tiers) · creatures, taming, comp
 
 **18 Sep 2026 — 1i grew from "rebalance the hazard rewards" to "rebuild the resource economy, then rebalance it."** A human playtest pass on 1h's text renderer found the old health/damage model and the LISTEN/READ tell-range model both worth replacing, not just retuning — see `docs/PHASE-1-PROGRESS.md` and `claude/design-decisions.md`, 18 Sep, for the full design thread. The flat 20-turn cap named below is also retired as part of that pass; see GDD §2.2.1.
 
-**`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1j**, and until it does, "the sim says" means "a visualiser sweep says".
+**`npm run sim` does not exist.** `package.json` has the script and `scripts/sim.ts` has never been written — the exit criterion below and `CLAUDE.md` §5's "run `npm run sim` and report the actual number" both point at a command that errors. The balance reads so far have come from the per-step visualisers (`map`, `hunt`, `tame`, `turn`, `prose`, `hazard`, `economy`), each of which sweeps but none of which is the harness `docs/EVALS.md` specifies. Noted here rather than quietly fixed: it lands in **1j**, and until it does, "the sim says" means "a visualiser sweep says".
 
 **The agent interface is a Phase 1 deliverable, built to `docs/EVALS.md` requirements** — pluggable policies, fixed seed sets, full per-turn logging, no state leakage, resumable batches. `npm run sim` is one policy among several. Building it as a one-off script means rebuilding it in week 5.
 
 **Exit criteria**
 - [ ] A full run is playable start to finish in text
-- [x] Every `(archetype × action × band)` outcome has content; coverage test passes — 246 authored cells, total over all 576 triples, `DEFERRED_ACTIONS` empty (1f, 1g)
+- [x] Every `(archetype × action × band)` outcome has content; coverage test passes — **186 authored cells** (108 room-led + 78 subject-led), total over all 576 triples, `DEFERRED_ACTIONS` empty (1f, 1g, 1i). *Re-counted from `npm run prose` Panel A in 1i part 2; it read 246 from 1g until then. Retiring `LISTEN` and `READ` took 144 strings with them and `FOCUS` gave 12 back, and the hazard axis is down to the pit alone since 1g deleted the bloom and snare rows. The criterion is still met — the drop is dead content leaving, not coverage rotting.*
 - [x] Every hazard but the pit offers a verb choice, and every stat has exactly one hazard it cannot answer (GDD §2.8) — 1g
 - [ ] `npm run sim` reports win rate, loss causes, band distribution, tame-vs-fight rate
 - [ ] Agent harness satisfies every requirement in `docs/EVALS.md` — verified by running a `random` policy batch and a `heuristic` batch over the same fixed seed list
