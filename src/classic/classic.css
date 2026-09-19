@@ -522,3 +522,108 @@ button {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* --- the control pad ----------------------------------------------------- */
+
+.pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.pad-row {
+  display: flex;
+  gap: 4px;
+}
+
+.pad-cell,
+.verb {
+  width: 5.4em;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: none;
+  border: 1px solid var(--rule);
+  color: var(--dim);
+  cursor: default;
+}
+
+/* A dark cell is a WALL, not a withheld verb — see padCells and GDD 2.17. */
+.pad-cell.live,
+.verb.live {
+  color: var(--amber);
+  border-color: #3d5a5c;
+  cursor: pointer;
+}
+
+.pad-cell.live:hover,
+.pad-cell.live:focus-visible,
+.verb.live:hover,
+.verb.live:focus-visible {
+  background: #17292d;
+  border-color: var(--amber);
+  outline: none;
+}
+
+.pad-cell.empty {
+  width: 5.4em;
+  border-color: transparent;
+}
+
+.pad-cell.back .pad-word::after {
+  content: ' ↩';
+  color: var(--amber);
+  opacity: 0.75;
+}
+
+.pad-key {
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.pad-word {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+.pad-cell.live .pad-word,
+.verb.live .pad-word {
+  color: var(--dim);
+}
+
+/* Focus armed: the pad is pointing somewhere else, and says so. */
+.pad.mode-focus .pad-cell.live {
+  border-style: dashed;
+}
+
+.verbs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.verb.armed {
+  background: #1d3336;
+  border-color: var(--amber);
+}
+
+.armed-hint {
+  margin: 0 0 10px;
+  text-align: center;
+  color: var(--amber);
+  font-size: 13px;
+}
+
+/* The opening frame, now its own tile rather than the top of the log. */
+.classic > .intro {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  padding: 12px;
+  margin: 0;
+}

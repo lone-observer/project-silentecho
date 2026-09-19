@@ -19,7 +19,7 @@
  *    menu of thirteen.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { Action, ActionKind, Direction } from '../engine/types.ts'
 import type { LegalAction } from '../engine/resolve.ts'
@@ -33,11 +33,23 @@ import {
   isWin,
   OUTCOME_LABEL,
   roomView,
+  listedEntries,
+  padCells,
   statusChunks,
+  verbButtons,
   waivedVerb,
   wayBack,
 } from './view.ts'
-import type { DoorwayView, MapCell, RollView, StatusChunk, UnsensedReason } from './view.ts'
+import type {
+  DoorwayView,
+  MapCell,
+  PadCell,
+  PadMode,
+  RollView,
+  StatusChunk,
+  UnsensedReason,
+  VerbButton,
+} from './view.ts'
 import { num } from './labels.ts'
 import './classic.css'
 
@@ -99,6 +111,22 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
   const chart = useMemo(() => chartedMap(run.state), [run.state])
   const back = useMemo(() => wayBack(run.state), [run.state])
   const waived = useMemo(() => waivedVerb(run.state), [run.state])
+  // F points the pad at FOCUS; the next direction spends it. Reset whenever the
+  // menu changes, so an armed F can never survive into a turn that has no FOCUS
+  // in it — a hazard taking the menu disarms it by construction.
+  const [mode, setMode] = useState<PadMode>('move')
+  // Four paragraphs are the right size on turn one and dead weight on turn
+  // twelve, so it folds itself away once the run is actually under way — once,
+  // and then it is the player's toggle again rather than something that keeps
+  // snapping shut under them.
+  const [introOpen, setIntroOpen] = useState(true)
+  const started = run.state.turn > 1
+  useEffect(() => {
+    if (started) setIntroOpen(false)
+  }, [started])
+  useEffect(() => setMode('move'), [run.turns.length])
+  const pad = useMemo(() => padCells(run.menu, run.state, mode), [run.menu, run.state, mode])
+  const verbs = useMemo(() => verbButtons(run.menu), [run.menu])
 
   const choose = useCallback((action: Action) => act(action), [act])
 
@@ -112,13 +140,40 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
       if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return
       const key = event.key.toUpperCase()
 
+      // F arms FOCUS and a second F disarms it; Escape always disarms.
+      if (key === 'ESCAPE') {
+        event.preventDefault()
+        setMode('move')
+        return
+      }
+      if (key === 'F') {
+        event.preventDefault()
+        if (verbs.some((v) => v.arms === 'focus' && v.available)) {
+          setMode((m) => (m === 'focus' ? 'move' : 'focus'))
+        }
+        return
+      }
+      if (key === 'E' || key === 'R') {
+        const verb = verbs.find((v) => v.key === key)
+        event.preventDefault()
+        if (verb?.available && verb.action !== null) {
+          setMode('move')
+          choose(verb.action)
+        }
+        return
+      }
+
       const direction = DIRECTION_KEYS[key]
       if (direction !== undefined) {
-        const action = actionForDirection(run.menu, direction)
-        // Swallow the arrow key either way, so a dead direction does not
-        // scroll the log out from under the player.
+        // In focus mode the direction spends the armed FOCUS; otherwise it is a
+        // MOVE. This is why the two verbs no longer contend for one key — the
+        // pad's mode decides, rather than a preference order inside the lookup.
+        const cellAction = pad.find((c) => c.direction === direction)?.action ?? null
         event.preventDefault()
-        if (action !== null) choose(action)
+        if (cellAction !== null) {
+          setMode('move')
+          choose(cellAction)
+        }
         return
       }
 
@@ -131,7 +186,7 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [run.menu, choose, ended])
+  }, [run.menu, choose, ended, pad, verbs])
 
   return (
     <div className="classic">
@@ -141,6 +196,13 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
           seed {run.seed} · {run.difficulty}
         </span>
       </header>
+
+      {/*
+        The opening frame is its own tile now, below the title and above the
+        status row, rather than sitting inside the scrolling log where it was
+        pushed off-screen by turn three.
+      */}
+      <Intro paragraphs={RUN_INTRO} open={introOpen} onToggle={setIntroOpen} />
 
       <Status chunks={chunks} />
 
@@ -169,13 +231,6 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
             </section>
           )}
 
-          {chart !== null && (
-            <section className="panel">
-              <h2>Charted</h2>
-              <ChartedMap rows={chart} />
-            </section>
-          )}
-
           {/*
             The heading names the action, because during an encounter or a
             hazard this panel is showing the roll for the MOVE that walked you
@@ -193,19 +248,42 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
             </section>
           )}
 
+          {/*
+            THE CONTROLLER SITS ABOVE THE MAP, which is the one place this
+            deviates from the sketch, and the reason is vertical order by
+            frequency: the pad is touched every single turn and the map is
+            consulted occasionally, and the map's grid is fixed-size and mostly
+            empty early (deliberately — see `chartedMap`). With the map between
+            them, the pad started the run below the fold.
+          */}
           <section className="panel">
             <h2>{ended ? 'The run is over' : 'What do you do?'}</h2>
             {ended ? (
               <Ending run={run} />
             ) : (
-              <Menu menu={run.menu} onChoose={choose} back={back} waived={waived} />
+              <>
+                <Pad cells={pad} mode={mode} onChoose={choose} />
+                <Verbs verbs={verbs} mode={mode} onChoose={choose} onArm={setMode} />
+                {mode === 'focus' && (
+                  <p className="armed-hint">
+                    Pick a doorway to look through. F or Esc to put it down.
+                  </p>
+                )}
+                <Menu menu={run.menu} onChoose={choose} back={back} waived={waived} />
+              </>
             )}
           </section>
+
+          {chart !== null && (
+            <section className="panel">
+              <h2>Charted</h2>
+              <ChartedMap rows={chart} />
+            </section>
+          )}
         </div>
 
         <section className="panel log-panel">
           <h2>Log</h2>
-          <Intro paragraphs={RUN_INTRO} />
           <Log turns={run.turns} />
         </section>
       </div>
@@ -350,6 +428,96 @@ function Roll({ roll }: { roll: RollView }): React.JSX.Element {
 /** The compass letter shown for a direction, matching `DIRECTION_KEYS`. */
 const KEY_FOR_DIRECTION: Record<Direction, string> = { N: 'W', W: 'A', S: 'S', E: 'D' }
 
+/** Structural equality for two actions, for matching a menu entry to a binding. */
+function sameAction(a: Action | null, b: Action): boolean {
+  if (a === null || a.kind !== b.kind) return false
+  const ad = 'direction' in a ? a.direction : null
+  const bd = 'direction' in b ? b.direction : null
+  if (ad !== bd) return false
+  const ai = 'item' in a ? a.item : null
+  const bi = 'item' in b ? b.item : null
+  return ai === bi
+}
+
+/**
+ * The compass pad. Four fixed cells; a dark one is a wall.
+ *
+ * See `padCells` for why a four-cell compass is not the greyed-out verb list
+ * GDD 2.17 forbids, and for the argued exception now written into that section.
+ */
+function Pad({
+  cells,
+  mode,
+  onChoose,
+}: {
+  cells: readonly PadCell[]
+  mode: PadMode
+  onChoose: (action: Action) => void
+}): React.JSX.Element {
+  const cell = (direction: string): React.JSX.Element => {
+    const c = cells.find((x) => x.direction === direction)
+    if (c === undefined) return <span className="pad-cell empty" />
+    const live = c.action !== null
+    return (
+      <button
+        type="button"
+        className={`pad-cell${live ? ' live' : ''}${c.wayBack ? ' back' : ''}`}
+        disabled={!live}
+        title={live ? `${mode === 'focus' ? 'Focus' : 'Move'} ${c.word}` : `wall to the ${c.word}`}
+        onClick={() => c.action !== null && onChoose(c.action)}
+      >
+        <span className="pad-key">{c.key}</span>
+        <span className="pad-word">{c.word}</span>
+      </button>
+    )
+  }
+  return (
+    <div className={`pad mode-${mode}`}>
+      <div className="pad-row">{cell('N')}</div>
+      <div className="pad-row">
+        {cell('W')}
+        {cell('S')}
+        {cell('E')}
+      </div>
+    </div>
+  )
+}
+
+function Verbs({
+  verbs,
+  mode,
+  onChoose,
+  onArm,
+}: {
+  verbs: readonly VerbButton[]
+  mode: PadMode
+  onChoose: (action: Action) => void
+  onArm: (mode: PadMode) => void
+}): React.JSX.Element {
+  return (
+    <div className="verbs">
+      {verbs.map((v) => {
+        const armed = v.arms !== null && mode === v.arms
+        return (
+          <button
+            key={v.key}
+            type="button"
+            className={`verb${v.available ? ' live' : ''}${armed ? ' armed' : ''}`}
+            disabled={!v.available}
+            onClick={() => {
+              if (v.arms !== null) onArm(armed ? 'move' : v.arms)
+              else if (v.action !== null) onChoose(v.action)
+            }}
+          >
+            <span className="pad-key">{v.key}</span>
+            <span className="pad-word">{v.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function Menu({
   menu,
   onChoose,
@@ -361,25 +529,39 @@ function Menu({
   back: Direction | null
   waived: ActionKind | null
 }): React.JSX.Element {
+  const rows = listedEntries(menu)
+  if (rows.length === 0) return <></>
   return (
     <ul className="menu">
-      {menu.map((entry, index) => {
+      {rows.map(({ entry, index }) => {
         // Directional entries show their compass key instead of their number.
         // The number still works — the handler is index-based and unchanged —
         // but the compass key is the one worth learning, because it is the only
         // one that means the same thing next turn.
+        // THE KEY SHOWN MUST BE THE KEY THAT FIRES THIS ROW. Deriving it from
+        // the entry's own direction was correct in 1h, when MOVE was the only
+        // directional verb in the normal menu — and 1i made it a lie by adding
+        // FOCUS as a second one: `Move north` and `Focus north` both rendered
+        // `W`, and `W` has always resolved to the MOVE. So ask the binding what
+        // it would actually do with this direction, and only claim the compass
+        // key when the answer is this exact entry. Anything else falls back to
+        // its number, which is index-based and always true.
         const dir =
           'direction' in entry.action && entry.action.kind !== 'send'
             ? entry.action.direction
             : null
-        const shown = dir !== null ? KEY_FOR_DIRECTION[dir] : (keyFor(index) ?? '·')
+        const boundHere =
+          dir !== null && sameAction(actionForDirection(menu, dir), entry.action)
+        const shown = boundHere ? KEY_FOR_DIRECTION[dir] : (keyFor(index) ?? '·')
         return (
           <li key={`${entry.label}-${index}`}>
             <button type="button" onClick={() => onChoose(entry.action)}>
               <span className="key">{shown}</span>
               <span className="label">
                 {entry.label}
-                {dir !== null && dir === back && <span className="back"> (go back)</span>}
+                {entry.action.kind === 'move' && dir === back && dir !== null && (
+                  <span className="back"> (go back)</span>
+                )}
               </span>
               {/*
                 A companion is paying for this one. Marked HERE as well as on
@@ -413,9 +595,21 @@ function Menu({
  * timer's. The text is `RUN_INTRO` from `data/outcomes.ts` — the renderer still
  * writes no prose.
  */
-function Intro({ paragraphs }: { paragraphs: readonly string[] }): React.JSX.Element {
+function Intro({
+  paragraphs,
+  open,
+  onToggle,
+}: {
+  paragraphs: readonly string[]
+  open: boolean
+  onToggle: (open: boolean) => void
+}): React.JSX.Element {
   return (
-    <details className="intro" open>
+    <details
+      className="intro"
+      open={open}
+      onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary>Before you go down</summary>
       {paragraphs.map((text, i) => (
         <p key={i}>{text}</p>

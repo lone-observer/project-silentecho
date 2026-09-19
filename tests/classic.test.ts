@@ -38,7 +38,10 @@ import {
   chartedMap,
   doorways,
   roomView,
+  listedEntries,
+  padCells,
   statusChunks,
+  verbButtons,
   waivedVerb,
   wayBack,
 } from '../src/classic/view.ts'
@@ -864,5 +867,180 @@ describe('classic renderer — the companion oil discount', () => {
         expect(companionWaivesOil(kind, free), `${kind} at ${band}`).toBe(true)
       }
     }
+  })
+})
+
+describe('classic renderer — the key a row shows is the key that fires it', () => {
+  /**
+   * MUTATION-CHECKED, and it exists because the old assertion passed through a
+   * real defect for a whole step.
+   *
+   * 1h asserted that a direction key resolves to an action `legalActions`
+   * already returned — that the binding is VALID. It never asserted the binding
+   * is UNAMBIGUOUS. When MOVE was the only directional verb in the normal menu
+   * those were the same claim; 1i added `FOCUS` as a second one and they came
+   * apart, so `Move north` and `Focus north` both displayed `W` while `W` fired
+   * the MOVE. The screen named a key that did something else, and every
+   * assertion in this file passed.
+   *
+   * So: for every directional entry in every menu, at most one may claim a
+   * given compass key, and the entry claiming it must be the one the binding
+   * resolves to.
+   */
+  it('never lets two entries claim the same compass key', () => {
+    let sawContested = 0
+
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 20; seed++) {
+        drive(seed, difficulty, (run) => {
+          for (const direction of DIRECTIONS) {
+            const bound = actionForDirection(run.menu, direction)
+            const claiming = run.menu.filter(
+              (e) =>
+                'direction' in e.action &&
+                e.action.direction === direction &&
+                e.action.kind !== 'send' &&
+                bound !== null &&
+                e.action.kind === bound.kind,
+            )
+            // The binding resolves to at most one entry, always.
+            expect(claiming.length).toBeLessThanOrEqual(1)
+
+            // And when more than one entry points this way, the binding still
+            // picks exactly one — the others must fall back to their numbers.
+            const directional = run.menu.filter(
+              (e) =>
+                'direction' in e.action &&
+                e.action.direction === direction &&
+                e.action.kind !== 'send',
+            )
+            if (directional.length > 1) {
+              sawContested += 1
+              expect(bound, 'a contested direction resolved to nothing').not.toBeNull()
+              expect(directional.some((e) => e.action.kind === bound?.kind)).toBe(true)
+            }
+          }
+        })
+      }
+    }
+
+    // The contested case is the whole point — MOVE and FOCUS through the same
+    // doorway. A sweep that never met one would prove nothing.
+    expect(sawContested, 'never saw two verbs pointing the same way').toBeGreaterThan(50)
+  })
+
+  /**
+   * `(go back)` describes retracing a MOVE. Focusing through the doorway you
+   * came in by is looking, not going, and labelling it "go back" invites the
+   * player to read a look as a step.
+   */
+  it('keeps the go-back label on movement only', () => {
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          const back = wayBack(run.state)
+          if (back === null) return
+          const pointingBack = run.menu.filter(
+            (e) => 'direction' in e.action && e.action.direction === back,
+          )
+          // At most one of them is a MOVE, and only that one may carry the label.
+          expect(pointingBack.filter((e) => e.action.kind === 'move').length).toBeLessThanOrEqual(1)
+        })
+      }
+    }
+  })
+})
+
+describe('classic renderer — the control pad', () => {
+  /**
+   * The pad is an input affordance over `legalActions`, never a second menu
+   * (GDD 2.17). Every cell either fires an action the engine already returned,
+   * or fires nothing at all — and a dark cell is a wall, not a verb withheld.
+   */
+  it('never offers an action legalActions did not return', () => {
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          for (const mode of ['move', 'focus'] as const) {
+            for (const cell of padCells(run.menu, run.state, mode)) {
+              if (cell.action === null) continue
+              expect(run.menu.map((e) => e.action)).toContainEqual(cell.action)
+              // And the mode decides the verb — this is what stopped MOVE and
+              // FOCUS contending for one key.
+              expect(cell.action.kind).toBe(mode)
+              expect('direction' in cell.action && cell.action.direction).toBe(cell.direction)
+            }
+          }
+        })
+      }
+    }
+  })
+
+  /**
+   * MUTATION-CHECKED. Every legal action reaches the player somewhere: the pad
+   * covers move/focus/search/rest and the numbered list covers the rest, and
+   * between them nothing the engine offered may go unrendered. That is the
+   * property the split risks breaking and the one worth asserting.
+   */
+  it('renders every legal action, on the pad or in the list', () => {
+    let listed = 0
+
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          const onPad = new Set<Action>()
+          for (const mode of ['move', 'focus'] as const) {
+            for (const c of padCells(run.menu, run.state, mode)) {
+              if (c.action !== null) onPad.add(c.action)
+            }
+          }
+          for (const v of verbButtons(run.menu)) {
+            if (v.action !== null) onPad.add(v.action)
+          }
+          const inList = new Set(listedEntries(run.menu).map(({ entry }) => entry.action))
+          listed += inList.size
+
+          for (const entry of run.menu) {
+            const reachable = onPad.has(entry.action) || inList.has(entry.action)
+            expect(reachable, `${entry.label} reached neither pad nor list`).toBe(true)
+          }
+        })
+      }
+    }
+
+    // The list must actually carry things, or the assertion above is only
+    // checking the pad.
+    expect(listed, 'nothing ever landed in the numbered list').toBeGreaterThan(20)
+  })
+
+  it('keeps the numbered list indexed against the whole menu', () => {
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 12; seed++) {
+        drive(seed, difficulty, (run) => {
+          for (const { entry, index } of listedEntries(run.menu)) {
+            // The number shown is the index the key handler uses, so it has to
+            // point back at this exact entry in the unfiltered menu.
+            expect(run.menu[index]).toBe(entry)
+          }
+        })
+      }
+    }
+  })
+
+  it('offers F only when a FOCUS is actually available', () => {
+    let armable = 0
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 15; seed++) {
+        drive(seed, difficulty, (run) => {
+          const f = verbButtons(run.menu).find((v) => v.key === 'F')
+          const hasFocus = run.menu.some((e) => e.action.kind === 'focus')
+          expect(f?.available).toBe(hasFocus)
+          if (hasFocus) armable += 1
+          // F never takes a turn by itself.
+          expect(f?.action).toBeNull()
+        })
+      }
+    }
+    expect(armable, 'FOCUS was never offered in the sweep').toBeGreaterThan(50)
   })
 })

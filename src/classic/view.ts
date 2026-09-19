@@ -202,6 +202,137 @@ export function actionForDirection(
 }
 
 // ---------------------------------------------------------------------------
+// The control pad — GDD 2.17's carve-out
+// ---------------------------------------------------------------------------
+
+/** The compass key for each direction. WASD, and the arrow keys alias it. */
+export const PAD_KEY: Record<Direction, string> = { N: 'W', W: 'A', S: 'S', E: 'D' }
+
+/**
+ * What the pad is currently pointing at.
+ *
+ * `move` is the resting state. `focus` is armed by F and spent by the next
+ * direction, because FOCUS resolves ONE doorway and costs a turn — a bare F
+ * can never complete it, so the verb needs a direction after it however it is
+ * typed. Arming is the same at every difficulty; only how many times it works
+ * differs (`focusesPerRoom`, GDD 2.2.1).
+ */
+export type PadMode = 'move' | 'focus'
+
+export interface PadCell {
+  readonly direction: Direction
+  readonly key: string
+  readonly word: string
+  /** The action this cell fires, or null when nothing legal points this way. */
+  readonly action: Action | null
+  /** The doorway you came in by. Movement only — a FOCUS back is not a retreat. */
+  readonly wayBack: boolean
+}
+
+/**
+ * The four compass cells, in whichever mode the pad is in.
+ *
+ * WHY THIS IS NOT THE GDD 2.17 VIOLATION IT LOOKS LIKE. That section forbids a
+ * renderer showing the verb list with unavailable entries greyed out, and gives
+ * the reason: "a menu of thirteen where three apply is a menu of thirteen as
+ * far as the player's decision cost is concerned." The cost being protected is
+ * READING COST — scanning a long list for the few live rows.
+ *
+ * A four-cell compass is not that list. It is a picture of THIS ROOM: which
+ * walls have doorways in them. That is one fact, it is already in the doorway
+ * panel, it never changes length, and a dark cell is a wall rather than a verb
+ * withheld. The fixed shape is the point — a cross with one lit arm reads as a
+ * dead end at a glance, which a list that shrinks to one row does not.
+ *
+ * It is still the closest thing in this UI to that rule, so it is written down
+ * as an argued exception in GDD 2.17 rather than left to drift. **Everything
+ * that is a verb rather than a direction stays in the numbered list**, and that
+ * list is still `legalActions` verbatim, still filtered by the engine.
+ */
+export function padCells(
+  menu: readonly LegalAction[],
+  state: GameState,
+  mode: PadMode,
+): PadCell[] {
+  const back = wayBack(state)
+  const want: ActionKind = mode === 'focus' ? 'focus' : 'move'
+  return DIRECTIONS.map((direction) => {
+    const entry = menu.find(
+      (e) => e.action.kind === want && 'direction' in e.action && e.action.direction === direction,
+    )
+    return {
+      direction,
+      key: PAD_KEY[direction],
+      word: DIRECTION_WORD[direction],
+      action: entry?.action ?? null,
+      wayBack: mode === 'move' && direction === back,
+    }
+  })
+}
+
+export interface VerbButton {
+  readonly key: string
+  readonly label: string
+  /** Null for a button that arms a mode rather than taking a turn. */
+  readonly action: Action | null
+  readonly arms: PadMode | null
+  readonly available: boolean
+}
+
+/**
+ * The three verbs that always want a key of their own, whether or not they are
+ * legal this turn.
+ *
+ * F does not take a turn by itself — it points the pad at FOCUS and the next
+ * direction spends it. E and R are whole actions. Everything else the engine
+ * offers keeps its number and its row in the list: an encounter's FIGHT/TAME,
+ * a hazard's verbs, items, SEND, the portal. Those change from turn to turn and
+ * a fixed key for them would be a key that usually does nothing.
+ */
+export function verbButtons(menu: readonly LegalAction[]): VerbButton[] {
+  const find = (kind: ActionKind): LegalAction | undefined =>
+    menu.find((e) => e.action.kind === kind)
+  const focusable = menu.some((e) => e.action.kind === 'focus')
+  const search = find('search')
+  const rest = find('rest')
+  return [
+    { key: 'F', label: 'Focus', action: null, arms: 'focus', available: focusable },
+    {
+      key: 'E',
+      label: 'Search',
+      action: search?.action ?? null,
+      arms: null,
+      available: search !== undefined,
+    },
+    {
+      key: 'R',
+      label: 'Rest',
+      action: rest?.action ?? null,
+      arms: null,
+      available: rest !== undefined,
+    },
+  ]
+}
+
+/**
+ * Menu entries the pad does NOT cover, with their index in the full menu.
+ *
+ * The index is what matters: the number key handler is index-based over the
+ * whole of `legalActions`, so a row shown as `5` must be the fifth entry the
+ * engine returned, not the fifth of this filtered remainder. Passing the
+ * original index through is what keeps the displayed number honest — the same
+ * property the compass-key fix restored.
+ */
+export function listedEntries(
+  menu: readonly LegalAction[],
+): { entry: LegalAction; index: number }[] {
+  const onPad: readonly ActionKind[] = ['move', 'focus', 'search', 'rest']
+  return menu
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => !onPad.includes(entry.action.kind))
+}
+
+// ---------------------------------------------------------------------------
 // The charted map
 // ---------------------------------------------------------------------------
 

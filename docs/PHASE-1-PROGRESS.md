@@ -700,6 +700,21 @@ The question largely answered itself once 1i landed: difficulty was *already* al
 
 **Still open, and much narrower: placement.** `focusesPerRoom` is a `DifficultyContract` field in `tuning.ts`; `MAP_DIFFICULTIES` is a renderer constant. One renderer can carry that. The moment a second wants a map — the diorama, or `AgentView` deciding what a bot may remember — the rule has to live where both read it, and `focusesPerRoom` is the precedent for where. Not moved on spec: it would add a field to the difficulty contract and touch the generation tests, for no consumer that exists yet.
 
+### The controller pass, same day — and the bug that prompted it
+
+**`FOCUS` was unreachable from the keyboard, and the menu displayed a key that did something else.** `Move north` and `Focus north` both rendered `W`; `W` always fired the MOVE, because `actionForDirection` returns its move branch first. Found by Gautham playing, not by the suite.
+
+**The binding was correct when it was written.** 1h added compass keys when MOVE was the only directional verb in the normal menu — SNEAK and FLEE appear only in encounters, where MOVE is absent, so "the directional action for this way" was unambiguous by construction. **1i added `FOCUS` as a second directional verb in the same menu and silently invalidated that**, and nothing failed, because 1h's test asserted the binding was *valid* (it resolves to something `legalActions` returned) and never that it was *unambiguous*. A verb added in one step broke an input rule established in another, with no overlap between the two steps' diffs.
+
+Two fixes, and the first matters more than the feature:
+
+- **The displayed key now asks the binding what it would do** and claims the compass key only when the answer is that exact row; anything else falls back to its number. It cannot display a mismatched key again, whatever verbs are added later. `(go back)` is narrowed to MOVE — focusing through the doorway you came in by is looking, not going.
+- **A control pad**, with `F` arming FOCUS and the next direction spending it. One scheme at every difficulty: the verb is identical at all four and only `focusesPerRoom` differs, so splitting the input by difficulty would cost muscle memory for no design payoff. `E` searches, `R` rests. Everything that is a verb rather than a direction keeps its number and its row.
+
+**The pad is an argued exception to GDD 2.17, now written into that section.** A four-cell compass with a dark cell where a wall is looks like the greyed-out verb list 2.17 forbids. It is not: the cost that rule protects is reading cost — scanning a long list for the few live rows — and a compass is one fact about the room, already in the doorway panel, that never changes length. The fixed shape is the point; a cross with one lit arm reads as a dead end at a glance. The exception is narrow and says so: verbs stay in the list, the list stays `legalActions` verbatim.
+
+**Two layout changes.** The opening frame is its own tile below the title rather than the top of the scrolling log, where it was pushed off-screen by turn three; it folds itself away once the run is under way, once, and is the player's toggle after that. And **the controller sits above the charted map** — the one place this deviates from Gautham's sketch, because the map's grid is fixed-size and mostly empty early (deliberately), so with it in between, the pad started the run below the fold. Vertical order by frequency of use: the pad is touched every turn.
+
 ### Findings
 
 **1. The menu has never shown what anything costs.** `LegalAction` carries `{ action, label, dc }` and no price, so in a game whose entire resource model is *per-action oil scaled by band* (`OIL_PRICE` × `BAND_OIL_MULTIPLIER`), the player picks a verb without being told its price and learns it afterwards from the oil line. This is the root cause the companion-discount item is a symptom of: a discount is invisible partly because **the thing being discounted is invisible**.
