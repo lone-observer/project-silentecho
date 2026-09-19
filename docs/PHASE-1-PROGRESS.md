@@ -2,7 +2,7 @@
 
 Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what Phase 1 *is*; this says how far in we are and what the next session should pick up.
 
-**Last updated:** 18 Sep 2026 — GDD economy-unification rewrite (health retired, oil-only economy, FOCUS/DISARM/DROP HEART, turn caps raised to 50/45/40/35), by PM session following Gautham's first playtest. 1h (the text renderer) is done. 1i splits into **part 1** (build the economy, then rebalance it — next, handoff prompt below) and **part 2** (companion buff rework, queued behind part 1).
+**Last updated:** 18 Sep 2026 — **1i part 1 landed**: the economy-unification design is built and measured. Health is gone, oil is priced per action and scaled by margin, `FOCUS`/`DISARM`/`DROP HEART` are live, turn caps are 50/45/40/35, the Wumpus stench reaches two rooms. 310 tests. The sweep answered all five questions it was given and two of the answers are negative results worth reading (findings 1 and 2 below). 1i **part 2** (companion buff rework) and **1j** (agent harness) are both unblocked.
 
 **Doc lock:** none. *(If this says otherwise, STOP before writing to `docs/GDD.md`, this file, or `docs/ROADMAP.md` — see "Doc lock" below.)*
 
@@ -18,8 +18,8 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 | 1f · outcomes table | **done** | `src/engine/data/outcomes.ts`, `scripts/prose.ts`, `tests/outcomes.test.ts` |
 | 1g · hazard-verb redesign | **done** | `src/engine/data/tuning.ts` (`VERB_HAZARDS`, `HAZARD_VERB_OUTCOMES`), `resolve.ts`, `scripts/hazard.ts`, `tests/hazards.test.ts`. Bloom and snare are verb encounters; `FORCE`/`ENDURE`/`AVOID`/`DODGE` are real `ActionKind`s; reward and ambient flask count both measured and set. |
 | 1h · text (classic) renderer | **done** | `src/classic/` (`Classic.tsx`, `Title.tsx`, `view.ts`, `lines.ts`, `labels.ts`, `classic.css`), `src/state/run.ts`, `tests/classic.test.ts`. The game is playable start to finish in a browser at `npm run dev`. Two small engine additions, both flagged below. `tests/tuning.test.ts`'s vacuous guard fixed. |
-| 1i part 1 · economy build + rebalance | **next** | build the 18 Sep economy-unification design (health retired, margin-scaled oil, `FOCUS`/`DISARM`/`DROP HEART`, the price table, turn caps 50/45/40/35, Wumpus stench radius 2) into the engine, then rebalance it against played feel and sim data. **Unblocked — 1h ships something to play.** Handoff prompt below. |
-| 1i part 2 · companion buff rework | queued, gated on part 1 | Goblin/Moth(lumewing)/Grellhound passive reworks, parked from the same 18 Sep design thread. Scope not yet written — see "Carried forward" below. |
+| 1i part 1 · economy build + rebalance | **done** | Health retired engine-wide; `OIL_PRICE` × `BAND_OIL_MULTIPLIER` through one `oilCostFor`; pit binary; `FOCUS` (per-room cap by difficulty) replacing `LISTEN`/`READ`; `DISARM` (stat-agnostic, permanent) and `DROP HEART` (free); `SEND` roll-keyed; turn caps 50/45/40/35; stench radius 2; `USE` rolled; `ENTER PORTAL`'s bad roll hands you the Heart. `getTells` returns `DoorwaySense[]`, which closes 1h finding 1. `src/classic/` follows. New visualiser `scripts/economy.ts` (7 panels) produced every number below. |
+| 1i part 2 · companion buff rework | **next** | Goblin/Moth(lumewing)/Grellhound passive reworks, parked from the same 18 Sep design thread. Scope not yet written — see "Carried forward" below. |
 | 1j · agent harness core | queued | `AgentView` adapter + a "can't see through walls" leakage test, the `Policy` interface (with the Fortune-spend hook — see `docs/EVALS.md`), `random` + `heuristic` policies, run-batch infra |
 | 1k · LLM integration + benchmark run | queued | OpenRouter wiring, the fixed prompt (`docs/AGENT-PROMPT.md`), the model roster, scoring/report script, the actual n=100 batches, the human baseline |
 
@@ -29,7 +29,7 @@ Running notes for a phase that spans many sessions. `docs/ROADMAP.md` says what 
 
 **18 Sep, later the same day — 1i splits into two parts.** The design-review thread that produced the economy-unification GDD rewrite also surfaced the companion buff reworks (Goblin/Moth/Grellhound) as real, wanted work — but they're additive content changes, not the engine rebuild 1i was already scoped for, and folding them in would make an already-wide step wider for no coupling reason. Gautham split it: **1i part 1** is the economy build (this session's GDD rewrite, turned into code) plus its sim-driven rebalance — the original 1i scope, just bigger than "rebalance numbers" now. **1i part 2** is the companion buff rework, gated on part 1 landing so it isn't rebasing against numbers still in motion. The Skittish→Companion→Brave temperament system and Endless mode stay parked outside both parts — see `claude/design-decisions.md`, 18 Sep, for the full reasoning on what's in which bucket and why.
 
-280 tests. `npm test`, `npm run typecheck`, `npm run build` all clean.
+310 tests. `npm test`, `npm run typecheck`, `npm run build` all clean.
 
 ## One session per step
 
@@ -430,6 +430,143 @@ The problem underneath: **session 3 ("Docs and hygiene") listed `2a25e07`, which
 
 **Build the equivalent habit for the next renderer: open it and play it.** The suite went 280 green through all four of these.
 
+## What 1i part 1 landed
+
+**The resource model is one mechanism now.** `OIL_PRICE[action] × BAND_OIL_MULTIPLIER[band]`, computed in one function (`oilCostFor`) and charged once, at step 1, before the action is resolved. That single line replaced three separate mechanisms: the passive burn every two turns, `OIL.extraCost` for the quiet verbs, and 1g's flask reward gated at strongSuccess. All three were answering "what does this cost you", in three places, which is exactly the drift `CLAUDE.md` 2.4 exists to stop.
+
+- **`src/engine/types.ts`** — `Player.health`/`maxHealth` gone; `Action` loses `listen`/`read` and gains `focus{direction}`, `disarm`, `dropHeart`; `GameState` gains `focusedByRoom` and `heartTaken`; `Room` gains `hazardCleared`; `GameEvent` loses `damage` and gains `presence`; `NarrationBeat` loses `killedByDamage` and `carvingsWarn`, gains `hazardDisarmed`/`heartDropped`/`heartThrustUpon`. New `DoorwaySense`.
+- **`src/engine/data/tuning.ts`** — `OIL_PRICE`, `BAND_OIL_MULTIPLIER`, `OIL_PRICE_OVERRIDE`, `oilCostFor`, `OIL_QUANTUM`/`quantizeOil`, `DARK_PROSE_BAND`/`isDarkBand`, `STAT_AGNOSTIC_ACTIONS`, `SEARCH_FIND_BAND`, `WUMPUS.mandatoryStenchRadius`, `disarmClears`, `DifficultyContract.focusesPerRoom`. `OilBand.tellRange`, `OIL.burnEveryNTurns`, `OIL.extraCost`, `REST.healOnSuccess`, `HazardOutcome.damage`/`oilLoss`/`rewardFlasks`, `FightOutcome.damage`/`rewardFlasks`, `TameOutcome.damage`, `SneakOutcome.damage`, `FleeOutcome.damage` and the `sendTierFor` DC tiering all deleted.
+- **`src/engine/wumpus.ts`** — `getTells` returns `DoorwaySense[]`; `stenchDirections` implements the radius-2 floor as *the doorways on a shortest path*; `activeHazardOf` is the one question about what is dangerous now.
+- **`src/engine/resolve.ts`** — the price charged once at step 1; `resolveFocus`; DISARM's permanence; DROP HEART; the Heart pickup routed through `heartFromRoomId` and gated on `heartTaken`; the portal's bad-roll branch; `focusableDirections`; both sensing registers emitted.
+- **`src/engine/data/outcomes.ts`** — `FOCUS` and `DISARM` written (12 beats each), `PRESENCE` written, `NOTE_LED_ACTIONS` added as a third category for verbs that do not roll. **`LISTEN` and `READ` deleted: 144 strings.** See the note in the file about what that cost.
+- **`src/classic/`** — the new verbs in the menu, health out of the status line, `unresolved` in the doorway panel, `formatOil`, directional labels spelled out (1h finding 5, settled with Gautham).
+- **`scripts/economy.ts`** — new, seven panels. **`scripts/devlog.ts`** — 1h finding 3 closed, the hard way (see finding 6).
+- **310 tests**, up from 288.
+
+### Decisions taken in 1i, all reversible
+
+- **`DISARM` is stat-agnostic, and that means NO stat modifier at all.** GDD 2.7 left this open and leaned agnostic "so it doesn't disturb the existing every-stat-has-exactly-one-hazard-it-can't-touch design". In a d20 game that is the only reading that actually delivers it: any stat would hand one build a universal answer to both verb hazards. Its counterweight is a Moderate DC where every other hazard verb is Easy — so it trades a worse roll for permanence rather than buying it with a better one, and at starting stats its ceiling is a plain `success` (it cannot return oil until the player has invested). **The tempting alternative was considered and declined**: DISARM testing the stat the hazard has *no* answer for (AGI on blooms, STR on snares) is genuinely nice design, and it is a deliberate revision of a `CLAUDE.md`-adjacent invariant, which this step was told not to make on its own.
+- **`FOCUS` always resolves its doorway.** The band scales what the looking cost and never what came back. GDD 2.8.1 rejects probabilistic tells outright and a FOCUS that sometimes returned nothing would be one wearing a hat.
+- **The FOCUS allowance is per room for the whole run**, not per visit. Walking out of a Ravening room and back in does not buy a second look — "capped per room" read literally. What is stored is the *permission*, never the answer; what is through a doorway is recomputed every turn, so a creature that wanders off cannot leave a remembered tell behind to become a lie.
+- **FOCUS is withdrawn while Confused**, rather than offered and made to fail. GDD 2.17 filters `legalActions` to what is actually available; a verb that provably cannot work is a trap dressed as a choice.
+- **`hazardCleared` is a flag, not a nulled `hazard`.** Generation's contracts — the pit-free route, the hazard-free route counts, the minimum safe detour — are claims about what was *built*, and they have to stay checkable after a player has been through.
+- **The skittish bolt trigger moved to a critical failure** (Gautham's call). "Bolts on damage taken" could no longer fire at all.
+- **`PLAYER.startingStat` 8 → 10** (Gautham's call). Every starting modifier is now 0 rather than −1.
+- **`SEARCH_FIND_BAND` is success-or-better**, a band later than everything else — GDD 2.7's "finds loot at lower reliability", the price of being FOCUS's cheap sibling.
+- **`DARK_PROSE_BAND` stays at Ember.** 1g measured that runs reaching turn 18+ ended in Guttering, which is the case for moving it — but this step changed the whole economy underneath that measurement, so 1g's number now describes a game that no longer exists. Re-ask it against the numbers below.
+
+### The empirical read — every number from `npm run economy`
+
+**Panel A, the price table.** Base × band, one number per band:
+
+| action | base | critFail | fail | mixed | success | strong | crit |
+|---|---|---|---|---|---|---|---|
+| `MOVE` / `FOCUS` / `FLEE` | 0.5 | −1.5 | −1.0 | −0.5 | −0.25 | +0.25 | +0.5 |
+| `FIGHT` / `TAME` / `SNEAK` / `FORCE` / `ENDURE` / `DISARM` | 1 | −3.0 | −2.0 | −1.0 | −0.5 | +0.5 | +1.0 |
+| `AVOID` | 0.75 | −2.25 | −1.5 | −0.75 | −0.4 | +0.4 | +0.75 |
+| `DODGE` | 1.25 | −3.75 | −2.5 | −1.25 | −0.65 | +0.65 | +1.25 |
+| `SEARCH` | 0.25 | −0.75 | −0.5 | −0.25 | −0.15 | +0.15 | +0.25 |
+| `REST` | 0.5 | −0.5 | −0.5 | 0 | 0 | 0 | 0 |
+| `USE` / `SEND` / `ENTER PORTAL` / `DROP HEART` | 0 | — | — | — | — | — | — |
+
+Multipliers are 3 / 2 / 1 / 0.5 / **−0.25** / **−0.5**. The payout side is deliberately smaller than its mirror and that asymmetry was found by measurement, not chosen — see finding 1.
+
+Expected oil of one attempt, by stat, after the fix — negative everywhere, which is the anti-farming property stated as a number rather than as a gate:
+
+| action | stat 10 | stat 12 | stat 14 | stat 16 | stat 18 |
+|---|---|---|---|---|---|
+| `MOVE` / `FOCUS` | −0.28 | −0.21 | −0.15 | −0.09 | −0.05 |
+| `FORCE` / `ENDURE` / `SNEAK` | −1.03 | −0.85 | −0.67 | −0.55 | −0.42 |
+| `AVOID` | −0.77 | −0.64 | −0.51 | −0.41 | −0.32 |
+| `DODGE` | −1.28 | −1.06 | −0.84 | −0.69 | −0.53 |
+| `DISARM` | −1.69 | −1.69 | −1.69 | −1.69 | −1.69 |
+| `FIGHT` / `TAME` | −1.69 | −1.53 | −1.36 | −1.20 | −1.03 |
+
+`DISARM` is flat across the row because it takes no stat modifier. That flatness *is* the mechanic.
+
+**Panel C, what actually ends runs** (n=120 seeds × 3 policies, per difficulty):
+
+| difficulty | cap | escaped | caught | killed | outOfTurns | turns used | rooms | oil left | ran dry |
+|---|---|---|---|---|---|---|---|---|---|
+| drowsing | 50 | 47.5% | 30.0% | 13.1% | 7.8% | 17.3 | 6.4 | 6.36 | 13.3% |
+| stirring | 45 | 25.6% | 62.5% | 11.1% | **0.0%** | 14.3 | 7.1 | 7.49 | 3.3% |
+| hunting | 40 | 20.3% | 63.1% | 16.1% | **0.0%** | 13.4 | 7.0 | 7.11 | 11.1% |
+| ravening | 35 | 19.4% | 62.2% | 18.3% | **0.0%** | 12.3 | 6.6 | 7.67 | 4.7% |
+
+**Panel B, the MOVE price** (the one number GDD 2.8.1 hands to the sim):
+
+| | drowsing esc. | stirring esc. | hunting esc. | ravening esc. | ran dry (range) | oil left (range) |
+|---|---|---|---|---|---|---|
+| MOVE 0.5 | 47.5% | 25.6% | 20.3% | 19.4% | 3.3–13.3% | 6.36–7.67 |
+| MOVE 0.25 | 47.5% | 23.3% | 19.7% | 19.2% | 0.8–10.3% | 7.61–8.86 |
+
+**Settled at 0.5.** Escape rates are inside the noise either way, so the tie-break is which price leaves oil doing anything at all: at 0.5 a Drowsing run spends 18.8% of its turns at Dark and runs dry 13.3% of the time; at 0.25 the lamp is decorative. GDD 2.2.1 asks for Drowsing and Stirring to be oil-constrained, and 0.5 is the price that delivers it.
+
+**Panel G, the hazard-cost counterfactual** — 1g finding 1, re-run:
+
+| difficulty | as shipped | hazard verbs free | swing | hazards/run |
+|---|---|---|---|---|
+| drowsing | 47.5% | 48.9% | **−1.4** | 0.93 |
+| stirring | 25.6% | 29.2% | **−3.6** | 1.29 |
+| hunting | 20.3% | 21.7% | **−1.4** | 1.01 |
+| ravening | 19.4% | 21.4% | **−1.9** | 0.89 |
+
+**Panel F, the Heart-distance sweep** — every difficulty's band shifted by the same amount:
+
+| shift | drowsing esc. | stirring esc. | hunting esc. | ravening esc. | rooms (drowsing) |
+|---|---|---|---|---|---|
+| +0 (shipped) | 46.1% | 25.0% | 21.7% | 24.4% | 6.2 |
+| +2 | 40.0% | 16.7% | 10.6% | 10.6% | 8.0 |
+| +4 | 32.8% | 15.0% | 7.8% | 2.2% | 9.5 |
+| +6 | 28.3% | 8.9% | 1.7% | 1.1% | 11.3 |
+
+**Panel D, the generation contract** against the new caps: mean Heart distance 5.6 / 6.5 / 7.0 / 7.0, round trip 11.2–14.0 turns, **21 to 39 spare turns**, and a "too-deep region" of **0.0 to 5.1 rooms out of 100**.
+
+**Panel E, the two-verb choices**, expected oil at stat 10: `FORCE` −1.03 and `ENDURE` −1.03 — **0.00 apart**. `AVOID` −0.77 and `DODGE` −1.28 — **0.51 apart**.
+
+### 1i findings
+
+**1. The band curve was an oil farm at high stats, and it was found in the first panel run.** The first version of `BAND_OIL_MULTIPLIER` was symmetric: −0.5 and −1, the exact negatives of `success` and `mixed`. Against a Trivial DC — which is where `MOVE` and `FOCUS` are authored, on purpose, per GDD 2.6 — a character at stat 16 or 18 lands in the paying bands often enough that the *expected* value of the action turns positive. **+0.07 oil per move at stat 18.** A maxed lanternbearer refilled the lamp by walking around.
+
+This is 1g's oil farm in a new mechanism, and it is exactly the trap the 1i brief said would recur. What is worth recording is that it recurred in a *different shape*: 1g's was a gate set at too low a band, and closing it meant moving the gate. This one was not a gate at all — it was a payout curve that beats its own cost curve once the dice stop being fair, which no gate would have caught. **Halving the two paying bands fixes it structurally**, and the fix is now asserted in two places rather than described: `tests/tuning.test.ts` checks that no action's best band returns more than its base price, and Panel A prints the whole stat grid so the next person to touch a multiplier sees the expectation go positive before they commit it.
+
+**2. 1g's 12.5-point hazard swing does NOT transfer. It is now 1.4 to 3.6 points.** Hazards are still net-negative in turns, which is the thing GDD 2.8 says must stay true — but the magnitude has collapsed by a factor of four to nine, and the reason is arithmetic rather than mysterious: a bloom costing four turns out of a twenty-turn budget is 20% of the run, and out of forty-five it is 9%. The brief was right not to let this be assumed.
+
+**The consequence is worth stating plainly: hazards barely matter to the outcome now.** At roughly one hazard per run and a two-to-three point swing, the verb redesign 1g spent a whole step on is close to invisible in the win rate. That is not an argument for making them harsher — 1g's own warning about tuning toward a target applies — but it is the context for any future conversation about hazard density (`HAZARD_COUNTS`) or the minimum safe detour, and it means the 12.5-point figure should stop being quoted.
+
+**3. The turn caps are not binding, at all, and raising them did not make runs longer.** `outOfTurns` is **0.0%** at stirring, hunting and ravening, and 7.8% at drowsing. Mean turns used is 12.3–17.3 against caps of 35–50. Runs end where 1g said they ended: the Wumpus, at 60%+ at three of four difficulties, around turn 13.
+
+The 18 Sep design entry predicted this and said so — "the turn-cap change and the Wumpus-radius widening are the two levers actually aimed at 'only 10–12 rooms', and they need to be measured as such". Measured: **the turn-cap lever did not move the thing it was aimed at.** Rooms visited is 6.4–7.1, and it is not bounded by the clock.
+
+The honest caveat, and it is a real one: these policies walk the shortest path and do not evade. The catch rate is the tell-ignored floor, not what a competent player scores — the same caveat `PHASE-1-PROGRESS` already carries about the 48%/67% figures. **A bot that evades could turn a 50-turn budget into something.** Nothing here says the caps are wrong; it says they are not yet doing anything, and that 1j is what will find out.
+
+**4. The turn budget can afford a deeper Heart. The Wumpus cannot.** This was the most promising lever on "runs feel short" — Panel D shows 21–39 spare turns and a too-deep region of essentially zero rooms, so the Heart band looked plainly stale. Panel F priced it: **+2 rooms of depth buys 1.8 more rooms visited and costs 6 points of escape at Drowsing, 8 at Stirring and 11 at Hunting and Ravening.** At +4 the top two difficulties are near-unwinnable (7.8% and 2.2%).
+
+**Left unchanged, deliberately.** Every extra room of depth is two more turns inside a labyrinth where something is hunting you, and the catch rate is already the dominant failure mode. The reason the contract *looked* stale — spare turns — turns out not to be the reason it was set. Same caveat as finding 3: a non-evading policy makes depth look maximally expensive, so this is worth re-asking once 1j has a bot that runs away. It is not worth acting on now.
+
+**The framing in GDD 2.2 is dead, though, and that is recorded rather than quietly left.** "100 rooms because a round trip binds at 20 turns" and the "too-deep region the player never chooses to enter" were both true of the old cap and are not true now: 94.9–100% of the grid is reachable inside half the budget. `tests/generate.test.ts` used to assert the opposite and now asserts the current state with the reasoning attached.
+
+**5. The new cost model did not separate `FORCE` from `ENDURE`, and did separate `AVOID` from `DODGE`.** The bloom pair is **0.00 oil apart** in expectation — identical base price, identical band table apart from `statusTurns` and `extraTurns` — so 1g finding 2 stands exactly as written, and so does its instruction: *do not act on this before 1j's bot*. A sim saying "nothing you do matters" usually indicts the policy.
+
+The snare pair moved because this step moved it. Health was the only thing distinguishing `AVOID` from `DODGE` ("pays in clock" vs "pays in blood"), and retiring health would have collapsed them into "AVOID but worse" — 1g had already measured `DODGE` as never once chosen. The split moved into the price (`AVOID` 0.75, `DODGE` 1.25), so the snare is **0.51 oil apart** and the clock difference survives on top. Whether that is enough to make it a real choice is 1j's question too, but it is at least a difference now.
+
+**6. `npm run devlog` did not just zero the churn column — the first fix made it destroy the data.** 1h finding 3 said the script silently renders `—` when git is unreachable. The first attempt here warned loudly and **wrote anyway**, which replaced eight sessions of correct churn figures with zeros and then explained why the zeros were meaningless. The warning is read once; the damaged file is committed forever.
+
+It now probes git *before* rendering anything and exits non-zero rather than writing. That is the third time this project has been bitten by the same shape — the stale-scratch-path clobber in 1d, the double-counted session 3 in 1h, this — and the shape is always **a close-out step that reports success and carries the wrong content**. Worth promoting to a habit rather than a third bullet: in a close-out, a write that cannot verify its own inputs should refuse, not degrade.
+
+**7. Four defects that only reading or playing found, none of which a test caught first.** Same ratio as 1g and 1h, and the habit keeps paying.
+
+| what | why no test saw it |
+|---|---|
+| The doorway panel hid the Wumpus's **stench** behind the unresolved marker | The stench is exempt from FOCUS, so a doorway can carry a resolved tell *and* an unresolved remainder. The ternary chain showed the marker first and returned — swallowing the one tell CLAUDE.md 3 says may never be hidden, on the turns it matters most. Found by reading the render path while wiring it. |
+| `isDarkProse` turned **lit again at zero oil** | Rewritten to compare the band name for equality; `OIL_BANDS` is ordered brightest-first, so only `ember` matched and a player in total darkness read prose about what they could see. Caught by a monotonicity assertion added in the same pass — the test was written because the shape looked fragile, not because anything had failed. |
+| `hazardCleared` became a **beat nothing could emit** | Removing the flask reward removed its only trigger. Caught by `tests/outcomes.test.ts`'s unreached-beat ledger, which is the one thing in the suite that notices coverage moving in either direction. |
+| The log printed **`+0.125 oil`** against a status line reading `Lamp 11.5` | Two precisions for one resource on one screen — the same class as 1h finding 7's hyphen-minus. Only visible by playing a run. Oil is quantized in the engine now (which also closes a replay-determinism hole: accumulated binary fractions reach `7.749999999999999` eventually, and `GameState` must JSON round-trip unchanged). |
+
+**8. Deleting `LISTEN` and `READ` cost 144 authored strings, and it is worth naming what went with them.** Both verbs are retired, so both tables were dead content — the same call 1g made on `HAZARD_NARRATION`'s bloom and snare rows, and prose no player can reach is content `allBeats()` and the lint report forever. But `LISTEN`'s table was the one place the six archetypes each got to *sound* like themselves: a flooded gallery carrying sound across still water, a fungal grotto eating it. `FOCUS` is subject-led and has twelve beats where `LISTEN` had seventy-two, because the sentence is now about a doorway rather than a room.
+
+**If the archetypes feel thinner in play, that is where they went**, and the fix is to give `FOCUS` an archetype axis rather than to bring `LISTEN` back. Noted in `data/outcomes.ts` at the deletion site as well as here.
+
 ## 1d findings — three real defects, none of them in 1d's own code
 
 **All three are now fixed.** Finding 3 landed in `generate.ts` during the 1d session; findings 1 and 2 were decided by the PM session on 17 Sep and implemented in the 1e session the same day. What follows is kept as the reasoning, with the measured after-numbers appended to each.
@@ -567,23 +704,31 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 
 ## Carried forward into 1h / 1i / 1j / 1k
 
-1g's own inherited list is done. 1h's is done too: the text renderer exists, it writes no prose, and `tests/tuning.test.ts`'s guard is fixed. What the next sessions inherit — **1h additions are marked NEW-1h**:
+1g's own inherited list is done. 1h's is done too. **1i part 1 closed three of the items below and added four; its additions are marked NEW-1i.** What the next sessions inherit:
 
-- **NEW-1h — the engine cannot say which doorways it looked at** (1h finding 1). `view.ts`'s `sensedDirections` duplicates the `restricted` branch inside `getTells` because `tellsFor` returns found tells and nothing else. The diorama and `AgentView` will each duplicate it a third and fourth time. **This is the one engine gap 1h would fix first** — a renderer that cannot tell "nothing is there" from "you cannot sense that far" breaks the darkness invariant at the presentation layer, and every renderer has to get it right independently today.
+- ~~**NEW-1h — the engine cannot say which doorways it looked at**~~ **Closed, 1i.** `tellsFor` returns `DoorwaySense[]` — one entry per doorway carrying its resolved tells, an `unresolved` flag, a `suppressed` flag and a `focusable` flag — and `view.ts`'s `sensedDirections` is deleted. It was going to be fixed here whatever: `FOCUS` makes the distinction load-bearing rather than merely untidy, because a renderer that shows an unresolved doorway the way it shows an empty one has no way to tell the player which doorway is worth a turn. The open question in "Not yet decided" was *where* it should live — a field on `tellsFor`'s return, or an event. **The answer turned out to be both**, and for different reasons: the return value is what three renderers read, and a `presence` event is what text parity requires (CLAUDE.md 2.3 — presence is a fact the player learns, so the event stream has to be able to say it).
+- **NEW-1i — nothing binds except the Wumpus** (findings 2, 3, 4). Turn caps do not bind (0.0% `outOfTurns` at three difficulties), hazards swing the win rate by 1.4–3.6 points, and a deeper Heart costs more escape rate than it buys rooms. Runs end to the Wumpus at ~60%, around turn 13, at every difficulty above Drowsing. **Every lever this step had was measured and none of them is the lever.** That points squarely at 1j: the sweep policies do not evade, so the catch rate is the tell-ignored floor rather than a balance figure, and nobody has yet seen what a competent player scores. Re-ask findings 3 and 4 with a bot that runs away before touching turn caps or Heart distance again.
+- **NEW-1i — `FOCUS` is unmeasured as a decision.** The `scholar` policy focuses the doorway it is about to walk through, which is a reasonable human habit and is *not* play: it never weighs looking against walking, never saves its Ravening single look for a moment that matters, never declines to look. Focuses per run came in at 2.2 (Drowsing/Stirring) and 1.6–1.7 (Hunting/Ravening), so the difficulty cap is biting — but whether the information economy is *interesting* is exactly the kind of question 1g finding 3 warns a one-axis value function cannot answer. **1j's heuristic bot needs an information axis**, the way 1g said it needs a second cost axis.
+- **NEW-1i — `DISARM` has no measured case for existing.** It is built, tested and priced, and no sweep policy ever chooses it, because its value is entirely in a *return trip* through a room and none of these policies model one. That is the same hole `SEND` sat in through 1d–1f. It is not evidence the verb is wrong; it is the absence of evidence either way.
+- **NEW-1i — a close-out write that cannot verify its inputs should refuse, not degrade** (finding 6). Third occurrence of the shape. Worth promoting from a finding to a rule the next close-out reads.
 - **NEW-1h — Fortune is unspendable and `Policy.spendFortune` has nothing to attach to** (1h finding 2). `applyAction` resolves the whole turn in one call; there is no seam between the roll landing and the outcome applying. 1j's entry below describes this as a hook on `Policy`; it is a change to `applyAction`'s signature, which every test and visualiser calls. **Budget it as reducer work, and decide the shape before 1j opens.** `docs/EVALS.md`'s "Fortune spend rate and timing" metric has nothing to measure until it exists.
 - **NEW-1h — `eventsToLines` is the projection `AgentView.log` wants.** It lives in `src/classic/lines.ts`. It is total over the `GameEvent` union and ends in a `never` check, and its `wumpusMoved` case is the one that matters: that event carries the Wumpus's true room id, so **`AgentView.log` cannot be `events.map(e => e.text)`**. There is already a mutation-checked test that no line ever contains the Wumpus's room. Hoist the module out of `classic/` when the agent view becomes its second consumer.
 - **NEW-1h — `TELL_TEXT` is untested prose in `resolve.ts`** (1h finding 6), with no dark variants and two appearance words in it. Content step.
-- **NEW-1h — the move label and the doorway label disagree on screen** (`Move N` vs `north`, 1h finding 5). One line in `resolve.ts`. Settle it in 1i, with the screen in front of you.
-- **NEW-1h — `npm run devlog` zeroes the churn column instead of failing when git is unreachable** (1h finding 3). Still open, and it is the sharper half of finding 4's lesson: `churnOf` cannot distinguish a hash that does not resolve (contributes zero) from one that resolves to another session's commit (contributes their diff), and both render as a working dev log. The staleness and the double-counted session 3 are **fixed** at 1h's close-out; the script that let them hide is not.
+- **NEW-1i — the 1i decision entry is in `claude/design-decisions-1i.md`, not appended to the main log.** The Projects tool has no append, so editing `claude/design-decisions.md` means rewriting all ~30KB of it out of a tool result — which is the same class of risk as 1i finding 6 (a close-out write that reports success and carries the wrong content), applied to five sessions of design history. The continuation file says where it belongs; merging it is a copy-paste and should be done somewhere the whole doc is in hand.
+- ~~**NEW-1h — the move label and the doorway label disagree on screen**~~ **Closed, 1i**, with the screen in front of us and Gautham's call: `directionalLabel` spells the compass out, so the menu reads `Move north` beside a doorway list that says `north`.
+- ~~**NEW-1h — `npm run devlog` zeroes the churn column instead of failing when git is unreachable**~~ **Closed, 1i, and it bit on the way out** — see finding 6. The script now probes git before rendering and exits rather than writing. **The second half of 1h finding 4 is still open and is not fixable in the script**: `churnOf` cannot tell a hash that resolves to *another session's* commit from one that resolves to yours, and both render as a working dev log. Only a human comparing the number to the work catches that, which is why the read-back step says "a number the right SIZE".
 - **NEW-1h — three noun dictionaries now live in three files.** `ACTION_LABEL` in `resolve.ts`, `ARCHETYPE_WORD`/`CREATURE_WORD`/`HAZARD_WORD`/`DIRECTION_WORD` in `data/outcomes.ts`, `BAND_LABEL` in `src/classic/labels.ts`. One renderer can live with that; the diorama will want all three, and that is when it stops being a preference.
+- **NEW-1i — `AgentView.doorways` replaced `AgentView.tells` in the type, and 1j inherits the new shape.** One entry per doorway rather than one per tell, because a model handed only the tells that fired cannot tell an empty doorway from an unresolved one — the same defect as 1h finding 1, and it would make `FOCUS` unplayable for an agent since there would be nothing to decide which doorway is worth the turn.
 - **`AgentView` is still unbuilt.** `legalActions` already returns `{ action, label, dc }`, which is the shape `AgentView.legalActions` wants, so the adapter is thin — but `docs/EVALS.md` requires no leakage, and `GameState` contains the true map and the Wumpus position. The adapter is the boundary and needs a test that it cannot see through walls. **1f makes `AgentView.log` nearly free:** every narration now carries a `NarrationBeat`, so the log is a typed stream rather than strings to be reassembled, and the text renderer and the agent view read the same beats.
 - ~~**The text renderer must not write prose.**~~ **Held, 1h.** No sentence was added to `data/outcomes.ts` and none was inlined in the renderer. `tests/classic.test.ts` now asserts the other direction too: every narration on screen is character-for-character the string the engine emitted. The two exceptions are named in 1h finding 1 and both exist because the engine cannot express the fact at all.
+- ~~**Five verbs roll for nothing**~~ **Partly closed, 1i.** Every verb's band now carries its own oil delta (`oilCostFor`), so `MOVE`, `SEARCH`, `REST`, `USE` and `SEND` all have a mechanical consequence at every band where they previously had none — the top bands hand oil back and the bottom bands cost more. `SEND` additionally gained a real band effect (the decoy duration). **What remains open is `USE` and `SEND` not reading the band for anything else**, and GDD 2.6's "a small gift" at Strong Success is now satisfied in oil rather than in treasure, which may or may not be what it meant. Original entry below for the reasoning.
 - **Five verbs roll for nothing** — see 1f finding 2. Either the top bands earn a gift or four verbs stop rolling. Deliberately untouched by 1g (it was scoped out of this step); it is 1j/1k's sim to arbitrate. Note that 1g has now built the machinery a gift would use — `rewardFlasks` on an outcome row — so the cheap version of this is a data change rather than a mechanic.
 - **The pit DC is still a correctness floor, not a balance number.** Easy kills a starting character 40% of the time on entry. A pit-free route is guaranteed and the draft tell is honest, so it is defensible — but nobody has measured it. (The bloom and snare DCs are no longer "hazard DCs" at all: they are the verbs' `ACTION_DC` entries, and 1g measured what they produce.)
 - **`scripts/tame.ts` and `resolve.ts` disagree slightly about step 7** (see the 1e decisions). If a 1g sim number contradicts a 1d sweep number, this is the first place to look.
 - **The fight-vs-tame comparison is still stale**, for the reason 1d gave plus the reducer's differing step-7 accounting. Re-measure with 1g's heuristic policy, not with either visualiser.
 - **1j's heuristic policy must tame AND fight deliberately.** Six of the *seven* beats no test sweep reaches now need a companion or a fight — `spoilsTaken`, 1g's FIGHT oil reward, joined the list the day it was written, because neither sweep policy ever engages a creature. The whole encounter subsystem is verified by nothing but its own unit tests.
 - **NEW — 1j's heuristic bot cannot be "pick the move that reduces distance".** It has to answer hazards, and two of the four verbs are invisible to any value function denominated in oil (1g finding 3). A bot with one axis will silently benchmark a third of the action space at zero. It also needs a second axis to be *measured* against: `scripts/hazard.ts`'s `route` and `quiet` policies are the minimum shape.
+- ~~**NEW — the FIGHT oil reward is the one number in 1g that nothing measured.**~~ **Dissolved, 1i.** The question was whether FIGHT should pay a band earlier than the hazard verbs, since TAME pays its companion from mixed up. Folding the reward into the per-band oil delta makes FIGHT and TAME the same curve, so there is no longer a gate to disagree about; the fight/tame asymmetry lives where CLAUDE.md 3 wants it, in the turn cost and the scent. Original entry below.
 - **NEW — the FIGHT oil reward is the one number in 1g that nothing measured.** `earned driving off a creature` came back 0.00 per run at every difficulty and every setting tried, because no policy fights. Its gate was aligned with the hazard verbs' (strongSuccess+) as the conservative choice, not an observed one. The argument for mixed+ instead is that TAME pays its companion from mixed up, so a FIGHT that pays a band later is worse exactly where most wins happen — and that is the asymmetry the reward was added to correct. Settle it with a bot that fights.
 - **NEW — `tests/tuning.test.ts` has a compile-time guard that guards nothing.** Same bug fixed in `tests/outcomes.test.ts` this session: `const ALL_ACTIONS: readonly ActionKind[] = [...]` makes `(typeof ALL_ACTIONS)[number]` evaluate to `ActionKind`, so the guard reads `ActionKind extends ActionKind` and is vacuously true. Adding three verbs to the union compiled clean against a list naming none of them. One-line fix (`as const`, plus an assertion in the other direction); left undone only to keep 1g's diff to its own subject.
 - **NEW — 1i part 2's scope, sketched but not written down anywhere else.** From the same 18 Sep design thread: the Goblin's dismantle-charge idea is now naturally `DISARM` (§2.7) once that verb exists, so it may already be answered rather than needing its own rework. The Moth's (lumewing) proposed tell-range extension was raised but never confirmed against the current lantern-radius passive — check before building. The Grellhound's escalating-warning rework (radius 3/2/1, more detail as the Wumpus closes) is the one clearly still open, and it's now also the fix for the Grellhound's passive having been mostly subsumed by the universal radius-2 stench floor (§2.10) — without this rework the Grellhound's tame is a weaker pick than it used to be. None of this is spec'd to build yet; write the actual scope when part 2 opens.
@@ -613,7 +758,22 @@ All in `CLAUDE.md` §3, but these have been tested against and are easy to erode
 - **NEW-1h/QoL — whether `PLAYER.startingStat` should be 10 rather than 8.** Also raised on first play: "what is Agility −1?" `statModifier` is `floor((score − 10) / 2)`, so a fresh character is −1 on all four stats and a first-time player's roll breakdown is **nothing but negative numbers** — on the one screen whose entire job is teaching them how the dice work. The counter-argument is the meta-progression arc (3 stat points per run, GDD 2.11): starting below zero is what makes the second run feel different. Moving to 10 shifts every DC's felt difficulty by one point, so it is a balance call for 1i with real play behind it.
 - **NEW-1h/QoL — where the map-vs-difficulty rule lives**, and whether difficulty is allowed an information axis at all. See "The charted map, as a decision" above. `MAP_DIFFICULTIES` is in the renderer pending the call.
 
-**These four bullets — the turn-cost price, the bloom-choice question, the dark-register threshold, and whether oil binds — are what step 1i exists to answer.** All four say "needs human play" or "nobody has played it"; none of them are 1j/1k's to arbitrate first. **1h unblocked all four: there is now something to play.**
+~~**These four bullets — the turn-cost price, the bloom-choice question, the dark-register threshold, and whether oil binds — are what step 1i exists to answer.**~~ **Answered, 1i, three of four — and the fourth is answered differently than expected.**
+
+- **The turn-cost price**: hazards now swing the win rate by 1.4–3.6 points, not 12.5 (finding 2). The redesign is no longer expensive; if anything it is close to invisible.
+- **The bloom choice**: still 0.00 oil apart (finding 5). 1g's instruction stands unchanged — do not act before 1j's bot.
+- **Whether oil binds**: yes at `MOVE` 0.5, and that is why 0.5 was chosen. 3.3–13.3% of runs run dry and Drowsing spends 18.8% of its turns at Dark; at 0.25 the lamp is decorative (Panel B).
+- **The dark-register threshold**: **deliberately not answered.** 1g's measurement (runs reaching turn 18+ end in Guttering) was the case for moving it, and this step replaced the economy that measurement describes. Re-ask it against the 1i oil distribution rather than acting on a number about a game that no longer exists.
+
+**Still open, and now sharper: nobody has PLAYED the rebuilt economy.** 1i was a build-and-measure step; every figure above comes from policies that walk shortest paths and do not evade. The four questions this list was written to hold have moved, but the reason they were on it — "needs human play" — has not been retired by anything here.
+
+### NEW-1i — open after the rebuild
+
+- **Whether the turn caps should come back down.** They do not bind (finding 3). Either they are correct and waiting for a player who uses them, or 50 is a number with nothing behind it. Do not touch before 1j.
+- **Whether hazard density should rise.** At ~1 hazard per run and a 2–3 point swing, the whole verb subsystem barely reaches the outcome (finding 2). `HAZARD_COUNTS` and `minSafeDetour` are the levers; neither should move on sim data alone.
+- **Whether the `FOCUS` cap of 1 at Hunting/Ravening is the right shape.** It binds (1.6–1.7 focuses per run against a cap of 1 per room), which is what it was for. Whether it reads as tense or as arbitrary is a play question.
+- **Whether `DISARM` earns its slot** (carried-forward above). Nothing measures a verb whose value is in a return trip.
+- **Whether the `metallic` Heart tell should be exempt from `FOCUS`** like the stench is. It is currently *not* — an unfocused doorway with the Heart behind it reads as `something, unlooked at`. That is consistent and it is also the one case where the presence signal is a reward rather than a risk, which may want its own answer.
 - **A genuinely INT-weak trap** (a mimic or fake-treasure-room — forceable by STR, dodgeable by AGI, a real cost for an INT build trusting its read of the room), to fully close the per-stat coverage matrix the hazard redesign above sets up. New content, deferred alongside creature difficulty tiers — not part of the hazard-verb step.
 - **The stone-grub's chew/dig-through-terrain mechanic**, retired from v1 but slated to return. Separate from `FORCE`. Whenever it's built, it will hit the same "terrain never drifts within a run" tension the bloom-spread question above is already parked against — decide the two together, not separately.
 - **A known-path map render — explicitly deferred.** Prompted by a look at a reference game (Wumpin, itch.io) that pairs its text with a force-directed node-graph of discovered rooms. The graph-layout approach is wrong for this game (it's a real grid with real directions, not an arbitrary topology), but a fixed-grid render of *only what's been discovered* is a plausible text-renderer nice-to-have — not now, not for 1.5. Gate it on data: build it only if telemetry shows players or bots actually getting lost. That requires a "lostness" metric that doesn't exist yet — see `docs/OBSERVABILITY.md`.

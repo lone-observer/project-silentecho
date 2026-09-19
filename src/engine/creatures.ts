@@ -36,6 +36,7 @@ import type {
 } from './types.ts'
 import { DIRECTIONS } from './types.ts'
 import type { Rng } from './rng.ts'
+import { activeHazardOf } from './wumpus.ts'
 import {
   ACTION_DC,
   COMPANION,
@@ -160,7 +161,6 @@ export interface EncounterResult {
   readonly turnCost: number
   /** Total scent to deposit in the player's room: base action weight + band extra. */
   readonly scent: number
-  readonly damage: number
   /** False when the creature has been driven off, bolted, or tamed away. */
   readonly creatureRemains: boolean
   /** It turned on you. It is still in the room and it is not friendly. */
@@ -173,12 +173,6 @@ export interface EncounterResult {
   readonly revealedRooms: readonly RoomId[]
   /** SNEAK: you slipped past. FLEE: you got out. Where to, if so. */
   readonly movedTo: RoomId | null
-  /**
-   * Oil flasks earned. FIGHT only, and only when the creature was driven off —
-   * see `FightOutcome.rewardFlasks` for why the other three options pay nothing.
-   * resolve.ts puts them in the inventory; creatures.ts never touches state.
-   */
-  readonly rewardFlasks: number
 }
 
 /**
@@ -199,14 +193,12 @@ export function resolveEncounter(
     band,
     creature: context.creature,
     turnCost: encounterTurnCost(action),
-    damage: 0,
     creatureRemains: true,
     hostile: false,
     companionGained: null,
     companionReleased: null,
     revealedRooms: [] as readonly RoomId[],
     movedTo: null,
-    rewardFlasks: 0,
   }
 
   // The Quiet One dampens everything you do, including how loudly you fail.
@@ -227,7 +219,6 @@ export function resolveEncounter(
       return {
         ...base,
         scent: (SCENT_BY_ACTION.tame + out.extraScent) * quiet,
-        damage: out.damage,
         // Tamed creatures leave the room with you; bolted ones are gone.
         creatureRemains: !out.tamed && !out.bolts,
         hostile: out.hostile,
@@ -242,12 +233,7 @@ export function resolveEncounter(
       return {
         ...base,
         scent: (SCENT_BY_ACTION.fight + out.extraScent) * quiet,
-        damage: out.damage,
         creatureRemains: !out.driven,
-        // Gated on `driven` as well as on the table, so a band that ever paid
-        // out without clearing the room would be a compile-visible mistake in
-        // FIGHT_OUTCOMES rather than a silent free flask.
-        rewardFlasks: out.driven ? out.rewardFlasks : 0,
       }
     }
 
@@ -256,7 +242,6 @@ export function resolveEncounter(
       return {
         ...base,
         scent: (SCENT_BY_ACTION.sneak + out.extraScent) * quiet,
-        damage: out.damage,
         movedTo: out.passed ? (context.retreatRoomId ?? null) : null,
       }
     }
@@ -266,7 +251,6 @@ export function resolveEncounter(
       return {
         ...base,
         scent: (SCENT_BY_ACTION.flee + out.extraScent) * quiet,
-        damage: out.damage,
         movedTo: out.fled ? (context.retreatRoomId ?? null) : null,
       }
     }
@@ -337,7 +321,8 @@ export function companionSenses(
     for (const direction of DIRECTIONS) {
       const id = exits[direction]
       if (id === undefined) continue
-      const hazard = roomAt(labyrinth, id)?.hazard
+      const room = roomAt(labyrinth, id)
+      const hazard = room ? activeHazardOf(room) : null
       if (hazard) revealed.push({ direction, hazard })
     }
     return {
@@ -418,20 +403,33 @@ export function companionUpkeep(companion: Companion | null, oil: number, rng: R
 }
 
 /**
- * Skittish companions bolt when the player TAKES DAMAGE, not on a failed roll.
+ * Skittish companions bolt on a CRITICAL FAILURE, not on any failed roll.
  *
- * Failed rolls are over 40% at starting stats, so tying flight to them would
- * make a Mixed Success tame worthless — and Mixed is meant to be the widest
- * good band, not a booby prize (GDD 2.9).
+ * THE TRIGGER MOVED IN 1i because the old one stopped existing: GDD 2.9 said
+ * "bolts when you take damage", and 18 Sep retired damage along with health
+ * (GDD 2.6). A trigger that can never fire is worse than no trigger, because the
+ * GDD goes on claiming the mechanic is there.
+ *
+ * Critical failure is the replacement, and the reasoning for the ORIGINAL choice
+ * is why: failed rolls are far too common — over a third even at the new
+ * starting stat of 10 — so tying flight to them would make a Mixed Success tame
+ * worthless, and Mixed is meant to be the widest good band rather than a booby
+ * prize. The critical band is rare, it is already defined as the one where the
+ * world escalates (GDD 2.6), and "something went badly wrong and the animal
+ * bolted" is the same beat the old rule was reaching for.
  *
  * The player may spend a Fortune point to keep it. That purchase is emotional
  * rather than mechanical, which is the point: it gives Luck a use outside
  * treasure and traps, and turns a mixed tame into something you can defend.
  */
-export function skittishBolts(companion: Companion | null, damageTaken: number, fortuneSpent: boolean): boolean {
+export function skittishBolts(
+  companion: Companion | null,
+  band: OutcomeBand,
+  fortuneSpent: boolean,
+): boolean {
   if (companion === null || !companion.skittish) return false
-  if (!COMPANION.skittishFleesOnDamage) return false
-  if (damageTaken <= 0) return false
+  if (!COMPANION.skittishFleesOnCriticalFailure) return false
+  if (band !== 'criticalFailure') return false
   return !fortuneSpent
 }
 
@@ -472,20 +470,26 @@ export function canSend(labyrinth: Labyrinth, player: Player, direction: Directi
  * Note it is deliberately NOT multiplied by the Quiet One's damping — a
  * sent companion makes its own noise, not yours.
  *
- * How loud that noise is depends on WHICH creature you are giving up: the
- * decoy's strength is keyed to the tame DC (sendScentFor). That is not a
- * per-creature special case bolted on, it is the only way to hold the GDD's
- * "1 turn while carrying the Heart" fixed for a Hard-DC creature while still
- * giving the Easy/Moderate ones the promised 3 — see COMPANION.sendScent.
+ * How loud that noise is depends on THE ROLL, as of 18 Sep 2026 — a good send
+ * buys 3 turns of decoy, a bad one buys 2, and carrying the Heart halves
+ * whichever you got (GDD 2.9). It used to depend on which creature you had
+ * tamed, via its tame DC, which made the escape valve's strength a function of a
+ * roll made several turns earlier on a creature you may have had no choice
+ * about. See COMPANION.sendScent for the decay arithmetic, which is unchanged.
  */
-export function sendCompanion(labyrinth: Labyrinth, player: Player, direction: Direction): SendResult | null {
+export function sendCompanion(
+  labyrinth: Labyrinth,
+  player: Player,
+  direction: Direction,
+  band: OutcomeBand,
+): SendResult | null {
   if (!canSend(labyrinth, player, direction)) return null
   const companion = player.companion
   if (companion === null) return null
   const targetRoomId = (roomAt(labyrinth, player.roomId)?.exits ?? {})[direction]
   if (targetRoomId === undefined) return null
 
-  return { sent: companion.kind, targetRoomId, scent: sendScentFor(companion.kind) }
+  return { sent: companion.kind, targetRoomId, scent: sendScentFor(band) }
 }
 
 // ---------------------------------------------------------------------------
@@ -556,7 +560,10 @@ export function driftWorld(labyrinth: Labyrinth, context: DriftContext, rng: Rng
     if (id === labyrinth.heartRoomId) return true
     if (id === context.wumpusRoomId) return true
     if (creatures[id] != null) return true
-    if ((labyrinth.rooms[id] as Room | undefined)?.hazard != null) return true
+    // Reads the LIVE hazard: a room the player disarmed is a room a creature
+    // may wander into, because there is nothing in it any more (GDD 2.7).
+    const room = labyrinth.rooms[id] as Room | undefined
+    if (room && activeHazardOf(room) != null) return true
     return false
   }
 

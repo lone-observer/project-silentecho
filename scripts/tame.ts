@@ -38,9 +38,9 @@ import type {
   OutcomeBand, Player, Room, RoomId, ScentField, WumpusTier,
 } from '../src/engine/types.ts'
 import {
-  COMPANION, DIFFICULTY, DRIFT, ENCOUNTER, FIGHT_OUTCOMES, HEART, OIL,
+  ACTION_DC, COMPANION, DIFFICULTY, DRIFT, ENCOUNTER, FIGHT_OUTCOMES, HEART, OIL,
   PLAYER, SCENT, SCENT_BY_ACTION, TAME_DC, TAME_OUTCOMES, WUMPUS_TIERS,
-  oilBandFor, sendDecoyTurnsFor, sendScentFor, wumpusReach,
+  oilBandFor, oilCostFor, sendDecoyTurnsFor, sendScentFor, wumpusReach,
 } from '../src/engine/data/tuning.ts'
 
 const seedArg = Number(process.argv[2] ?? 1)
@@ -55,6 +55,10 @@ const policyArg = (process.argv[5] ?? 'both') as EncounterAction | 'both'
 const BESTIARY: readonly CreatureKind[] = ['goblin', 'lumewing', 'grellhound', 'quietOne']
 const rule = (n = 74): string => '─'.repeat(n)
 const pad = (s: string, n: number): string => s.padEnd(n)
+
+/** `-1.50 oil`, `+0.50 oil`, or `free` — signed so a payout reads as one. */
+const oilLabel = (cost: number): string =>
+  cost === 0 ? 'free' : `${cost > 0 ? '-' : '+'}${Math.abs(cost).toFixed(2)} oil`
 const num = (v: number, n = 5): string => v.toFixed(2).padStart(n)
 
 // ===========================================================================
@@ -75,9 +79,15 @@ function panelAsymmetry(): void {
     const t = TAME_OUTCOMES[band]
     const fScent = SCENT_BY_ACTION.fight + f.extraScent
     const tScent = SCENT_BY_ACTION.tame + t.extraScent
-    const fText = `${num(fScent)} scent  ${f.damage ? `-${f.damage}hp ` : '     '} ${f.driven ? 'driven off' : 'still there'}`
+    // Oil where the health column used to be. Health is retired (GDD 2.6) and
+    // what a band costs you now is the action's price scaled by that band —
+    // which is the comparison this panel was always trying to make, in the one
+    // currency that is left.
+    const fOil = oilCostFor('fight', band)
+    const tOil = oilCostFor('tame', band)
+    const fText = `${num(fScent)} scent  ${pad(oilLabel(fOil), 9)}${f.driven ? 'driven off' : 'still there'}`
     const tText =
-      `${num(tScent)} scent  ${t.damage ? `-${t.damage}hp ` : '     '} ` +
+      `${num(tScent)} scent  ${pad(oilLabel(tOil), 9)}` +
       (t.tamed
         ? t.brave ? 'TAMED (brave)' : t.skittish ? 'TAMED (skittish)' : t.revealsRooms ? 'TAMED (+reveal)' : 'TAMED'
         : t.hostile ? 'HOSTILE' : 'bolted')
@@ -260,7 +270,6 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
 
   let scent = emptyScent()
   let oil: number = OIL.starting
-  let health: number = PLAYER.maxHealth
   let fortune = Math.floor(PLAYER.startingStat / PLAYER.fortuneDivisor)
   let companion: Companion | null = null
   let carrying = false
@@ -321,17 +330,23 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
       )[0]
 
       const player = {
-        roomId: playerId, facing, stats: { str: 8, agi: 8, int: 8, lck: 8 },
-        health, maxHealth: PLAYER.maxHealth, oil, maxOil: OIL.max, fortune,
+        roomId: playerId, facing,
+        stats: { str: PLAYER.startingStat, agi: PLAYER.startingStat, int: PLAYER.startingStat, lck: PLAYER.startingStat },
+        oil, maxOil: OIL.max, fortune,
         carryingHeart: carrying, companion, inventory: [], statuses: {},
       } as Player
-      const sent = towardWumpus ? sendCompanion(lab, player, towardWumpus.d) : null
+      // The send's own roll decides the decoy now (GDD 2.9), so this visualiser
+      // has to roll one rather than reading the creature's tame DC.
+      const sendBand = bandForMargin(
+        rng.d20() + statModifier(PLAYER.startingStat) + oilBandFor(oil).modifier - ACTION_DC.send,
+      )
+      const sent = towardWumpus ? sendCompanion(lab, player, towardWumpus.d, sendBand) : null
 
       if (sent) {
         scent = depositScent(scent, sent.targetRoomId, sent.scent)
         detail.push(
           `      SEND the ${sent.sent} ${towardWumpus?.d} into ${sent.targetRoomId}: ` +
-          `${sent.scent} scent, covers ${sendDecoyTurnsFor(sent.sent, carrying)} turn(s)` +
+          `${sent.scent} scent, covers ${sendDecoyTurnsFor(sendBand, carrying)} turn(s)` +
           `${carrying ? ' (carrying the Heart)' : ''} — IT DOES NOT COME BACK`,
         )
         companion = null
@@ -355,14 +370,14 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
         if (verbose) {
           console.log(render(lab, playerId, wumpus.roomId, scent, carrying))
           console.log(
-            `turn ${String(turn).padStart(2)}  oil ${String(oil).padStart(2)}  hp ${health}  ` +
+            `turn ${String(turn).padStart(2)}  oil ${oil.toFixed(2)}  ` +
             `player ${playerId}  wumpus ${wumpus.roomId}  gap ${gap0}  companion —`,
           )
           for (const dline of detail) console.log(dline)
           console.log('')
         }
         scent = decayScent(scent)
-        if (turn % OIL.burnEveryNTurns === 0) oil = Math.max(0, oil - 1)
+        oil = Math.max(0, oil - oilCostFor('send', 'mixed'))
         continue
       }
     }
@@ -393,14 +408,12 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
       peakScent = Math.max(peakScent, result.scent)
       scent = depositScent(scent, playerId, result.scent)
 
-      if (result.damage > 0) {
-        health -= result.damage
-        damageTaken += result.damage
-        // Skittish companions bolt on DAMAGE, not on a failed roll.
-        if (skittishBolts(companion, result.damage, false) && companion !== null) {
-          detail.push(`      the ${companion.kind} bolts (skittish, took damage; ${fortune} fortune unspent)`)
-          companion = null
-        }
+      // The encounter's oil price, and the skittish bolt that replaced the
+      // damage trigger it used to hang off (GDD 2.6, 2.9).
+      oil = Math.max(0, oil - oilCostFor(chosen, band))
+      if (skittishBolts(companion, band, false) && companion !== null) {
+        detail.push(`      the ${companion.kind} bolts (skittish, critical failure; ${fortune} fortune unspent)`)
+        companion = null
       }
 
       if (result.companionGained) {
@@ -493,14 +506,16 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
     const gap = distancesFrom(lab, playerId)[wumpus.roomId] ?? -1
     if (gap >= 0) closestWumpus = Math.min(closestWumpus, gap)
     const band = oilBandFor(oil)
+    // Everything resolved: this is a view of the WORLD, not a simulation of
+    // what a player has paid to learn (GDD 2.7's FOCUS economy).
     const tells = getTells(lab, playerId, wumpus.roomId, {
-      tellRange: band.tellRange, confused: false, facing, heartTaken: carrying,
-    })
+      confused: false, resolved: [...DIRECTIONS], heartTaken: carrying,
+    }).flatMap((d) => d.tells)
 
     if (verbose) {
       console.log(render(lab, playerId, wumpus.roomId, scent, carrying))
       console.log(
-        `turn ${String(turn).padStart(2)}  oil ${String(oil).padStart(2)}(${band.name})  hp ${health}  ` +
+        `turn ${String(turn).padStart(2)}  oil ${oil.toFixed(2)}(${band.name})  ` +
         `player ${playerId}${carrying ? ' [HEART]' : ''}  wumpus ${wumpus.roomId} [${moveReason}]  gap ${gap}  ` +
         `companion ${companion ? companion.kind + (companion.brave ? '*' : companion.skittish ? '~' : '') : '—'}` +
         `${wumpusIsNear(lab, playerId, wumpus.roomId) ? '   *** SILENCE ***' : ''}`,
@@ -510,12 +525,12 @@ function playRun(policy: EncounterAction, verbose: boolean): RunSummary {
       console.log('')
     }
 
-    if (health <= 0) { outcome = `KILLED turn ${turn} — out of health`; break }
+    // No health means no death by attrition (GDD 2.6): only a pit and the
+    // Wumpus end a run, and both are checked elsewhere in this loop.
     if (playerId === lab.entranceId && carrying) { outcome = `ESCAPED turn ${turn}`; break }
 
     // ---- upkeep ----------------------------------------------------------
     scent = decayScent(scent)
-    if (turn % OIL.burnEveryNTurns === 0) oil = Math.max(0, oil - 1)
     void fortune
   }
 
@@ -553,14 +568,15 @@ function panelSend(): void {
   const companion: Companion = { kind: 'grellhound', brave: true, skittish: false }
   const player = {
     roomId: playerId, facing: null, stats: { str: 8, agi: 8, int: 8, lck: 8 },
-    health: 3, maxHealth: 3, oil: 12, maxOil: 12, fortune: 2,
+    oil: 12, maxOil: 12, fortune: 2,
     carryingHeart: false, companion, inventory: [], statuses: [],
   } as Player
 
   const dir = DIRECTIONS.find((d) => (lab.rooms[playerId] as Room).exits[d] !== undefined)
   if (!dir) { console.log('  no exit to send into; pick another seed'); return }
 
-  const sent = sendCompanion(lab, player, dir)
+  // A clean send, so Panel D shows the decoy at its stated strength.
+  const sent = sendCompanion(lab, player, dir, 'success')
   if (!sent) { console.log('  send refused'); return }
 
   console.log(`  player at ${playerId}, wumpus at ${wumpus.roomId}, gap ${distancesFrom(lab, playerId)[wumpus.roomId] ?? -1}`)
@@ -602,21 +618,31 @@ function panelSend(): void {
   }
 
   console.log(`\n  decay ${SCENT.decayFactor}/turn. walking deposits ${SCENT_BY_ACTION.move}, carrying the Heart ${carried}.\n`)
+  // KEYED BY THE ROLL, NOT BY THE CREATURE, since 18 Sep 2026 (GDD 2.9). The
+  // rows used to be the four creatures and their tame DCs — the decoy's
+  // strength was a function of which animal you had managed to catch. It is
+  // the send's own band now, so every companion bids the same and the table is
+  // two rows instead of four.
+  //
+  // Panel B's lesson from 1e applies here and is why this reads `sendScentFor`
+  // rather than a constant: a visualiser that hardcodes the rule it is watching
+  // is a visualiser that lies on the day the rule changes, which is the only
+  // day anyone is looking at it.
   console.log(
-    `  ${pad('creature', 13)}${pad('DC', 5)}${pad('sendScent', 11)}` +
+    `  ${pad('send roll', 13)}${pad('sendScent', 11)}` +
     `${pad('alone', 16)}${pad('with Heart', 16)}`,
   )
   console.log(`  ${rule(70)}`)
-  for (const creature of BESTIARY) {
-    const decoy = sendScentFor(creature)
+  for (const band of ['success', 'failure'] as const) {
+    const decoy = sendScentFor(band)
     const alone = dominatesFor(decoy, SCENT_BY_ACTION.move)
     const withHeart = dominatesFor(decoy, carried)
-    const claimAlone = sendDecoyTurnsFor(creature, false)
-    const claimHeart = sendDecoyTurnsFor(creature, true)
+    const claimAlone = sendDecoyTurnsFor(band, false)
+    const claimHeart = sendDecoyTurnsFor(band, true)
     const cell = (measured: number, claimed: number): string =>
       `${measured}t ${measured === claimed ? '✓' : `✗ claims ${claimed}`}`
     console.log(
-      `  ${pad(creature, 13)}${pad(String(TAME_DC[creature]), 5)}${pad(String(decoy), 11)}` +
+      `  ${pad(band === 'success' ? 'good' : 'bad', 13)}${pad(String(decoy), 11)}` +
       `${pad(cell(alone, claimAlone), 16)}${pad(cell(withHeart, claimHeart), 16)}`,
     )
   }

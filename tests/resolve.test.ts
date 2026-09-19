@@ -30,7 +30,7 @@ import type {
   GameEvent, GameState, Room, RoomId,
 } from '../src/engine/types.ts'
 import type { Rng } from '../src/engine/rng.ts'
-import { ACTION_STAT, ENCOUNTER, HEART, OIL, TAME_DC } from '../src/engine/data/tuning.ts'
+import { ACTION_STAT, ENCOUNTER, HEART, TAME_DC } from '../src/engine/data/tuning.ts'
 
 const ALL_CREATURES: readonly CreatureKind[] = ['goblin', 'lumewing', 'grellhound', 'quietOne']
 const ALL_DIFFICULTIES: readonly Difficulty[] = ['drowsing', 'stirring', 'hunting', 'ravening']
@@ -168,7 +168,7 @@ describe('turn order (GDD 2.2.2)', () => {
         // A trail to follow, so it has a reason to come.
         scent: { [base.player.roomId]: 5 },
       }
-      const { state: after, events } = act(state, { kind: 'listen' })
+      const { state: after, events } = act(state, { kind: 'rest' })
       if (after.outcome !== 'caught') continue
       caughtAtSix += 1
       expect(events.some((e) => e.kind === 'narration' && e.beat === 'caughtCameForYou')).toBe(true)
@@ -185,9 +185,12 @@ describe('turn order (GDD 2.2.2)', () => {
     // run rather than the handful of cases anyone thought to enumerate.
     const rank: Partial<Record<GameEvent['kind'], number>> = {
       roll: 1, moved: 1, creatureEncounter: 1, graveFound: 1, companionGained: 1,
-      damage: 3, heartTaken: 3, wumpusTierChanged: 3,
+      heartTaken: 3, wumpusTierChanged: 3,
       wumpusMoved: 5,
-      tell: 8, runEnded: 8,
+      // `presence` joins `tell` at step 8: both are the end-of-turn sensing
+      // query, and both describe the world AFTER drift. `damage` is gone with
+      // health (GDD 2.6).
+      tell: 8, presence: 8, runEnded: 8,
     }
 
     let turnsChecked = 0
@@ -292,17 +295,18 @@ describe('turn order (GDD 2.2.2)', () => {
     // hands you a skittish companion, whose upkeep is also a step-7 effect and
     // also runs once per consumed turn — so the net change on a taming turn can
     // be three points when the schedule only burned one. Netting them together
-    // would make this test pass for the wrong reason.
+    // THE PASSIVE BURN IS GONE (GDD 2.8.1, 18 Sep 2026), so what a multi-turn
+    // action costs the lamp is no longer a function of how many turn boundaries
+    // it crossed — it is the action's own price, charged once, scaled by the
+    // band it rolled. This asserts the replacement: a TAME spends TAME's price
+    // and nothing is added per turn on top of it.
     const state = encounterState(41, 'goblin')
-    const { events } = act(state, { kind: 'tame' })
-    let expected = 0
-    for (let t = state.turn; t < state.turn + ENCOUNTER.tameTurnCost; t++) {
-      if (t % OIL.burnEveryNTurns === 0) expected += 1
-    }
-    const burned = events
-      .filter((e) => e.kind === 'oilChanged' && e.beat === 'lampBurnsDown')
-      .reduce((sum, e) => sum + (e.kind === 'oilChanged' ? -e.delta : 0), 0)
-    expect(burned).toBe(expected)
+    const { state: after, events } = act(state, { kind: 'tame' })
+    const oilEvents = events.filter((e) => e.kind === 'oilChanged')
+    expect(oilEvents.some((e) => e.kind === 'oilChanged' && e.beat === 'lampBurnsDown'))
+      .toBe(false)
+    // It still consumed two turns — the asymmetry is in the clock, not the oil.
+    expect(after.turn - state.turn).toBe(ENCOUNTER.tameTurnCost)
   })
 
   it('step 7 runs once per consumed turn, upkeep included', () => {
@@ -401,7 +405,7 @@ describe('legalActions (GDD 2.17)', () => {
     const state = encounterState(5, 'goblin')
     const kinds = new Set(legalActions(state).map((m) => m.action.kind))
     expect(kinds.has('move')).toBe(false)
-    expect(kinds.has('listen')).toBe(false)
+    expect(kinds.has('focus')).toBe(false)
     expect(kinds.has('search')).toBe(false)
     expect(kinds.has('fight')).toBe(true)
     expect(kinds.has('tame')).toBe(true)
@@ -682,7 +686,7 @@ describe('endings', () => {
     const state = run(37)
     expect(state.player.roomId).toBe(state.labyrinth.entranceId)
     expect(state.outcome).toBe('inProgress')
-    const { state: after } = act(state, { kind: 'listen' })
+    const { state: after } = act(state, { kind: 'rest' })
     expect(after.outcome).toBe('inProgress')
   })
 
@@ -690,7 +694,7 @@ describe('endings', () => {
     for (const difficulty of ALL_DIFFICULTIES) {
       const state = run(3, difficulty)
       const late = { ...state, turn: state.maxTurns }
-      const { state: after } = act(late, { kind: 'listen' })
+      const { state: after } = act(late, { kind: 'rest' })
       expect(['outOfTurns', 'caught', 'killed'], difficulty).toContain(after.outcome)
     }
   })
@@ -726,9 +730,21 @@ describe('tells, as the reducer serves them', () => {
     const clear = tellsFor(state)
     const muddled = { ...state, player: { ...state.player, statuses: { confused: 2 } } }
     expect(hasStatus(muddled.player, 'confused')).toBe(true)
-    expect(tellsFor(muddled)).toHaveLength(0)
+
+    // NOTHING REPORTED, AND THE DOORWAYS SAY SO. `tellsFor` returns one entry
+    // per doorway now rather than a flat list of tells, so suppression is the
+    // absence of tells PLUS an explicit `suppressed` flag — which is what stops
+    // a renderer reading Confused as "there is nothing there" (1h finding 1).
+    const confusedSenses = tellsFor(muddled)
+    expect(confusedSenses.flatMap((d) => d.tells)).toHaveLength(0)
+    expect(confusedSenses.every((d) => d.suppressed)).toBe(true)
+    expect(confusedSenses.every((d) => !d.unresolved)).toBe(true)
+    // A suppressed doorway is also not focusable: there is nothing to resolve
+    // while the sweetness has everything drowned out.
+    expect(confusedSenses.every((d) => !d.focusable)).toBe(true)
+
     // and every tell the clear state reported was true of the world
-    for (const tell of clear) {
+    for (const tell of clear.flatMap((d) => d.tells)) {
       const neighbour = roomOf(state, state.player.roomId).exits[tell.direction]
       expect(neighbour).toBeDefined()
     }
@@ -737,6 +753,8 @@ describe('tells, as the reducer serves them', () => {
   it('the Heart stops calling once it is in your hands', () => {
     const state = run(43)
     const carried = { ...state, player: { ...state.player, carryingHeart: true } }
-    expect(tellsFor(carried).some((t) => t.kind === 'metallic')).toBe(false)
+    expect(
+      tellsFor(carried).flatMap((d) => d.tells).some((t) => t.kind === 'metallic'),
+    ).toBe(false)
   })
 })

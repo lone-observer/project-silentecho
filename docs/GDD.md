@@ -26,7 +26,11 @@ One run = one labyrinth crawl, turn-capped per difficulty (§2.2.1). *(18 Sep 20
 **Partial:** **Retreat** — leave alive without the Heart. Not a loss. The map is the prize (§2.11).
 **Lose:** Caught by the Wumpus, killed by a hazard, or the turn limit ends without escaping.
 
-**Why 100 rooms when the Heart is never more than 7 away.** This reasoning was derived against the original flat 20-turn cap: a round trip costs at least twice the Heart's distance, so at 20 turns the Heart had to sit in the near third whatever the grid size — the turn budget bound, not the geometry. **Stale as of the 18 Sep turn-cap change (below) — not yet re-derived.** At 45–50 turns a much larger share of the 100-room grid is reachable inside a single run, which may be exactly the point (see the 18 Sep decision — the original complaint was "not enough of the map, most runs feel short"), but the Heart-distance contract (§2.2.1) and the "too-deep region" framing were both tuned against the old budget and have not been re-measured against the new one. Pending 1i.
+**Why 100 rooms when the Heart is never more than 7 away.** This reasoning was derived against the original flat 20-turn cap: a round trip costs at least twice the Heart's distance, so at 20 turns the Heart had to sit in the near third whatever the grid size — the turn budget bound, not the geometry.
+
+**MEASURED IN 1i, AND THE FRAMING IS DEAD.** `npm run economy -- contract`: at the new caps, **94.9–100% of the grid is reachable inside half the turn budget**, and a round trip to the Heart leaves **21 to 39 spare turns**. There is no "too-deep region" any more — 0.0 to 5.1 rooms out of 100 sit beyond half the budget, against the ~70 the original reasoning assumed. A player cannot end up too deep by searching the wrong way, because there is no too-deep.
+
+**The Heart was NOT moved deeper, and the reason is the interesting part.** The obvious response to 21 spare turns is a deeper Heart, and 1i swept exactly that: **+2 rooms of depth buys 1.8 more rooms visited per run and costs 6 points of escape rate at Drowsing, 8 at Stirring and 11 at Hunting and Ravening**; at +4 the top two difficulties are close to unwinnable. Every extra room of depth is two more turns inside a labyrinth where something is hunting you. **The turn budget can afford a deeper Heart; the Wumpus cannot.** So the grid is doing something other than what this section says it does, and the honest record is that rather than a re-derived constraint that is no longer load-bearing. Full numbers in `docs/PHASE-1-PROGRESS.md`, 1i finding 4.
 
 **Turn pressure is no longer flat across difficulty.** At Drowsing and Stirring the turn cap is now generous on purpose — oil is meant to be the thing you're managing, not the clock. At Hunting and Ravening the cap tightens back down and turn pressure returns as the dominant threat, alongside a faster, more perceptive Wumpus. See §2.2.1 and `claude/design-decisions.md`, 18 Sep.
 
@@ -51,14 +55,20 @@ One run = one labyrinth crawl, turn-capped per difficulty (§2.2.1). *(18 Sep 20
 
 Difficulty is not merely a Wumpus tier. It is a set of guarantees the generator must satisfy before a labyrinth is playable.
 
-| Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Wumpus start | Turns |
-|---|---|---|---|---|---|---|
-| Drowsing | 1 | 2 | +2 | 5–6 | 4–6 | **50** |
-| Stirring | 2 | 1 | +3 | 6–7 | 5–8 | **45** |
-| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 5–8 | **40** |
-| Ravening | 4 | 0 | — | 7 | 5–8 | **35** |
+| Difficulty | Wumpus | Hazard-free routes | Min safe detour | Heart distance | Wumpus start | Turns | Focus/room |
+|---|---|---|---|---|---|---|---|
+| Drowsing | 1 | 2 | +2 | 5–6 | 4–6 | **50** | 4 |
+| Stirring | 2 | 1 | +3 | 6–7 | 5–8 | **45** | 4 |
+| Hunting | 3 | 0 — an encounter is unavoidable | — | 7 | 5–8 | **40** | 1 |
+| Ravening | 4 | 0 | — | 7 | 5–8 | **35** | 1 |
 
-**Turns changed 18 Sep 2026** — was a flat 20/20/20/18. Starting numbers, explicitly provisional: intent is Drowsing/Stirring to be oil-constrained rather than turn-constrained, Hunting/Ravening to keep real turn pressure. **Not yet retuned against the new cap: Heart distance, hazard-free route counts, min safe detour, and the "first contact around turn 7" claim below** — all were derived against the old 18–20-turn budget. 1i re-measures and adjusts. See `claude/design-decisions.md`, 18 Sep.
+**Turns changed 18 Sep 2026** — was a flat 20/20/20/18. Intent: Drowsing/Stirring oil-constrained rather than turn-constrained, Hunting/Ravening keeping real turn pressure.
+
+**MEASURED IN 1i. The oil half works; the turn half does not bind at all.** `outOfTurns` is **0.0%** at Stirring, Hunting and Ravening and 7.8% at Drowsing, against mean turns used of 12.3–17.3. Runs end to the Wumpus — 60%+ above Drowsing, around turn 13 — exactly as 1g found under the old caps. **Raising the cap did not make runs longer, because the cap was never what was ending them.** The oil side did land: at `MOVE` 0.5 a Drowsing run spends 18.8% of its turns at Dark and runs dry 13.3% of the time.
+
+The caveat is load-bearing: 1i's sweep policies walk shortest paths and do not evade, so the catch rate is the tell-ignored floor rather than what a competent player scores. **A bot that runs away might turn 50 turns into something.** The caps are left as they are pending 1j rather than tuned against a policy that cannot use them. `heartDistance`, `safeRoutes` and `minSafeDetour` are likewise unchanged — see §2.2's note for why depth was measured and then declined.
+
+**`focusesPerRoom` is new, and it makes difficulty a contract on INFORMATION as well as on generation** (GDD 2.7). Drowsing and Stirring may resolve all four doorways; Hunting and Ravening get one. Measured at 1.6–1.7 focuses per run at the top two difficulties against 2.2 at the bottom two, so the cap binds.
 
 **The Wumpus start is a band, and the ceiling is the load-bearing half.** It was once a floor alone — "at least 5 rooms from the entrance" — which on a 10×10 grid put it a mean of 11 rooms away. A Drowsing Wumpus covers 6 rooms in twenty turns, so in 83% of Drowsing seeds and 63% of Stirring ones **it could not reach the player at all**, and the teaching tier could not teach the tell it exists to teach. This is the same failure as a Heart distance specified at one end only (§2.2): a bound that only says *not too close* guarantees *too far*.
 
@@ -125,7 +135,7 @@ This is the biggest presentation upgrade over a classic Wumpus. Instead of "you 
 
 ## 2.5 Stats
 
-Four stats. Each starts at **8**. Player gets **3 points** after each completed run (win or lose), max 18 per stat.
+Four stats. Each starts at **10** *(raised from 8 in 1i, Gautham's call — at 8 every starting modifier was −1, so a first-time player's roll breakdown was nothing but negative numbers on the one screen whose job is teaching them how the dice work. It shifts every DC's felt difficulty by a point, which is why it is a balance change rather than a cosmetic one)*. Player gets **3 points** after each completed run (win or lose), max 18 per stat.
 
 | Stat | Governs |
 |---|---|
@@ -134,7 +144,7 @@ Four stats. Each starts at **8**. Player gets **3 points** after each completed 
 | **INT** | Reading carvings, recognizing hazards, deciphering portals, **taming**, map memory |
 | **LCK** | Does not work like the others — see below |
 
-**Modifier:** `mod = floor((stat - 10) / 2)`. At 8 that's −1; at 18 it's +4. Deliberately tight.
+**Modifier:** `mod = floor((stat - 10) / 2)`. At 10 that's 0; at 18 it's +4. Deliberately tight.
 
 **Luck is different by design.** It does not add to rolls. Instead:
 - Grants **Fortune points** per run: `floor(LCK / 4)`. Spend one *after seeing a roll* to reroll it, or to bump a result up one outcome band.
@@ -166,7 +176,9 @@ Resolve on **margin** (`roll_total − DC`):
 
 **Design note:** The Mixed Success band is deliberately the widest of the good bands, so "you got it, but —" is the most common non-failure result.
 
-Sanity-check the starting math before you trust it: a fresh character (stat 8, mod −1) against a Moderate DC 12 needs a natural 13 to reach Mixed — 40% odds of mixed-or-better. That's harsh on purpose for a roguelike with stat growth, but it means **routine actions must be authored at Easy (8) or Trivial (5)**, with Moderate reserved for genuine risk. If early runs feel punishing, the first lever is DC assignment in the content table, not band widths. The Phase 1 sim harness is the arbiter.
+Sanity-check the starting math before you trust it: a fresh character (stat 10, mod 0) against a Moderate DC 12 needs a natural 12 to reach Mixed — 45% odds of mixed-or-better. *(Was 40% at the old starting stat of 8; raising it to 10 in 1i shifted every DC's felt difficulty by a point.)* Still harsh on purpose for a roguelike with stat growth, and it still means **routine actions must be authored at Easy (8) or Trivial (5)**, with Moderate reserved for genuine risk.
+
+**That rule has a second edge nobody had noticed, and 1i found it the expensive way.** Routine actions at a Trivial DC mean a high-stat character lands in the top bands most of the time — so any per-band reward that scales with the roll pays out most often on exactly the actions authored to be easy. That is how `MOVE` briefly became an oil farm (§2.8). The rule is right; anything that pays on a band has to be checked against it.
 
 ## 2.7 Actions
 
@@ -174,11 +186,15 @@ Sanity-check the starting math before you trust it: a fresh character (stat 8, m
 
 **Changed 18 Sep 2026.** `LISTEN` and `READ` are retired, replaced by `FOCUS` (below). `DISARM` and `DROP HEART` are new. Every action is a roll except `DROP HEART`, which is free and unconditional. The verbs stay fixed; the *outcomes* get authored per room type. Make outcomes data, not code (§4).
 
-**`FOCUS` — resolves a doorway's hazard tell.** The base lamp tells you a doorway has *something* nearby (presence only) — `FOCUS` is what tells you what it is and confirms the direction with certainty. This replaces `LISTEN`'s old job (buying back tell range in the dark) and `READ`'s old job (recognizing hazards, deciphering portals). One `FOCUS` resolves one doorway. **Difficulty caps how many doorways can be focused per room, replacing the old oil-band tell-range restriction entirely** — Drowsing and Stirring allow focusing all four; Hunting and Ravening allow exactly one, forcing a real guess on the rest. The Wumpus's stench and any companion informational passive (grellhound, lumewing) are exempt — always free, always automatic, never gated by `FOCUS` or by oil level. See §2.4, §2.8.1, and `claude/design-decisions.md`, 18 Sep.
+**`FOCUS` — resolves a doorway's tells.** *(Built 1i. It carries a direction — it resolves a doorway, not a room, which is the whole difference from the `LISTEN` it replaces and is why difficulty can cap how many of them a room is worth. It resolves EVERYTHING through that doorway, not only hazards: the base lamp's presence signal covers creatures and the Heart's call too, so resolving only hazards would leave a doorway half-answered. And it ALWAYS resolves — the band scales what the looking cost in oil, never what came back, because a `FOCUS` that sometimes returned nothing would be the probabilistic tell §2.8.1 rejects, wearing a hat. It is withdrawn from the menu entirely while Confused, rather than offered and made to fail: §2.17 filters `legalActions` to what is actually available, and a verb that provably cannot work is a trap dressed as a choice.)* The base lamp tells you a doorway has *something* nearby (presence only) — `FOCUS` is what tells you what it is and confirms the direction with certainty. This replaces `LISTEN`'s old job (buying back tell range in the dark) and `READ`'s old job (recognizing hazards, deciphering portals). One `FOCUS` resolves one doorway. **Difficulty caps how many doorways can be focused per room, replacing the old oil-band tell-range restriction entirely** — Drowsing and Stirring allow focusing all four; Hunting and Ravening allow exactly one, forcing a real guess on the rest. The Wumpus's stench and any companion informational passive (grellhound, lumewing) are exempt — always free, always automatic, never gated by `FOCUS` or by oil level. See §2.4, §2.8.1, and `claude/design-decisions.md`, 18 Sep.
 
-**`SEARCH`** is a lighter, cheaper pass under the same `FOCUS` family — finds loot at lower reliability, does not resolve hazard tells. Exact split TBD, 1i.
+**`SEARCH`** is a lighter, cheaper pass under the same `FOCUS` family — finds loot at lower reliability, does not resolve hazard tells. **Set in 1i:** `SEARCH` costs 0.25 against `FOCUS`'s 0.5, and pays out at **success-or-better** where everything else in the game clears at mixed-or-better (`SEARCH_FIND_BAND`). That is the "lower reliability" — 45% at the starting stat against a DC 8, where mixed-or-better would be 65%.
 
-**`DISARM` — clears a bloom or snare permanently**, available alongside `FORCE`/`ENDURE` and `AVOID`/`DODGE` respectively. Where the other options get you past the hazard once, `DISARM` removes it from the room for the rest of the run — useful if you expect to pass through again (e.g. on the way back with the Heart), and meant to cost more up front than just getting past. Whether `DISARM` is stat-gated (joining the per-stat coverage matrix in §2.8) or stat-agnostic (a universal, build-independent option) is **not yet decided** — leaning stat-agnostic so it doesn't disturb the existing "every stat has exactly one hazard it can't touch" design, but not settled. Pending 1i.
+**`DISARM` — clears a bloom or snare permanently**, available alongside `FORCE`/`ENDURE` and `AVOID`/`DODGE` respectively. Where the other options get you past the hazard once, `DISARM` removes it from the room for the rest of the run — useful if you expect to pass through again (e.g. on the way back with the Heart), and meant to cost more up front than just getting past. **Settled in 1i: `DISARM` is stat-agnostic, and that means it takes NO stat modifier at all.** In a d20 game that is the only reading that actually delivers what "build-independent" was reaching for — any stat would hand one build a universal answer to both verb hazards, which is exactly the coverage-matrix break §2.8 exists to prevent. It is the only such roll in the game (`STAT_AGNOSTIC_ACTIONS`).
+
+Its counterweight is the DC: **Moderate, where every other hazard verb is Easy.** Without that, carrying no modifier would mean strictly better odds than the verb you were supposed to be choosing between. At starting stats its ceiling is a plain Success — it cannot hand oil back at all until the player has invested in stats, which is the "priced higher than the pass-through options" this section asks for, delivered by the band distribution rather than by a bigger number in a table.
+
+*The alternative that was considered and declined: `DISARM` testing the stat the hazard has NO answer for — AGI on blooms, STR on snares — which closes the coverage matrix elegantly at a higher price. It is a deliberate revision of a tested invariant, and 1i was scoped not to make those on its own. See `claude/design-decisions.md`.*
 
 **`DROP HEART`** — see §2.9.1.
 
@@ -207,11 +223,21 @@ Every hazard but the pit now offers a choice of verb, the same shape as the Crea
 | **Portals** | Tell: hum. INT roll, and the two outcomes are deliberately far apart — **non-negotiable, 18 Sep 2026.** Good roll: reseed into a different labyrinth, map knowledge resets, oil carries over unchanged, Wumpus loses your scent entirely. Bad roll: you land already **holding the new labyrinth's Heart** — no exploration phase, straight into the escape problem, with whatever oil you had left and zero map knowledge. `DROP HEART` (§2.9.1) is the release valve if that's not a fight worth having. |
 | **Lamp oil** | An action budget rather than a second clock. Low oil applies a labelled penalty to every roll **and visibly shrinks the lantern radius** — the screen closes in on you. See below. |
 
-**18 Sep 2026 — the reward is folded into the margin-scaled cost, not a separate flask on top.** The 17 Sep design (a flat oil price per verb, plus a bonus flask at Strong-Success-or-better, gated there specifically to avoid an oil-farming exploit measured at +1.75 oil per bloom) is superseded by the "cost is margin, not injury" model in §2.6: each band now carries its own net oil delta directly — heavy loss on a critical failure, down through breakeven around mixed/success, to a net gain on strong/critical success. This is the same shape the old two-part model was reaching for (bad rolls cost you, great rolls pay you back a little), collapsed into one number per band instead of a base price plus a conditional bonus. Exact deltas per verb per band are **not yet set** — 1i measures them the same way 1g measured the old ones, via `SWEEP=300 npm run hazard`, and the same oil-farming trap (paying out too generously at too low a bar) applies and needs the same discipline this time.
+**18 Sep 2026 — the reward is folded into the margin-scaled cost, not a separate flask on top.** The 17 Sep design (a flat oil price per verb, plus a bonus flask at Strong-Success-or-better, gated there specifically to avoid an oil-farming exploit measured at +1.75 oil per bloom) is superseded by the "cost is margin, not injury" model in §2.6: each band now carries its own net oil delta directly — heavy loss on a critical failure, down through breakeven around mixed/success, to a net gain on strong/critical success. This is the same shape the old two-part model was reaching for (bad rolls cost you, great rolls pay you back a little), collapsed into one number per band instead of a base price plus a conditional bonus.
 
-**What stays true regardless of the exact numbers:** hazards should be net-negative in **turns**, which is the currency that actually decides runs (1g measured a 12.5-point escape-rate cost from the old verb redesign alone — see `docs/PHASE-1-PROGRESS.md`). That finding doesn't get invalidated by the cost-model change; it gets re-measured against the new turn caps (§2.2.1) and the new per-action turn costs once 1i has real numbers.
+**SET IN 1i, AND THE FARM TRAP DID RECUR — in a shape no gate would have caught.** The multipliers are **3 / 2 / 1 / 0.5 / −0.25 / −0.5**, and the asymmetry at the top is the whole finding. The first version was symmetric (−0.5 and −1, the exact negatives of `success` and `mixed`), and against a Trivial DC — where `MOVE` and `FOCUS` are authored on purpose, per §2.6 — a character at stat 16 or 18 lands in the paying bands often enough that the *expected* value of the action turns positive: **+0.07 oil per move at stat 18**, so a maxed lanternbearer refilled the lamp by walking around.
 
-**Ambient oil flasks were re-sized in the same 1g pass**, because the reward and the loot count are one number wearing two hats. `POPULATION.oilFlasks` went from 8–12 to **3–5**: measured across that range the win rate and the shape of the oil budget are flat, and 3–5 is the first setting where the economy actually leans on *earned* oil rather than found oil. **This was measured against the old passive-burn, health-bearing economy and needs re-checking under the 18 Sep model** — a per-action oil price and a much wider turn budget change how much oil a run actually needs, so 3–5 is a starting point, not a re-confirmed number.
+1g's farm was a gate set at too low a band and closing it meant moving the gate. This one was not a gate at all — it was a payout curve beating its own cost curve once the dice stop being fair. Halving the two paying bands makes the expectation negative for every verb at every stat while keeping what this section promises: a great roll still hands you something back. The property is now asserted structurally (`tests/tuning.test.ts`: no action's best band may return more than its base price) rather than defended by a chosen band.
+
+**What stays true regardless of the exact numbers:** hazards should be net-negative in **turns**, which is the currency that actually decides runs.
+
+**RE-MEASURED IN 1i, AND THE 12.5-POINT FIGURE DOES NOT TRANSFER.** The same controlled counterfactual now measures the verbs' cost at **1.4 to 3.6 points** of escape rate. Hazards are still net-negative, which is what this paragraph requires — but the magnitude collapsed by a factor of four to nine, for a reason that is arithmetic rather than mysterious: a bloom costing four turns out of twenty is 20% of the run, and out of forty-five it is 9%.
+
+The consequence is worth stating plainly rather than leaving implied: at roughly one hazard per run and a two-to-three point swing, **the verb subsystem barely reaches the outcome.** That is not an argument for making hazards harsher — it is the context for any future conversation about `HAZARD_COUNTS` or the minimum safe detour, and it means the 12.5-point number should stop being quoted.
+
+**Ambient oil flasks were re-sized in the same 1g pass**, because the reward and the loot count are one number wearing two hats. `POPULATION.oilFlasks` went from 8–12 to **3–5**: measured across that range the win rate and the shape of the oil budget are flat, and 3–5 is the first setting where the economy actually leans on *earned* oil rather than found oil.
+
+**Left at 3–5 in 1i, and the reason it was not re-swept is worth recording.** Under the new model "earned oil" no longer means flasks at all — it means the oil a good band hands back, which every verb now does. So the number this setting was tuned against has stopped existing, and re-sweeping it in the same pass that redefined it would have measured the wrong thing. What 1i did measure is the thing the setting exists to protect: runs end with 6.4–7.7 oil left and run dry 3.3–13.3% of the time, so the lamp is neither decorative nor a second death clock. **The honest caveat from 1g survives and is now sharper**: `SEARCH` pays out a band later than it used to (§2.7), and blind searching over a 100-room map already found almost nothing. If `SEARCH` stops being worth a turn, this is the first number to look at.
 
 ### 2.8.1 Oil — the light budget
 
@@ -226,21 +252,32 @@ Oil is expressed as a **labelled modifier on the roll, never as a hidden DC chan
 
 **18 Sep 2026 — oil is spent per action, not burned passively.** The old "start at 12, burn 1 every 2 turns" clock is retired along with health (§2.6). Every action has an oil price, and margin scales it — see the price table below. Starting oil is still **12**; an oil flask still restores **4**, both pending re-check against the new model (§2.8, "ambient oil flasks").
 
-**The price list, starting point — all pending 1i's sim data:**
+**The price list. Set in 1i from `npm run economy`; the reasoning for each number is in `docs/PHASE-1-PROGRESS.md`.**
 
 | Action | Base oil cost | Notes |
 |---|---|---|
-| `MOVE` | 0.5 (or 0.25 — sim decides) | |
-| `FIGHT` / `TAME` / `SNEAK` / `FORCE` / `ENDURE` / `AVOID` / `DODGE` | 1 | Margin scales this up or down — see §2.6. |
-| `DISARM` | 1 | Higher effective cost intended once margin scaling is applied; clears the hazard permanently (§2.7). |
+| `MOVE` | **0.5** | Sim-decided in 1i — see below the table. |
+| `FIGHT` / `TAME` / `SNEAK` / `FORCE` / `ENDURE` | 1 | Margin scales this up or down — see §2.6. |
+| `AVOID` / `DODGE` | **0.75 / 1.25** | Split apart in 1i. Health was the only thing distinguishing them ("pays in clock" vs "pays in blood"), and retiring it would have collapsed `DODGE` into "AVOID but worse" — 1g had already measured it as never once chosen. The split moved into the price: AVOID pays a misread in clock, DODGE in oil. |
+| `DISARM` | 1 | Its higher effective cost comes from the **band distribution**, not the base: Moderate DC and no stat modifier put its ceiling at a plain Success for a fresh character, so it cannot return oil until stats are invested. Expected cost −1.69 at every stat (§2.7). |
 | `FOCUS` | 0.5 | Per doorway, capped by difficulty (§2.7). |
-| `SEARCH` | lower than `FOCUS` | Weaker find-rate to match. Exact number TBD. |
+| `SEARCH` | **0.25** | Weaker find-rate to match: pays at success-or-better, a band later than anything else (§2.7). |
 | `REST` | 0.5 | Refunded to net 0 on a good roll; lost outright on a bad one. No more +1 penalty. |
 | `FLEE` | ~ `MOVE` | Clean exit is cheap; a botched one costs extra oil and a scent marker, same shape as a bad `FIGHT`. |
 | `ENTER PORTAL` | 0 beyond the roll | Good roll: reseed into a new labyrinth, oil carries over unchanged. Bad roll: you land already holding the new labyrinth's Heart — see §2.9.1. |
-| `USE` (an oil flask) | 0 | Now rolled rather than flat: good roll restores 100% of `flaskValue`, bad roll restores 50%. |
+| `USE` (an oil flask) | 0 | Now rolled rather than flat: good roll restores 100% of `flaskValue`, bad roll restores 50%. The flask is spent either way. |
 | `SEND` | 0 beyond the roll | See §2.9. |
-| `DROP HEART` | 0 | Free, unconditional. |
+| `DROP HEART` | 0 | Free, unconditional, and the only action in the game that does not roll. |
+
+**`MOVE` is 0.5, and it was the closest call in the table.** It is the most-taken action in the game, so its price is the shape of the economy rather than one row. Swept at both values across 120 seeds × 3 policies × 4 difficulties: **escape rates are inside the noise either way** (47.5% vs 47.5% at Drowsing, 25.6% vs 23.3% at Stirring). The tie-break is which price leaves oil doing anything — at 0.5, Drowsing spends 18.8% of its turns at Dark and runs dry 13.3% of the time; at 0.25 the lamp is decorative. §2.2.1 asks for Drowsing and Stirring to be oil-constrained, and 0.5 is the price that delivers it.
+
+**Oil is quantized to `OIL_QUANTUM`.** A base of 0.5 times a multiplier of 0.25 is an eighth, and a run printing `+0.125 oil` at a player whose status line reads `Lamp 11.5` is offering a precision the decision does not need. The load-bearing half is determinism: accumulating binary fractions reaches `7.749999999999999` eventually, and `GameState` must survive a JSON round trip unchanged (`CLAUDE.md` 2.5) and replay bit-identically from `(seed, actionLog)` (2.2).
+
+#### The information model, as built
+
+**Two registers, both honest.** The base lamp reports PRESENCE — a doorway either has something behind it or it does not, and that answer is complete and free. `FOCUS` buys IDENTITY, one doorway at a time. So a doorway is in one of four states and every renderer is handed all four (`DoorwaySense`): resolved with tells, resolved and genuinely empty, unresolved, or suppressed by Confused.
+
+**Silence is now a fact rather than an absence**, which is the part worth noticing. Under the old model an empty doorway and an out-of-range one looked alike, and "nothing" carried almost no weight; a doorway reporting nothing is now a complete answer about that doorway, and the only thing on the panel a player can act on without spending a turn. It is also what closes the gap 1h found at the presentation layer — a renderer that cannot tell "nothing is there" from "I have not looked" lets the player read silence as safety, and the engine now makes the distinction by construction instead of asking three renderers to remember it.
 
 #### Darkness restricts range, never reliability — now via `FOCUS`, not oil band
 
@@ -249,7 +286,8 @@ Oil is expressed as a **labelled modifier on the roll, never as a hidden DC chan
 Three things carried over from the old design, still true:
 
 - **Probabilistic tells were rejected**, and stay rejected. Whatever `FOCUS` resolves is always true; the cost is in turns and oil to resolve it, never in the reliability of what comes back.
-- **The Wumpus's own stench, and any companion informational passive (grellhound, lumewing), are exempt from all of this** — always free, always automatic, never gated by oil or by `FOCUS`. CLAUDE.md §3's mandatory-adjacency guarantee widens to **two rooms**, not one, as of 18 Sep — see §2.10.
+- **The Wumpus's own stench, and any companion informational passive (grellhound, lumewing), are exempt from all of this** — always free, always automatic, never gated by oil or by `FOCUS`. CLAUDE.md §3's mandatory-adjacency guarantee widens to **two rooms**, not one, as of 18 Sep — see §2.10. *(Built 1i. The exemption means a doorway can carry a resolved stench AND an unresolved remainder at the same time, which is a real state the renderers have to handle: the stench is printed first, because a panel that showed the unresolved marker and stopped would swallow the one tell `CLAUDE.md` 3 says may never be hidden, on exactly the turns it matters most.)*
+- **Confused is the one thing that suppresses the stench too.** §2.8.2 is explicit that a Confused player receives no tells at all, and that is unchanged — the exemption above is from oil and from `FOCUS`, not from the spores. The player is told plainly that they are Confused and for how long, so the absence is legible rather than mistakable for safety.
 - **0 oil is not a third death.** Only the pit and the Wumpus end a run (§2.6). Running out of oil means maximum roll penalty and no light — it makes every other danger more likely to kill you, but it never kills you directly. Making it lethal would recreate the "second death clock" the original 16 Sep oil design explicitly rejected.
 
 #### Darkness changes the channel, not the fact
@@ -278,7 +316,7 @@ The labyrinth is inhabited by things that are not the Wumpus. They are not obsta
 
 > **Fighting is fast and loud. Taming is slow and quiet.**
 
-`FIGHT` resolves in one turn and drops a **heavy scent marker** — you just rang a dinner bell. `TAME` costs **two turns** and drops almost no scent. Against a 20-turn limit with a Wumpus navigating by scent, that's a genuine dilemma every single encounter, and it's the kind that gets more interesting as you get better at the game rather than less.
+`FIGHT` resolves in one turn and drops a **heavy scent marker** — you just rang a dinner bell. `TAME` costs **two turns** and drops almost no scent. Against a turn limit with a Wumpus navigating by scent, that's a genuine dilemma every single encounter, and it's the kind that gets more interesting as you get better at the game rather than less.
 
 **Taming outcome bands:**
 
@@ -299,7 +337,9 @@ The labyrinth is inhabited by things that are not the Wumpus. They are not obsta
 
 This matters most at an encounter: the grellhound's hazard reveal has to land *before* fight/tame, or it is flavour rather than a decision input. Firing first gives every companion visible tactical value at the moment you are deciding whether to release it — which is what makes "do I give up my grellhound to tame this goblin?" a real question.
 
-**Skittish companions bolt on damage taken, not on a failed roll.** Failed rolls are far too common — over 40% at starting stats — so tying flight to them would make the Mixed Success tame worthless.
+**Skittish companions bolt on a CRITICAL FAILURE, not on any failed roll.** *(Changed in 1i, Gautham's call.)* The rule was "bolts on damage taken", and damage stopped existing on 18 Sep (§2.6) — a trigger nothing can fire is worse than no trigger, because this document goes on claiming the mechanic is there. The critical band is the nearest thing the new economy has to the old trigger's meaning: §2.6 already defines it as the one where the world escalates.
+
+The reasoning for the original choice is why the replacement is the *critical* band rather than any failure: ordinary failed rolls are far too common — over a third even at the new starting stat of 10 — so tying flight to them would make the Mixed Success tame worthless.
 
 The player may **spend a Fortune point to keep a bolting companion.** That is an emotional purchase rather than a mechanical one, it gives Luck a use outside treasure and traps, and it turns a mixed tame into something you can defend rather than a downgraded consolation prize.
 
@@ -316,7 +356,7 @@ The player may **spend a Fortune point to keep a bolting companion.** That is an
 
 **`SEND <companion> <direction>` — baiting the Wumpus.** A brave companion can be sent into an adjacent room to make noise. It drops a heavy scent marker there, pulling the Wumpus off your trail.
 
-**Superseded 18 Sep 2026 — every companion's decoy is now equally strong; the roll decides the duration, not which creature you tamed.** A good `SEND` roll buys **3 turns**, a bad one buys **2**, and carrying the Heart still halves whichever you get (2 / 1) — the "hot trail" logic stays load-bearing and stacks with the roll rather than being replaced by it. This retires the 17 Sep `COMPANION.sendScent` tiering (10 for Easy/Moderate-DC creatures, 5 for the Quiet One), which had made the decoy's strength a function of which creature you'd tamed rather than how well you executed the send. Simpler, and it decouples the escape valve from an earlier tame roll's luck. *(See `claude/design-decisions.md`, 18 Sep — supersedes the 17 Sep decision below, kept for its reasoning.)*
+**Built in 1i. Superseded 18 Sep 2026 — every companion's decoy is now equally strong; the roll decides the duration, not which creature you tamed.** A good `SEND` roll buys **3 turns**, a bad one buys **2**, and carrying the Heart still halves whichever you get (2 / 1) — the "hot trail" logic stays load-bearing and stacks with the roll rather than being replaced by it. This retires the 17 Sep `COMPANION.sendScent` tiering (10 for Easy/Moderate-DC creatures, 5 for the Quiet One), which had made the decoy's strength a function of which creature you'd tamed rather than how well you executed the send. Simpler, and it decouples the escape valve from an earlier tame roll's luck. *(See `claude/design-decisions.md`, 18 Sep — supersedes the 17 Sep decision below, kept for its reasoning.)*
 
 **The companion does not come back.**
 
@@ -459,7 +499,12 @@ The engine is pure and deterministic, so anything that can read text and choose 
 ```ts
 interface AgentView {                 // what a player-agent sees
   room: string                        // prose description
-  tells: { direction: Dir, tell: TellKind, text: string }[]
+  // One entry per DOORWAY, not one per tell — `DoorwaySense`, as of 1i. A model
+  // handed only the tells that fired cannot tell an empty doorway from one
+  // nobody has looked at, which is 1h's renderer defect in a second place and
+  // would make FOCUS unplayable for an agent: nothing to decide on.
+  doorways: { direction: Dir, tells: { kind: TellKind, text: string }[],
+              unresolved: boolean, suppressed: boolean, focusable: boolean }[]
   legalActions: { action: Action, label: string, dc?: number }[]
   status: { turn: number, oil: number,
             fortune: number, companion: string | null, carryingHeart: boolean }

@@ -15,33 +15,33 @@ import type {
 } from '../types.ts'
 import { DC } from '../types.ts'
 
-/**
- * How much of the room's surroundings the player can sense.
- * `all` — tells from every doorway. `facing` — only the doorway last moved through.
- * Darkness restricts RANGE, never reliability: what you receive is always true.
- * GDD 2.8.1
- */
-export type TellRange = 'all' | 'facing'
-
 // ---------------------------------------------------------------------------
 // The run — GDD 2.2
 // ---------------------------------------------------------------------------
 
 export const RUN = {
-  /** Hard turn limit. The real antagonist alongside the Wumpus. */
-  maxTurns: 20,
+  /**
+   * Ceiling across every difficulty; the binding number is per-difficulty
+   * (`DIFFICULTY[].maxTurns`, 50/45/40/35 since 18 Sep 2026). Kept as the upper
+   * bound so anything sizing an array or an axis by turn count has one number to
+   * read rather than a max() over the contract table.
+   */
+  maxTurns: 50,
   gridWidth: 10,
   gridHeight: 10,
 
   /**
    * The Heart's distance band is bounded by the TURN BUDGET, not by grid size.
    *
-   * A round trip costs at least 2x this distance, so at 20 turns a Heart 7
-   * rooms deep already spends 14 of them walking. Growing the grid does not
-   * change that arithmetic — which is the point of a 10x10 map: the Heart sits
-   * in the near third and the other ~70 rooms are the too-deep region. The
-   * player never CHOOSES to go too deep; they end up there by searching the
-   * wrong direction, and then the turn count decides whether they get back.
+   * THE ARITHMETIC THIS WAS DERIVED FROM IS STALE, and 1i re-measured rather
+   * than re-derived it. The original reasoning: a round trip costs at least 2x
+   * this distance, so against a flat 20-turn cap a Heart 7 rooms deep already
+   * spends 14 of them walking, and the Heart therefore had to sit in the near
+   * third whatever the grid size. At 50/45/40/35 turns that constraint is simply
+   * gone — a round trip to a Heart 7 deep is 14 of 45 turns, not 14 of 20.
+   *
+   * See the note on `DIFFICULTY.heartDistance` for what the 1i sweep measured
+   * and what moved because of it.
    *
    * Per-difficulty bands narrow this further — see DIFFICULTY.
    */
@@ -86,9 +86,19 @@ export const GENERATION = {
 // ---------------------------------------------------------------------------
 
 export const PLAYER = {
-  maxHealth: 3,
-  /** Every stat starts here. mod = floor((stat - 10) / 2), so 8 is -1. */
-  startingStat: 8,
+  // `maxHealth` retired 18 Sep 2026. There is no health resource anywhere in the
+  // game; cost is margin, paid in oil (GDD 2.6).
+  /**
+   * Every stat starts here. mod = floor((stat - 10) / 2), so 10 is 0.
+   *
+   * WAS 8 THROUGH 1h, which made every starting modifier -1 — so a first-time
+   * player's roll breakdown was nothing but negative numbers, on the one screen
+   * whose whole job is teaching them how the dice work. Raised to 10 on
+   * Gautham's call in 1i. This shifts every DC's felt difficulty by one point,
+   * which is why it is a balance change and not a cosmetic one; the 1i sweep
+   * measured the four difficulties against it rather than assuming it was free.
+   */
+  startingStat: 10,
   maxStat: 18,
   /** Awarded after every completed run, win or lose. */
   statPointsPerRun: 3,
@@ -101,15 +111,16 @@ export const PLAYER = {
 // ---------------------------------------------------------------------------
 
 /**
- * Oil is an ACTION BUDGET, not a second death clock. A clean 20-turn run
- * finishes with a little left, so it only bites when you dawdle.
+ * Oil is an ACTION BUDGET, not a second death clock — and since 18 Sep 2026 it
+ * is the ONLY resource the player manages, because health is gone (GDD 2.6).
+ * Everything a bad roll can do to you, it does here.
  *
  * The penalty is a LABELLED MODIFIER on the roll, never a hidden DC change —
  * `Guttering lamp -2` in the roll breakdown teaches the mechanic for free.
  *
- * Darkness restricts the RANGE of tells, never their honesty. At `facing` you
- * sense only the doorway you came through; LISTEN reveals all four, truthfully,
- * for the price of a turn. Information costs turns; it never lies.
+ * Running dry is not a third death (GDD 2.8.1). At zero you roll at -6 with no
+ * lantern, which makes a pit and the Wumpus far likelier to end you, and that is
+ * the whole of it.
  */
 export interface OilBand {
   readonly name: string
@@ -121,25 +132,251 @@ export interface OilBand {
   readonly label: string
   /** Rooms visible around the player in the diorama. */
   readonly lanternRadius: number
-  readonly tellRange: TellRange
 }
 
+/**
+ * `tellRange` is GONE from this table, 18 Sep 2026.
+ *
+ * It restricted Ember and Dark to the facing doorway only, and 1g's sweep showed
+ * it almost never fired — most runs never reach Ember, so the mechanism defended
+ * by the 17 Sep darkness decision had gone quiet before it was retired. `FOCUS`
+ * replaces it outright (GDD 2.7): information is now gated per doorway by a turn
+ * and a small oil price, capped per room by difficulty, and never by oil level.
+ *
+ * What survives unchanged is the reason that decision existed: darkness costs
+ * you RANGE and never honesty. It still does — zero oil is a -6 on every roll
+ * and a dark lantern, and not one word of what reaches you is false.
+ */
 export const OIL_BANDS: readonly OilBand[] = [
-  { name: 'bright',    min: 7, max: 12, modifier:  0, label: 'Lamp bright',    lanternRadius: 2, tellRange: 'all' },
-  { name: 'guttering', min: 3, max:  6, modifier: -2, label: 'Guttering lamp', lanternRadius: 1, tellRange: 'all' },
-  { name: 'ember',     min: 1, max:  2, modifier: -4, label: 'Failing lamp',   lanternRadius: 1, tellRange: 'facing' },
-  { name: 'dark',      min: 0, max:  0, modifier: -6, label: 'Darkness',       lanternRadius: 0, tellRange: 'facing' },
+  { name: 'bright',    min: 7, max: 12, modifier:  0, label: 'Lamp bright',    lanternRadius: 2 },
+  { name: 'guttering', min: 3, max:  6, modifier: -2, label: 'Guttering lamp', lanternRadius: 1 },
+  { name: 'ember',     min: 1, max:  2, modifier: -4, label: 'Failing lamp',   lanternRadius: 1 },
+  { name: 'dark',      min: 0, max:  0, modifier: -6, label: 'Darkness',       lanternRadius: 0 },
 ] as const
+
+/**
+ * The band at which the prose switches to its dark register.
+ *
+ * WAS DERIVED from `OIL_BANDS[].tellRange`, which no longer exists — 1f keyed it
+ * there because GDD 2.8.1 had already chosen Ember for the range restriction and
+ * the prose shift was meant to land on the same change of state. With the range
+ * mechanism retired, the derivation has nothing left to point at, so the choice
+ * is explicit here instead of implicit somewhere else.
+ *
+ * KEPT AT EMBER rather than moved. 1g measured that runs reaching turn 18+ ended
+ * at 3.5-5.2 oil — Guttering, not Ember — which means 1f picked the threshold on
+ * an arithmetic claim that turned out to be wrong, and "move it to Guttering" is
+ * on the open list for that reason. It stays at Ember here because this step
+ * changed the entire oil economy underneath the question: a 45-turn run priced
+ * per action burns nothing like a 20-turn run burning passively, so 1g's number
+ * describes a game that no longer exists, and moving the threshold to match a
+ * stale measurement would be worse than leaving it. Re-ask it against the 1i
+ * sweep's oil distribution, which is in PHASE-1-PROGRESS.
+ */
+export const DARK_PROSE_BAND = 'ember'
+
+/**
+ * True once the lamp has fallen to `DARK_PROSE_BAND` OR BELOW.
+ *
+ * At-or-below, not equal-to, and the difference is not academic: `OIL_BANDS` is
+ * ordered brightest-first, so an equality test would put the prose back into its
+ * LIT register at zero oil — a player standing in total darkness reading about
+ * what they could see. Caught by the monotonicity assertion in
+ * `tests/outcomes.test.ts`, which exists because this is precisely the kind of
+ * off-by-one that reads fine in the source and is absurd on the screen.
+ */
+export function isDarkBand(name: string): boolean {
+  const threshold = OIL_BANDS.findIndex((b) => b.name === DARK_PROSE_BAND)
+  const here = OIL_BANDS.findIndex((b) => b.name === name)
+  return here >= threshold
+}
 
 export const OIL = {
   max: 12,
   starting: 12,
-  /** One point of oil is spent every N turns. */
-  burnEveryNTurns: 2,
-  /** Extra oil these actions cost on top of the passive burn. */
-  extraCost: { search: 1, read: 1, rest: 1 } as Partial<Record<ActionKind, number>>,
+  /**
+   * PASSIVE BURN IS RETIRED, 18 Sep 2026 (GDD 2.8.1). The old model burned one
+   * oil every two turns whatever you did; oil is now spent per ACTION, and the
+   * band the action rolls scales what it costs — see `OIL_PRICE` below.
+   *
+   * The reason is the turn-cap change. Passive burn against a 20-turn cap was an
+   * anti-dawdling tax; against 50 it would be a second death clock, which the
+   * 16 Sep oil design explicitly rejected and GDD 2.8.1 still forbids ("0 oil is
+   * not a third death").
+   */
   flaskValue: 4,
+  /** A bad USE spills half of it. GDD 2.8.1 — USE is rolled now, not flat. */
+  botchedFlaskFraction: 0.5,
 } as const
+
+// ---------------------------------------------------------------------------
+// The oil price of an action — GDD 2.6, 2.8.1. The centre of the 1i rebuild.
+// ---------------------------------------------------------------------------
+
+/**
+ * What an action costs before the dice touch it. GDD 2.8.1's price table.
+ *
+ * Read with `oilCostFor`, never directly: the number here is the price of doing
+ * the thing, and `BAND_OIL_MULTIPLIER` is what a good or bad roll does to it.
+ * Cost is POSITIVE; a negative result out of `oilCostFor` is oil coming back.
+ *
+ * These are the numbers 1i measured — see PHASE-1-PROGRESS for the sweep they
+ * came out of, and `npm run economy` to re-run it.
+ */
+export const OIL_PRICE: Record<ActionKind, number> = {
+  /**
+   * The most-taken action in the game, so it sets the shape of the whole
+   * economy: at 0.5 a 45-turn run of clean moves spends most of a full lamp, at
+   * 0.25 it spends a quarter of one. 1i swept both.
+   */
+  move: 0.5,
+  // Answering a hazard or a creature. One, per GDD 2.8.1's table.
+  fight: 1,
+  tame: 1,
+  sneak: 1,
+  force: 1,
+  endure: 1,
+  // AVOID and DODGE are the same hazard at two prices, and the split IS the
+  // decision (GDD 2.8): AVOID pays a misread in CLOCK (`extraTurns` in
+  // HAZARD_VERB_OUTCOMES), DODGE pays it in oil. Under the old model DODGE paid
+  // in health, and with health retired the two verbs would have collapsed into
+  // "AVOID but worse" — 1g already measured DODGE as never once chosen because
+  // AVOID tied it on scent and beat it on oil. Pricing them apart is what keeps
+  // the snare a choice at all.
+  avoid: 0.75,
+  dodge: 1.25,
+  /** Permanence costs more than getting past it once. GDD 2.7. */
+  disarm: 1,
+  /** Per doorway, and capped per room by difficulty rather than by oil. */
+  focus: 0.5,
+  /** FOCUS's cheaper, weaker sibling: lower price, later find gate. GDD 2.7. */
+  search: 0.25,
+  /** A clean exit is priced like the walk it is. GDD 2.8.1. */
+  flee: 0.5,
+  /** Refunded to net zero on a good roll, lost outright on a bad one. */
+  rest: 0.5,
+  // Free of oil beyond whatever the roll does to the world.
+  use: 0,
+  send: 0,
+  enterPortal: 0,
+  dropHeart: 0,
+}
+
+/**
+ * What the band does to the price. GDD 2.6: "cost is margin, not injury."
+ *
+ * Multiplied into `OIL_PRICE`, so one shape serves every verb and a verb is
+ * tuned by its base alone. Positive is spent, negative is returned.
+ *
+ *   criticalFailure  you paid three times over and still wear it
+ *   failure          twice the price for nothing
+ *   mixed            the signature band: you got it, at the asking price
+ *   success          clean, and cheaper than you feared
+ *   strongSuccess    a little oil back
+ *   criticalSuccess  a little more
+ *
+ * WHY THE PAYOUT IS THIS SMALL. 1g's model paid a whole flask (4 oil,
+ * `OIL.flaskValue`, a third of the lamp) at strongSuccess-or-better, and the
+ * first version of that paid at mixed-or-better and was measured at +1.75 oil
+ * per bloom — every hazard in the labyrinth an oil farm. Folding the reward into
+ * the band delta (GDD 2.8, 18 Sep: "one number per band, not a base price plus a
+ * conditional bonus") means the best possible outcome of a 1-oil action returns
+ * 1 oil, so no amount of skill turns a hazard into income. The farming trap is
+ * closed by the SHAPE this time rather than by a gate, which is why it cannot
+ * come back the next time someone widens a band.
+ */
+export const BAND_OIL_MULTIPLIER: Record<OutcomeBand, number> = {
+  criticalFailure: 3,
+  failure: 2,
+  mixed: 1,
+  success: 0.5,
+  // THE PAYOUT SIDE IS DELIBERATELY SMALLER THAN ITS MIRROR, and it is the one
+  // number in this table that was changed by measurement rather than chosen.
+  //
+  // The first version was symmetric — -0.5 and -1, the exact negatives of
+  // `success` and `mixed`. `npm run economy -- price` showed what that does at
+  // the top of the stat curve: against a Trivial DC (MOVE, FOCUS) a character at
+  // stat 16 or 18 lands in the paying bands often enough that the EXPECTED value
+  // of the action turns positive — +0.07 oil per move at stat 18. A maxed
+  // lanternbearer refilled their lamp by walking around, which is 1g's oil farm
+  // wearing a different hat: not a gate set too low this time, but a payout
+  // curve that beats its own cost curve once the dice stop being fair.
+  //
+  // Halving the two paying bands makes the expectation negative for every verb
+  // at every stat (the panel prints the whole grid), while keeping what GDD 2.6
+  // actually asks for: "strong/critical success can net you oil back". A great
+  // roll still hands you something. It just cannot become an income.
+  //
+  // WHY NOT RAISE THE DCs INSTEAD, which would have worked too: MOVE and FOCUS
+  // are authored at Trivial on purpose (GDD 2.6 — "routine actions must be
+  // authored at Easy or Trivial"), and making walking a Moderate check to fix an
+  // oil exploit would be tuning the wrong table.
+  strongSuccess: -0.25,
+  criticalSuccess: -0.5,
+}
+
+/**
+ * Verbs whose oil cost is NOT the generic band curve above.
+ *
+ * Two of them, both because GDD 2.8.1 prices them as a stated rule rather than a
+ * scaling: REST is "refunded to net 0 on a good roll; lost outright on a bad
+ * one", which is a step function and not a slope — and it must never PAY, or
+ * resting becomes the way to farm a lamp. USE and the other zero-priced verbs
+ * need no row: zero times anything is zero.
+ */
+export const OIL_PRICE_OVERRIDE: Partial<Record<ActionKind, Record<OutcomeBand, number>>> = {
+  rest: {
+    criticalFailure: OIL_PRICE.rest,
+    failure: OIL_PRICE.rest,
+    mixed: 0,
+    success: 0,
+    strongSuccess: 0,
+    criticalSuccess: 0,
+  },
+}
+
+/**
+ * The oil an action costs at this band. Positive spends, negative returns.
+ *
+ * THE ONE PLACE THIS IS COMPUTED. `resolve.ts` calls it for every action it
+ * resolves, so a verb cannot acquire a second, quieter price somewhere in the
+ * reducer — which is exactly how the old model ended up with a passive burn, an
+ * `extraCost` table and a conditional flask reward all describing "what this
+ * costs you" in three different places.
+ */
+/**
+ * The smallest unit of oil the game keeps track of.
+ *
+ * TWO REASONS, and the second is the load-bearing one. The obvious one is
+ * legibility: a base of 0.5 times a multiplier of 0.25 is an eighth, and a run
+ * printing `+0.125 oil` at the player is offering a precision the status line
+ * does not show and the decision does not need. Found by playing a run, which
+ * is the only thing that ever finds this class of defect (1h finding 7).
+ *
+ * The real reason is that `GameState` must survive `JSON.parse(JSON.stringify())`
+ * unchanged (CLAUDE.md 2.5) and replay bit-identically from `(seed, actionLog)`
+ * (2.2). Accumulating binary fractions gets you 7.749999999999999 sooner or
+ * later, and a lamp that reads 7.75 in one process and 7.749999999999999 in
+ * another is a determinism bug that will surface as a replay divergence months
+ * from now, in a telemetry report nobody can reproduce.
+ */
+export const OIL_QUANTUM = 0.05
+
+/** Snaps an oil figure to `OIL_QUANTUM`, killing float dust. */
+export function quantizeOil(value: number): number {
+  return Math.round(value / OIL_QUANTUM) * OIL_QUANTUM + 0
+}
+
+export function oilCostFor(action: ActionKind, band: OutcomeBand): number {
+  const override = OIL_PRICE_OVERRIDE[action]
+  if (override) return quantizeOil(override[band])
+  // `quantizeOil` also normalises -0, which a zero-priced verb produces at every
+  // band with a negative multiplier (0 * -0.5 is -0, and Object.is(-0, 0) is
+  // false) — it would survive `JSON.stringify` as `0` and compare unequal in a
+  // test that round-tripped state, a difference visible nowhere except where it
+  // matters.
+  return quantizeOil(OIL_PRICE[action] * BAND_OIL_MULTIPLIER[band])
+}
 
 // ---------------------------------------------------------------------------
 // Status effects — GDD 2.8.2
@@ -197,9 +434,37 @@ export const ENTRY_HAZARDS: readonly HazardKind[] = ['pit'] as const
 export const VERB_HAZARDS: readonly HazardKind[] = ['sporeBloom', 'snareCarving'] as const
 
 /** An action that answers a hazard. GDD 2.7, 2.8. */
-export type HazardVerb = 'force' | 'endure' | 'avoid' | 'dodge'
+export type HazardVerb = 'force' | 'endure' | 'avoid' | 'dodge' | 'disarm'
 
-export const HAZARD_VERBS: readonly HazardVerb[] = ['force', 'endure', 'avoid', 'dodge'] as const
+export const HAZARD_VERBS: readonly HazardVerb[] = ['force', 'endure', 'avoid', 'dodge', 'disarm'] as const
+
+/**
+ * Verbs that take no stat modifier at all. GDD 2.7, decided in 1i.
+ *
+ * DISARM is the only member, and being a member is the whole design of it. GDD
+ * 2.7 left "stat-gated or stat-agnostic" open and leaned agnostic "so it doesn't
+ * disturb the existing every-stat-has-exactly-one-hazard-it-can't-touch design";
+ * this is what agnostic has to mean in a d20 game to actually deliver that.
+ *
+ * WHY NOT GIVE IT A STAT. Any stat would hand one build a universal answer to
+ * both verb hazards, which is precisely the coverage-matrix break the tests in
+ * `tests/hazards.test.ts` assert against. The tempting version — DISARM tests
+ * the stat the hazard has NO answer for, AGI on blooms and STR on snares — is
+ * genuinely nice design and is exactly the invariant revision this step was told
+ * not to make on its own; it is written up in the decisions log as the option
+ * that was considered and declined.
+ *
+ * WHAT MAKES IT A TRADE RATHER THAN A FREE WIN, given it dodges the -0/-1 every
+ * other verb carries: its DC is Moderate where every other hazard verb is Easy
+ * (`ACTION_DC`). At the new starting stat of 10 that is 45% mixed-or-better
+ * against FORCE's 65%, and it costs more oil for the privilege. You are paying
+ * for permanence with a worse roll, not buying it with a better one.
+ */
+export const STAT_AGNOSTIC_ACTIONS: readonly ActionKind[] = ['disarm'] as const
+
+export function isStatAgnostic(action: ActionKind): boolean {
+  return STAT_AGNOSTIC_ACTIONS.includes(action)
+}
 
 /**
  * Which verbs each hazard offers, in menu order.
@@ -210,8 +475,12 @@ export const HAZARD_VERBS: readonly HazardVerb[] = ['force', 'endure', 'avoid', 
  * no option" column true rather than aspirational.
  */
 export const VERBS_FOR_HAZARD: Partial<Record<HazardKind, readonly HazardVerb[]>> = {
-  sporeBloom: ['force', 'endure'],
-  snareCarving: ['avoid', 'dodge'],
+  // DISARM rides alongside each hazard's own pair rather than replacing either:
+  // GDD 2.7 puts it "available alongside FORCE/ENDURE and AVOID/DODGE". It is
+  // last in menu order because it is the expensive option, and a menu reads as
+  // cheap-to-dear.
+  sporeBloom: ['force', 'endure', 'disarm'],
+  snareCarving: ['avoid', 'dodge', 'disarm'],
 }
 
 /**
@@ -223,11 +492,15 @@ export const VERBS_FOR_HAZARD: Partial<Record<HazardKind, readonly HazardVerb[]>
  * 2.4 warns about. This one exists so the coverage matrix can be checked as
  * data instead of by reading a comment.
  */
-export const HAZARD_VERB_STAT: Record<HazardVerb, StatKey> = {
+export const HAZARD_VERB_STAT: Partial<Record<HazardVerb, StatKey>> = {
   force: 'str', //  shoulder through it
   endure: 'int', // know what it is doing to you and stand there anyway
   avoid: 'int', //  read the mechanism before it triggers
   dodge: 'agi', //  wriggle free after it does
+  // DISARM is deliberately ABSENT, and its absence is the data that makes it
+  // stat-agnostic — see STAT_AGNOSTIC_ACTIONS. A row here would be a build with
+  // a universal answer to every verb hazard, which is the one thing the coverage
+  // matrix exists to prevent.
 }
 
 export const HAZARD_DC: Partial<Record<HazardKind, number>> = {
@@ -261,8 +534,18 @@ export const HAZARD_STAT: Partial<Record<HazardKind, StatKey>> = {
 export interface HazardOutcome {
   /** Ends the run outright. Pits only — see CLAUDE.md 3. */
   readonly fatal: boolean
-  readonly damage: number
-  readonly oilLoss: number
+  /**
+   * `damage`, `oilLoss` and `rewardFlasks` are all GONE, 18 Sep 2026.
+   *
+   * Health is retired (GDD 2.6) and oil is no longer something a hazard row
+   * decides on its own: every action's oil moves through `oilCostFor`, so a
+   * hazard verb's cost and its payout are the same number seen from two ends.
+   * A row that could still subtract oil here would be a second, quieter price
+   * for the same verb — which is the drift CLAUDE.md 2.4 exists to stop.
+   *
+   * What a hazard row still owns is what oil cannot express: the CLOCK and the
+   * STATUS. Those are the two currencies the verbs actually differ in.
+   */
   readonly extraTurns: number
   readonly applies: StatusEffect | null
   /**
@@ -275,44 +558,6 @@ export interface HazardOutcome {
    * against, not a value any of them has to equal.
    */
   readonly statusTurns: number
-  /**
-   * Oil flasks paid out for clearing the hazard. GDD 2.8.
-   *
-   * The first GAIN this struct has ever carried — until 1g a HazardOutcome
-   * could only ever cost you something. Flasks, not raw oil, so the reward
-   * behaves exactly like ambient loot and the player still chooses when to
-   * spend it; `OIL.flaskValue` is what one is worth.
-   *
-   * PAYS AT strongSuccess AND ABOVE, AND NOWHERE ELSE. Measured, not guessed —
-   * `npm run hazard -- cost` and `SWEEP=300 npm run hazard -- oil`; the full
-   * distribution is in PHASE-1-PROGRESS's 1g notes.
-   *
-   * The first pass paid at mixed-or-better, which is the band a clearing
-   * happens at. At starting stats that is a 60% chance of four oil against an
-   * expected cost of 0.65 — **+1.75 oil per bloom walked into**, which turns
-   * every hazard in the labyrinth into an oil farm and inverts the thing it was
-   * supposed to be. Narrowing to strongSuccess+ takes that to +0.15, and
-   * one-in-five at stat 8 rising to nearly one-in-two at 18 keeps it a
-   * progression curve rather than a lottery.
-   *
-   * WHY NOT criticalSuccess ONLY, which would make the oil ledger unambiguously
-   * negative: it is 0% at starting stats. That is the exact shape of the bug
-   * the 1d sweep found in `TAME_OUTCOMES.brave` — a gate that reads as a rare
-   * reward and is arithmetically unreachable, so the mechanic never fires and
-   * nobody notices for three steps. Not making that mistake twice.
-   *
-   * WHAT THE NUMBERS COULD NOT SATISFY, stated plainly rather than fudged: GDD
-   * 2.8 asks for the reward to be smaller than the average failure cost. A
-   * flask is `OIL.flaskValue` = 4, a third of the lamp; the average failure
-   * here costs well under one oil-equivalent. NO reachable probability makes
-   * four smaller than that, so the constraint as written is unsatisfiable while
-   * the reward is a whole flask, and pretending otherwise would have meant
-   * quietly choosing an unreachable band. What IS true, and is the thing the
-   * constraint was reaching for, is that hazards are heavily net-negative in
-   * the currency that decides runs: turns. Making the verbs free was measured
-   * at +12.5 points of escape rate. See PHASE-1-PROGRESS.
-   */
-  readonly rewardFlasks: number
 }
 
 /**
@@ -323,18 +568,29 @@ export interface HazardOutcome {
  * fatal here, so the failure line there has to end the run.
  */
 export const HAZARD_OUTCOMES: Partial<Record<HazardKind, Record<OutcomeBand, HazardOutcome>>> = {
+  /**
+   * BINARY SINCE 18 Sep 2026. Pass and you are through unhurt; fail and the run
+   * ends. GDD 2.8.
+   *
+   * The pit used to have a Mixed Success survive-band — you caught the lip, lost
+   * a point of health and two oil — and it was the one hazard in the game with
+   * partial credit. It went with health: "you caught the lip and it cost you
+   * some lamp oil" is not a thing that happens to someone falling into a hole,
+   * and once injury stopped existing there was no honest currency left for a
+   * near-miss to be paid in. So the pit is now what it has always been described
+   * as in play, and every band above `failure` is the same row.
+   *
+   * It pays NOTHING for being survived, at any band, and that stays true for the
+   * original reason: there is nothing in the hole to earn. You did not beat it,
+   * you failed to fall in.
+   */
   pit: {
-    criticalFailure: { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    failure:         { fatal: true,  damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    // The signature band, at its most literal: you caught the lip. It cost you
-    // a point of health and the lamp gutters.
-    mixed:           { fatal: false, damage: 1, oilLoss: 2, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    // A pit pays NOTHING for being survived, at any band, and that is the point
-    // of it. There is nothing in the hole to earn: you did not beat it, you
-    // failed to fall in. Every other hazard can be cleared and rewards it.
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
+    criticalFailure: { fatal: true,  extraTurns: 0, applies: null, statusTurns: 0 },
+    failure:         { fatal: true,  extraTurns: 0, applies: null, statusTurns: 0 },
+    mixed:           { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    success:         { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    strongSuccess:   { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    criticalSuccess: { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
   },
 }
 
@@ -371,63 +627,105 @@ export const HAZARD_OUTCOMES: Partial<Record<HazardKind, Record<OutcomeBand, Haz
 export const HAZARD_VERB_OUTCOMES: Record<HazardVerb, Record<OutcomeBand, HazardOutcome>> = {
   // ---- spore bloom -------------------------------------------------------
   force: {
-    // Two turns and a lungful, plus the bloom takes a piece of you on the way.
-    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
-    failure:         { fatal: false, damage: 0, oilLoss: 1, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
-    // Cleared, and it cost you nothing but the time — but no flask. The reward
-    // gate sits a band higher than the clearing does, deliberately; see
-    // HazardOutcome.rewardFlasks.
-    mixed:           { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    criticalFailure: { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 3 },
+    failure:         { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
+    mixed:           { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
+    success:         { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
     // GDD 2.8: "margin sets how many turns it costs (2, or 1 on a strong
     // success)". This row and the one below it ARE that sentence.
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused', statusTurns: 2, rewardFlasks: 1 },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: 'confused', statusTurns: 2, rewardFlasks: 1 },
+    strongSuccess:   { fatal: false, extraTurns: 0, applies: 'confused', statusTurns: 2 },
+    criticalSuccess: { fatal: false, extraTurns: 0, applies: 'confused', statusTurns: 2 },
   },
   endure: {
     // extraTurns is 1 in EVERY row: flat, by design. Enduring never buys clock.
-    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
-    failure:         { fatal: false, damage: 0, oilLoss: 1, extraTurns: 1, applies: 'confused', statusTurns: 3, rewardFlasks: 0 },
-    mixed:           { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 2, rewardFlasks: 0 },
+    criticalFailure: { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 3 },
+    failure:         { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 3 },
+    mixed:           { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
+    success:         { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
     // The floor. Never 0 — see the header.
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 1, rewardFlasks: 1 },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: 'confused', statusTurns: 1, rewardFlasks: 1 },
+    strongSuccess:   { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 1 },
+    criticalSuccess: { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 1 },
   },
   // ---- snare-carving -----------------------------------------------------
+  //
+  // The snare split used to be "AVOID pays in clock, DODGE pays in blood", and
+  // blood is gone. It is now "AVOID pays in clock, DODGE pays in oil" — and the
+  // oil half lives in `OIL_PRICE` (avoid 0.75, dodge 1.25) rather than in these
+  // rows, because oil has exactly one road into the ledger now. What is left
+  // here is the clock, which is AVOID's currency alone.
   avoid: {
-    criticalFailure: { fatal: false, damage: 1, oilLoss: 0, extraTurns: 2, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    failure:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    mixed:           { fatal: false, damage: 0, oilLoss: 1, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
+    criticalFailure: { fatal: false, extraTurns: 2, applies: null, statusTurns: 0 },
+    failure:         { fatal: false, extraTurns: 1, applies: null, statusTurns: 0 },
+    mixed:           { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    success:         { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    strongSuccess:   { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    criticalSuccess: { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
   },
   dodge: {
-    // You are already in it when you start reacting, so the bottom costs blood
-    // where AVOID's only costs time.
-    criticalFailure: { fatal: false, damage: 2, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    failure:         { fatal: false, damage: 1, oilLoss: 0, extraTurns: 1, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    mixed:           { fatal: false, damage: 1, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    success:         { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 0 },
-    strongSuccess:   { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
-    criticalSuccess: { fatal: false, damage: 0, oilLoss: 0, extraTurns: 0, applies: null, statusTurns: 0, rewardFlasks: 1 },
+    // Faster than reading your way round it when it works — one turn back at the
+    // bottom where AVOID loses two, which is what "reacts after it fires" buys.
+    criticalFailure: { fatal: false, extraTurns: 1, applies: null, statusTurns: 0 },
+    failure:         { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    mixed:           { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    success:         { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    strongSuccess:   { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
+    criticalSuccess: { fatal: false, extraTurns: 0, applies: null, statusTurns: 0 },
   },
+  /**
+   * DISARM — one row shape for both hazards, because it does the same thing to
+   * each: takes it out of the room for good (GDD 2.7).
+   *
+   * It costs the clock on a botch like AVOID does, and it applies Confused on a
+   * bloom exactly as FORCE and ENDURE do — you are still standing in spores
+   * while you pull it apart. `resolve.ts` only applies `applies` when the hazard
+   * it is answering can produce that status, so this single row serves a snare
+   * without handing the player a Confused they could not have got from a snare.
+   */
+  disarm: {
+    criticalFailure: { fatal: false, extraTurns: 2, applies: 'confused', statusTurns: 3 },
+    failure:         { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
+    mixed:           { fatal: false, extraTurns: 1, applies: 'confused', statusTurns: 2 },
+    success:         { fatal: false, extraTurns: 0, applies: 'confused', statusTurns: 2 },
+    strongSuccess:   { fatal: false, extraTurns: 0, applies: 'confused', statusTurns: 1 },
+    criticalSuccess: { fatal: false, extraTurns: 0, applies: 'confused', statusTurns: 1 },
+  },
+}
+
+/**
+ * Bands at which a DISARM actually removes the hazard.
+ *
+ * Mixed-or-better, the same gate a clearing has always had — GDD 2.6 is explicit
+ * that Mixed means you got what you wanted and it cost you something, and a
+ * DISARM that failed to disarm at the signature band would make the widest good
+ * band a failure in disguise. A botched DISARM still gets you PAST the hazard
+ * (the encounter clears, as it does for every verb); what it does not do is take
+ * the thing out of the room.
+ */
+export function disarmClears(band: OutcomeBand): boolean {
+  return band !== 'criticalFailure' && band !== 'failure'
 }
 
 // ---------------------------------------------------------------------------
 // Assorted action effects — GDD 2.7, 2.8.1
 // ---------------------------------------------------------------------------
 
-export const REST = {
-  /** Health recovered by a REST that lands mixed-or-better. */
-  healOnSuccess: 1,
-} as const
+/**
+ * REST no longer heals, because there is nothing to heal (GDD 2.6). What it buys
+ * is its own price back: 0.5 oil on a bad roll, nothing on a good one, and never
+ * a profit — see `OIL_PRICE_OVERRIDE.rest`. The world keeps turning through it;
+ * nothing in this game pauses, and REST did not become the first thing that does.
+ */
 
-export const SEARCH = {
-  /** Rooms READ names the hazards of, on a mixed-or-better roll. Radius 1. */
-  readRevealRadius: 1,
-} as const
+/**
+ * The band at or above which `SEARCH` turns up what is in the room.
+ *
+ * FOCUS's weaker sibling, in the one currency a find can be weak in: SEARCH used
+ * to pay out at mixed-or-better like everything else, and GDD 2.7 asks for
+ * "loot at lower reliability" to match its lower price. Success-or-better is
+ * that — 45% at the new starting stat against a DC 8, where mixed-or-better
+ * would be 65%.
+ */
+export const SEARCH_FIND_BAND: OutcomeBand = 'success'
 
 // ---------------------------------------------------------------------------
 // Difficulty — GDD 2.6
@@ -442,7 +740,15 @@ export const SEARCH = {
  */
 export const ACTION_DC: Record<ActionKind, number> = {
   move: DC.trivial,
-  listen: DC.trivial,
+  /**
+   * FOCUS is Trivial, where LISTEN was, and for the same reason: what it returns
+   * is the tell list, and the tell list is honest at every band (CLAUDE.md 3).
+   * A FOCUS ALWAYS resolves its doorway — the band scales what the looking cost
+   * you, never whether you were told the truth. Making a bad FOCUS return less
+   * information would be probabilistic tells wearing a different hat, and GDD
+   * 2.8.1 rejects those in as many words.
+   */
+  focus: DC.trivial,
   search: DC.easy,
   // The four hazard verbs all sit at Easy, and they sit at the SAME Easy.
   //
@@ -461,15 +767,27 @@ export const ACTION_DC: Record<ActionKind, number> = {
   endure: DC.easy,
   avoid: DC.easy,
   dodge: DC.easy,
+  /**
+   * The ONE hazard verb that is not Easy, and the exception proves the rule
+   * above rather than breaking it. The same-Easy rule exists so the choice
+   * between two verbs is a choice between two COST MODELS and never between an
+   * easy option and a hard one. DISARM is not one of that pair — it is a third
+   * thing offered alongside them, it carries no stat modifier at all
+   * (STAT_AGNOSTIC_ACTIONS), and it buys something neither of them can. Moderate
+   * is what stops "no stat modifier" from meaning "strictly better odds than the
+   * verb you were supposed to be choosing between".
+   */
+  disarm: DC.moderate,
   sneak: DC.easy,
   fight: DC.moderate,
   tame: DC.moderate,
   flee: DC.easy,
   use: DC.trivial,
   send: DC.easy,
-  read: DC.moderate,
   enterPortal: DC.hard,
   rest: DC.trivial,
+  /** Never rolled — free and unconditional (GDD 2.9.1). Present so the record is total. */
+  dropHeart: DC.trivial,
 }
 
 /**
@@ -482,7 +800,7 @@ export const ACTION_DC: Record<ActionKind, number> = {
  */
 export const ACTION_STAT: Record<ActionKind, StatKey> = {
   move: 'agi',
-  listen: 'int',
+  focus: 'int', // reading a doorway for what it is, not merely that it is
   search: 'int',
   // These four MUST equal HAZARD_VERB_STAT; tests/tuning.test.ts asserts it.
   // They are the coverage matrix: bloom has no AGI answer, snare has no STR one.
@@ -490,15 +808,20 @@ export const ACTION_STAT: Record<ActionKind, StatKey> = {
   endure: 'int',
   avoid: 'int',
   dodge: 'agi',
+  // DISARM's entry is never READ — `isStatAgnostic` short-circuits it in
+  // `rollForAction` before this table is consulted — but the record is total by
+  // type, and a lie here would be worse than a value nothing uses. INT is what
+  // it would test if it tested anything.
+  disarm: 'int',
   sneak: 'agi',
   fight: 'str',
   tame: 'int',
   flee: 'agi',
   use: 'agi',
   send: 'agi',
-  read: 'int',
   enterPortal: 'int',
   rest: 'str',
+  dropHeart: 'str', // never rolled
 }
 
 export const PORTAL = {
@@ -530,6 +853,30 @@ export interface TierProfile {
   readonly anticipatesExit: boolean
 }
 
+export const WUMPUS = {
+  /**
+   * The mandatory adjacency stench fires out to this many rooms. GDD 2.10.
+   *
+   * WIDENED FROM 1 TO 2 on 18 Sep 2026, and it is a PRESENTATION-LAYER FLOOR
+   * rather than a perception radius: it fires whatever the tier's own
+   * `perceptionRadius` is, including for a Drowsing Wumpus that has not noticed
+   * the player at all. It is what CLAUDE.md 3's "a player who holds still is
+   * always warned" now means in rooms.
+   *
+   * IT IS ALSO THE COMPENSATION FOR `FOCUS`. Making identity cost a turn and a
+   * price makes the base game blinder than the always-on directional tells it
+   * replaced; without a wider floor, first contact with the Wumpus would read as
+   * unfair instead of tense. The two changes are one change and must not be
+   * tuned apart — narrowing this back to 1 without restoring free directional
+   * tells would put the game somewhere neither design intended.
+   *
+   * What it does NOT promise: that you can never be caught unwarned. Walk into a
+   * room that happens to sit two from the Wumpus and nothing leaked at your last
+   * room, because it was three away. That is the price of exploring blind.
+   */
+  mandatoryStenchRadius: 2,
+} as const
+
 export const WUMPUS_TIERS: Record<WumpusTier, TierProfile> = {
   1: { name: 'Drowsing', moveEveryNTurns: 3, perceptionRadius: 1, memoryTurns: 0, takesPortals: false, anticipatesExit: false },
   2: { name: 'Stirring', moveEveryNTurns: 2, perceptionRadius: 2, memoryTurns: 0, takesPortals: false, anticipatesExit: false },
@@ -551,7 +898,8 @@ export const WUMPUS_TIERS: Record<WumpusTier, TierProfile> = {
  */
 export const SCENT_BY_ACTION: Record<ActionKind, number> = {
   move: 1,
-  listen: 0.5,
+  /** Inherits LISTEN's weight: holding still at a doorway, quieter than walking. */
+  focus: 0.5,
   search: 1.5,
   // The hazard verbs split loud/quiet on exactly the fight/tame line, decided
   // 18 Sep 2026 and written into GDD 2.10's scent paragraph.
@@ -568,15 +916,22 @@ export const SCENT_BY_ACTION: Record<ActionKind, number> = {
   endure: 0.25,
   avoid: 0.5,
   dodge: 0.5,
+  // Taking a trap apart is patient work, not loud work — it sits with the quiet
+  // half. It is above ENDURE because you are handling the thing rather than
+  // standing still in it, and below FORCE because nothing gets shouldered.
+  disarm: 0.5,
   sneak: 0.25,
   fight: 4,
   tame: 0.5,
   flee: 2,
   use: 1,
   send: 0, // the marker lands in the TARGET room — see COMPANION.sendScent
-  read: 1,
   enterPortal: 0, // the trail does not follow you through
   rest: 0.5,
+  // Setting the Heart down is the quietest thing you can do while holding it —
+  // it is the deposit MULTIPLIER this action cancels (HEART.carryScentMultiplier),
+  // and cancelling it while still laying a full marker would undo the point.
+  dropHeart: 0.25,
 }
 
 export const SCENT = {
@@ -620,30 +975,46 @@ export const TAME_DC: Record<CreatureKind, number> = {
 }
 
 /**
- * Which decoy tier a creature falls in. Keyed off TAME_DC rather than listing
- * creatures, so adding a creature to the bestiary cannot forget to give it a
- * decoy strength — it inherits one from how hard it is to tame.
+ * How well the send went. GDD 2.9, 18 Sep 2026.
+ *
+ * SUPERSEDES THE 17 Sep TIERING, which keyed the decoy's strength to the tamed
+ * creature's DC (10 for goblin/lumewing/grellhound, 5 for the Quiet One). That
+ * made the escape valve's strength a function of a tame roll you made several
+ * turns ago and possibly had no choice about — you bait the Wumpus with whatever
+ * you managed to catch, not with whatever you would have picked. The roll you
+ * make NOW decides it instead, which is both simpler to reason about and the
+ * only version where executing the send well is a thing you can do.
  */
-export type SendTier = 'easyModerate' | 'hard'
+export type SendQuality = 'good' | 'bad'
 
-export function sendTierFor(creature: CreatureKind): SendTier {
-  return (TAME_DC[creature] as number) <= DC.moderate ? 'easyModerate' : 'hard'
+export function sendQualityFor(band: OutcomeBand): SendQuality {
+  return band === 'criticalFailure' || band === 'failure' ? 'bad' : 'good'
 }
 
-/** Scent a sent companion of this kind drops in the target room. GDD 2.9 */
-export function sendScentFor(creature: CreatureKind): number {
-  return COMPANION.sendScent[sendTierFor(creature)]
+/** Scent a sent companion drops in the target room. GDD 2.9 */
+export function sendScentFor(band: OutcomeBand): number {
+  return COMPANION.sendScent[sendQualityFor(band)]
 }
 
 /** Turns that decoy is expected to out-smell the player. Derived; see COMPANION. */
-export function sendDecoyTurnsFor(creature: CreatureKind, carryingHeart: boolean): number {
-  const pair = COMPANION.sendDecoyTurns[sendTierFor(creature)]
+export function sendDecoyTurnsFor(band: OutcomeBand, carryingHeart: boolean): number {
+  const pair = COMPANION.sendDecoyTurns[sendQualityFor(band)]
   return carryingHeart ? pair.carryingHeart : pair.alone
 }
 
 export const COMPANION = {
-  /** Skittish companions bolt when the player TAKES DAMAGE, not on a failed roll. */
-  skittishFleesOnDamage: true,
+  /**
+   * Skittish companions bolt on a CRITICAL FAILURE — the band where the world
+   * escalates (GDD 2.6). Replaces "bolts on damage taken", which died with
+   * health; see `TameOutcome.skittish`.
+   *
+   * The original reasoning survives the change and is why the trigger is the
+   * critical band rather than any failure: failed rolls are common (over a third
+   * even at the new starting stat), so tying flight to them would make a Mixed
+   * Success tame worthless, and Mixed is meant to be the widest good band rather
+   * than a booby prize.
+   */
+  skittishFleesOnCriticalFailure: true,
   /** Fortune points spent to keep a bolting skittish companion. GDD 2.9 */
   skittishFortuneSave: 1,
   /**
@@ -656,40 +1027,36 @@ export const COMPANION = {
    * hunt/tame visualisers. A special-case lock would make SEND the only thing in
    * the game the Wumpus AI knows about by name.
    *
-   * WHY TWO VALUES AND NOT ONE. The flat 5 made the decoy weakest exactly when
-   * it was needed: against a Heart-carrying player (deposit 2, via
-   * HEART.carryScentMultiplier) it dominated for a single turn, against a GDD
-   * that promises 2-3. Solving `sendScent * decayFactor^n > deposit` shows the
-   * achievable pairs do not overlap — 3-turns-without-Heart forces
-   * sendScent in (7.3, 14.6], which forces 2-turns-with-Heart; 1-turn-with-Heart
-   * forces (2.7, 5.4], which caps at 2-turns-without. 3-without / 1-with is
-   * ARITHMETICALLY IMPOSSIBLE under one shared decayFactor, and the factor must
-   * stay shared or the Wumpus would perceive different creatures' trails fading
-   * at different physical rates.
+   * THE TWO VALUES ARE THE SAME TWO VALUES the 17 Sep tiering derived; what
+   * changed is what selects between them. The arithmetic is unchanged and still
+   * load-bearing: a decoy dominates for as long as `sendScent * decayFactor^n`
+   * exceeds the player's freshest deposit, and solving that for the turn counts
+   * GDD 2.9 promises gives 3-turns-without-Heart ∈ (7.3, 14.6] and
+   * 2-turns-without ∈ (2.7, 7.3]. 10 and 5 sit in those bands, and each carries
+   * its Heart-halved case with it for free — which is why "3/2 on a good roll,
+   * 2/1 on a bad one" is a shape the scent math can actually produce.
    *
-   * So the decoy's strength scales with the tame DC instead: the Easy/Moderate
-   * creatures land exactly on the GDD's 3/2, and the Quiet One keeps 5 and its
-   * 2/1. That is not the Quiet One being a worse decoy by design — it is what
-   * the shared decay math produces once "1 turn while carrying" is held fixed.
-   * Decided 17 Sep 2026; GDD 2.9 updated to match.
+   * (3-without / 1-with remains ARITHMETICALLY IMPOSSIBLE under one shared
+   * decayFactor, and the factor must stay shared or the Wumpus would perceive
+   * different trails fading at different physical rates. That constraint is why
+   * the pairs below are 3/2 and 2/1 and not something rounder.)
    *
    * Its duration is arithmetic, not a setting: see sendDecoyTurns.
    */
-  sendScent: { easyModerate: 10, hard: 5 } as Record<SendTier, number>,
+  sendScent: { good: 10, bad: 5 } as Record<SendQuality, number>,
   /**
    * Turns the decoy is expected to out-smell the player. DERIVED, not free —
-   * two pairs now, one per tier, each split by whether the player is carrying
-   * the Heart (which doubles their own deposit).
+   * one pair per roll quality, each split by whether the player is carrying the
+   * Heart (which doubles their own deposit, so it halves the decoy's lead).
    *
-   * A decoy dominates for as long as `sendScent * decayFactor^n` exceeds the
-   * player's freshest deposit. tests/creatures.test.ts asserts all four cases,
-   * so changing sendScent without changing this fails the build rather than
-   * quietly making the GDD's "3 turns for a goblin" a lie.
+   * tests/creatures.test.ts asserts all four cases against the decay model, so
+   * changing sendScent without changing these fails the build rather than
+   * quietly making GDD 2.9's "3 turns on a good send" a lie.
    */
   sendDecoyTurns: {
-    easyModerate: { alone: 3, carryingHeart: 2 },
-    hard: { alone: 2, carryingHeart: 1 },
-  } as Record<SendTier, { readonly alone: number; readonly carryingHeart: number }>,
+    good: { alone: 3, carryingHeart: 2 },
+    bad: { alone: 2, carryingHeart: 1 },
+  } as Record<SendQuality, { readonly alone: number; readonly carryingHeart: number }>,
   /** A sent companion NEVER returns. Not a tunable — see CLAUDE.md 3. */
   sendIsPermanent: true,
   /** Oil per turn to keep a skittish companion fed and calm. */
@@ -699,7 +1066,16 @@ export const COMPANION = {
   /** Chance per turn a goblin companion turns up a point of oil. GDD 2.9 */
   goblinScroungeChance: 0.1,
   goblinScroungeOil: 1,
-  /** Radius at which the grellhound growls — one extra turn of warning. */
+  /**
+   * Radius at which the grellhound growls.
+   *
+   * LARGELY SUBSUMED as of 18 Sep 2026: the universal mandatory stench floor is
+   * now radius 2 as well (`WUMPUS.mandatoryStenchRadius`), so this passive gives
+   * the player almost nothing the base game does not. Left at 2 rather than
+   * raised here, because raising it is the companion rework parked in 1i part 2
+   * (escalating detail at 3/2/1), and moving it in this step would be building
+   * half of that against numbers still in motion. Flagged in PHASE-1-PROGRESS.
+   */
   grellhoundWarningRadius: 2,
   /** Multiplier on the player's scent output while the Quiet One follows. */
   quietOneScentMultiplier: 0.5,
@@ -739,14 +1115,23 @@ export interface TameOutcome {
    * roll. See GDD 2.9.
    */
   readonly brave: boolean
-  /** Mixed success: costs oil to keep, and bolts on damage. */
+  /**
+   * Mixed success: costs oil to keep, and bolts when a roll comes apart.
+   *
+   * The bolt trigger MOVED in 1i. It was "the player takes damage", and there is
+   * no damage any more (GDD 2.6) — leaving it there would have shipped a GDD
+   * line that nothing could ever fire. It is now a critical failure on any roll:
+   * the band GDD 2.6 already defines as "the world escalates", which is the
+   * nearest thing the new economy has to the old trigger's meaning, and rare
+   * enough (~5% at the new starting stat against an Easy DC) that a Mixed tame
+   * is still worth having. Gautham's call, 1i.
+   */
   readonly skittish: boolean
   /** It turns on you and stays in the room. */
   readonly hostile: boolean
   /** It leaves the room entirely — the creature is gone from the labyrinth. */
   readonly bolts: boolean
   readonly extraScent: number
-  readonly damage: number
   /** A strong success knows this place: adjacent rooms revealed. */
   readonly revealsRooms: number
 }
@@ -754,42 +1139,41 @@ export interface TameOutcome {
 export const TAME_OUTCOMES: Record<OutcomeBand, TameOutcome> = {
   // It shrieks. 0.5 + 3.5 = 4 — exactly a FIGHT's worth of noise, which is the
   // point: a tame that fails this badly has become the thing you were avoiding.
-  criticalFailure: { tamed: false, brave: false, skittish: false, hostile: true,  bolts: false, extraScent: 3.5, damage: 1, revealsRooms: 0 },
+  criticalFailure: { tamed: false, brave: false, skittish: false, hostile: true,  bolts: false, extraScent: 3.5, revealsRooms: 0 },
   // Bolts noisily. 0.5 + 1.5 = 2, a FLEE's worth. Turn wasted, creature gone.
-  failure:         { tamed: false, brave: false, skittish: false, hostile: false, bolts: true,  extraScent: 1.5, damage: 0, revealsRooms: 0 },
-  mixed:           { tamed: true,  brave: false, skittish: true,  hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
-  success:         { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
-  strongSuccess:   { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 1 },
-  criticalSuccess: { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   damage: 0, revealsRooms: 0 },
+  failure:         { tamed: false, brave: false, skittish: false, hostile: false, bolts: true,  extraScent: 1.5, revealsRooms: 0 },
+  mixed:           { tamed: true,  brave: false, skittish: true,  hostile: false, bolts: false, extraScent: 0,   revealsRooms: 0 },
+  success:         { tamed: true,  brave: false, skittish: false, hostile: false, bolts: false, extraScent: 0,   revealsRooms: 0 },
+  strongSuccess:   { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   revealsRooms: 1 },
+  criticalSuccess: { tamed: true,  brave: true,  skittish: false, hostile: false, bolts: false, extraScent: 0,   revealsRooms: 0 },
 }
 
 export interface FightOutcome {
   /** The creature is driven off and removed from the labyrinth. */
   readonly driven: boolean
-  readonly damage: number
   readonly extraScent: number
   /**
-   * Oil flasks taken off what you drove away. GDD 2.8, step 1g.
+   * `damage` and `rewardFlasks` both retired 18 Sep 2026.
    *
-   * FIGHT is in the hazard-reward pass and the other three encounter options
-   * are not, and that asymmetry is the whole point rather than an oversight: a
-   * successful TAME already pays out a companion, which is the richer prize;
-   * SNEAK and FLEE do not clear anything, they get you past it. Paying FIGHT in
-   * oil is what stops "tame is strictly better" from being true once taming
-   * costs a turn more (CLAUDE.md 3 — if one option is ever strictly better,
-   * fix the costs, do not remove the choice).
-   *
-   * Rides on `driven`: you are paid for clearing the room, not for surviving it.
+   * FIGHT's oil reward was the one number in 1g that nothing ever measured — no
+   * sweep policy fought, so `earned driving off a creature` came back 0.00 per
+   * run at every setting tried, and its strongSuccess-or-better gate was the
+   * conservative guess rather than an observation. The question it left open —
+   * should FIGHT pay from mixed up, the way TAME pays its companion from mixed
+   * up? — is answered by the new model without anyone having to settle it:
+   * every action's band carries its own oil delta now (`BAND_OIL_MULTIPLIER`),
+   * so a FIGHT and a TAME are paid on exactly the same curve and the asymmetry
+   * between them is back where CLAUDE.md 3 wants it, in the turn cost and the
+   * scent.
    */
-  readonly rewardFlasks: number
 }
 
 export const FIGHT_OUTCOMES: Record<OutcomeBand, FightOutcome> = {
   // 4 + 2 = 6 — a botched fight is the loudest thing short of taking the Heart.
-  criticalFailure: { driven: false, damage: 2, extraScent: 2, rewardFlasks: 0 },
-  failure:         { driven: false, damage: 1, extraScent: 0, rewardFlasks: 0 },
+  criticalFailure: { driven: false, extraScent: 2 },
+  failure:         { driven: false, extraScent: 0 },
   // The signature band: you won, and it cost you a point of health.
-  mixed:           { driven: true,  damage: 1, extraScent: 0, rewardFlasks: 0 },
+  mixed:           { driven: true, extraScent: 0 },
   // FIGHT's gate is set to match the hazard verbs' — strongSuccess and above —
   // and it is the one reward number in this pass that NOTHING MEASURED IT.
   // Neither sweep policy ever fights, so `earned driving off a creature` came
@@ -799,42 +1183,40 @@ export const FIGHT_OUTCOMES: Record<OutcomeBand, FightOutcome> = {
   // and a FIGHT that pays a band later is a FIGHT that is worse at the band
   // where most wins happen. 1i's heuristic bot has to fight and tame on purpose
   // before anyone can settle this.
-  success:         { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 0 },
-  strongSuccess:   { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 1 },
-  criticalSuccess: { driven: true,  damage: 0, extraScent: 0, rewardFlasks: 1 },
+  success:         { driven: true, extraScent: 0 },
+  strongSuccess:   { driven: true, extraScent: 0 },
+  criticalSuccess: { driven: true, extraScent: 0 },
 }
 
 export interface SneakOutcome {
   /** True if the player slips past into the room they were headed for. */
   readonly passed: boolean
-  readonly damage: number
   readonly extraScent: number
 }
 
 export const SNEAK_OUTCOMES: Record<OutcomeBand, SneakOutcome> = {
-  criticalFailure: { passed: false, damage: 1, extraScent: 2 },
-  failure:         { passed: false, damage: 0, extraScent: 0.75 },
+  criticalFailure: { passed: false, extraScent: 2 },
+  failure:         { passed: false, extraScent: 0.75 },
   // Through, but not silently — 0.25 + 0.75 = 1, no quieter than walking.
-  mixed:           { passed: true,  damage: 0, extraScent: 0.75 },
-  success:         { passed: true,  damage: 0, extraScent: 0 },
-  strongSuccess:   { passed: true,  damage: 0, extraScent: 0 },
-  criticalSuccess: { passed: true,  damage: 0, extraScent: 0 },
+  mixed:           { passed: true, extraScent: 0.75 },
+  success:         { passed: true, extraScent: 0 },
+  strongSuccess:   { passed: true, extraScent: 0 },
+  criticalSuccess: { passed: true, extraScent: 0 },
 }
 
 export interface FleeOutcome {
   /** True if the player retreats to the room they came from. */
   readonly fled: boolean
-  readonly damage: number
   readonly extraScent: number
 }
 
 export const FLEE_OUTCOMES: Record<OutcomeBand, FleeOutcome> = {
-  criticalFailure: { fled: false, damage: 1, extraScent: 1 },
-  failure:         { fled: false, damage: 0, extraScent: 1 },
-  mixed:           { fled: true,  damage: 1, extraScent: 0 },
-  success:         { fled: true,  damage: 0, extraScent: 0 },
-  strongSuccess:   { fled: true,  damage: 0, extraScent: 0 },
-  criticalSuccess: { fled: true,  damage: 0, extraScent: 0 },
+  criticalFailure: { fled: false, extraScent: 1 },
+  failure:         { fled: false, extraScent: 1 },
+  mixed:           { fled: true, extraScent: 0 },
+  success:         { fled: true, extraScent: 0 },
+  strongSuccess:   { fled: true, extraScent: 0 },
+  criticalSuccess: { fled: true, extraScent: 0 },
 }
 
 // ---------------------------------------------------------------------------
@@ -998,17 +1380,44 @@ export interface DifficultyContract {
    */
   readonly wumpusStartDistance: readonly [number, number]
   readonly maxTurns: number
+  /**
+   * How many doorways a room is worth `FOCUS`ing, for the whole run. GDD 2.7.
+   *
+   * THE SECOND AXIS DIFFICULTY NOW OWNS. Through 1h, difficulty was a contract
+   * on GENERATION alone — how the labyrinth is built. This makes it a contract
+   * on INFORMATION too: at Drowsing and Stirring you may resolve all four
+   * doorways if you can afford the turns, and at Hunting and Ravening you get
+   * exactly one and have to guess the rest.
+   *
+   * That is a deliberate repositioning and it pairs with the turn caps above:
+   * the two easy difficulties are an oil-management puzzle with time to look
+   * around, and the two hard ones are a turn-pressure puzzle where looking
+   * around is the thing you cannot afford. Naming it here rather than leaving it
+   * to be discovered as an inconsistency later.
+   */
+  readonly focusesPerRoom: number
 }
 
+/**
+ * TURNS WENT FROM A FLAT 20/20/20/18 TO 50/45/40/35 on 18 Sep 2026, and the
+ * shape of the change matters more than the size. Turn pressure is no longer
+ * uniform: Drowsing and Stirring are deliberately generous so that OIL is the
+ * thing being managed, and Hunting and Ravening tighten back down so the clock
+ * is the dominant threat again, stacked on a faster and more perceptive Wumpus.
+ *
+ * `heartDistance`, `safeRoutes` and `minSafeDetour` were all sized against the
+ * old 18-20 turn budget and were re-measured in 1i rather than carried over —
+ * see PHASE-1-PROGRESS for the numbers and what moved.
+ */
 export const DIFFICULTY: Record<Difficulty, DifficultyContract> = {
-  drowsing: { wumpusTier: 1, safeRoutes: 2, minSafeDetour: 2, heartDistance: [5, 6], wumpusStartDistance: [4, 6], maxTurns: 20 },
-  stirring: { wumpusTier: 2, safeRoutes: 1, minSafeDetour: 3, heartDistance: [6, 7], wumpusStartDistance: [5, 8], maxTurns: 20 },
-  hunting:  { wumpusTier: 3, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 20 },
+  drowsing: { wumpusTier: 1, safeRoutes: 2, minSafeDetour: 2, heartDistance: [5, 6], wumpusStartDistance: [4, 6], maxTurns: 50, focusesPerRoom: 4 },
+  stirring: { wumpusTier: 2, safeRoutes: 1, minSafeDetour: 3, heartDistance: [6, 7], wumpusStartDistance: [5, 8], maxTurns: 45, focusesPerRoom: 4 },
+  hunting:  { wumpusTier: 3, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 40, focusesPerRoom: 1 },
   // Harder through pressure, not distance: a deeper Heart only adds corridors,
   // whereas fewer turns bites on every decision in the run at once. The start
   // band is shared with stirring and hunting on purpose — a tier-4 Wumpus
   // placed identically is a far worse problem than a tier-2 one.
-  ravening: { wumpusTier: 4, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 18 },
+  ravening: { wumpusTier: 4, safeRoutes: 0, minSafeDetour: 0, heartDistance: [7, 7], wumpusStartDistance: [5, 8], maxTurns: 35, focusesPerRoom: 1 },
 }
 
 /**

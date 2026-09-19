@@ -89,7 +89,7 @@ import type {
   RoomArchetype,
 } from '../types.ts'
 import { BAND_ORDER } from '../types.ts'
-import { oilBandFor } from './tuning.ts'
+import { isDarkBand, oilBandFor } from './tuning.ts'
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -108,22 +108,20 @@ export interface Beat {
 /**
  * Where the prose modality switches.
  *
- * Keyed off `OIL_BANDS[].tellRange` rather than a constant of its own, because
- * GDD 2.8.1 already chose that threshold and gave the reason: "Range
- * restriction starts at Ember, not Guttering. The first oil threshold stays
- * purely arithmetic so the deep one lands as a genuine change of state rather
- * than more of the same." The prose shift IS that change of state, so it lands
- * where the range restriction lands.
+ * READS `DARK_PROSE_BAND` NOW. It was keyed off `OIL_BANDS[].tellRange` because
+ * GDD 2.8.1 had already chosen Ember for the tell-range restriction and the
+ * prose shift was meant to land on that same change of state — and the range
+ * restriction was retired on 18 Sep 2026, so the derivation had nothing left to
+ * point at. The threshold is named in tuning.ts instead of inferred from a
+ * mechanic that no longer exists; see the note there for why it stayed at Ember.
  *
- * The practical consequence is that this is not a rare state for flavour's
- * sake: oil starts at 12 and burns 1 every 2 turns, so a clean 20-turn run ends
- * at Ember. The last turns of a good run read in the dark register, which is
- * the right shape — the escape is the hard part, and it is the end.
- *
- * Reversible in one line if playtesting says the shift should wait for Dark.
+ * The old practical consequence — "oil burns 1 every 2 turns, so a clean 20-turn
+ * run ends at Ember" — is doubly stale: the passive burn is gone and so is the
+ * 20-turn cap. How often the dark register is actually reached under the new
+ * economy is a question for the 1i sweep's oil distribution, not for arithmetic.
  */
 export function isDarkProse(oil: number): boolean {
-  return oilBandFor(oil).tellRange === 'facing'
+  return isDarkBand(oilBandFor(oil).name)
 }
 
 /** Picks the variant. The single place the lit/dark choice is made. */
@@ -278,7 +276,7 @@ export function fill(text: string, slots: Slots = {}): string {
 // ---------------------------------------------------------------------------
 
 /** The room is the subject of the sentence. Full archetype x band prose. */
-export const ROOM_LED_ACTIONS = ['move', 'listen', 'search', 'read', 'rest'] as const
+export const ROOM_LED_ACTIONS = ['move', 'search', 'rest'] as const
 export type RoomLedAction = (typeof ROOM_LED_ACTIONS)[number]
 
 /**
@@ -302,6 +300,15 @@ export const SUBJECT_LED_ACTIONS = [
   'endure',
   'avoid',
   'dodge',
+  // FOCUS is subject-led rather than room-led, which is the one place it differs
+  // from the LISTEN it replaces. LISTEN was about the room — you went still and
+  // the chamber's acoustics handed you its doorways — so it carried a full
+  // archetype axis. FOCUS is about ONE DOORWAY (GDD 2.7), and a flooded gallery
+  // has nothing to say about the doorway you are squinting through that the
+  // doorway does not say better. Keeping the archetype axis would have meant 36
+  // beats restating the room where the subject is the threshold.
+  'focus',
+  'disarm',
 ] as const
 export type SubjectLedAction = (typeof SUBJECT_LED_ACTIONS)[number]
 
@@ -309,6 +316,23 @@ export const NARRATED_ACTIONS: readonly ActionKind[] = [
   ...ROOM_LED_ACTIONS,
   ...SUBJECT_LED_ACTIONS,
 ]
+
+/**
+ * Verbs whose prose is a NOTE rather than a band table, because they do not
+ * roll. New category, 1i; `dropHeart` is its only member.
+ *
+ * GDD 2.9.1 makes DROP HEART free and unconditional — there is no die, so there
+ * are no six bands, and giving it a `ByBand` table would mean authoring five
+ * beats nothing can ever emit. That is exactly the dead content 1g deleted from
+ * `HAZARD_NARRATION` and this file just deleted with LISTEN and READ.
+ *
+ * It is NOT deferred, and the distinction matters: `DEFERRED_ACTIONS` means "no
+ * player can choose this", which `tests/outcomes.test.ts` asserts and which
+ * would be false here. A note-led verb is fully narrated — the line lives in
+ * `NOTES.heartDropped` — so text parity holds (CLAUDE.md 2.3). What changes is
+ * only where the sentence is kept.
+ */
+export const NOTE_LED_ACTIONS: readonly ActionKind[] = ['dropHeart'] as const
 
 /**
  * Verbs deliberately left unwritten, with the reason. EMPTY as of 1g.
@@ -523,183 +547,38 @@ const MOVE: ByArchetype = {
 }
 
 // ---------------------------------------------------------------------------
-// LISTEN — GDD 2.8.1
+// LISTEN and READ are GONE — 18 Sep 2026, GDD 2.7.
 //
-// The escape valve: it reveals all four doorways truthfully for the price of a
-// turn, whatever the oil, and it costs no extra oil because charging twice
-// would close the valve.
+// Both verbs were retired and replaced by FOCUS, and their tables went with
+// them: 36 archetype x band beats each, 144 strings in total, deleted rather
+// than left to rot. That is the same call 1g made on `HAZARD_NARRATION`'s bloom
+// and snare rows — prose no player can ever reach is dead content that
+// `allBeats()` and the lint go on reporting forever, and the coverage matrix in
+// `npm run prose` stops meaning anything once it is scoring rooms nobody can
+// stand in.
 //
-// Mechanically LISTEN is one-valued. The tell-range override fires regardless
-// of band; the roll's only consequence is the critical-failure scent bonus.
-// These six bands describe how well you settled to it, and must not imply that
-// a good roll heard MORE — what LISTEN returns is the tell list, and the tell
-// list is honest at every band (`CLAUDE.md` 3).
+// It is worth naming what was lost, because it was good and it was not free.
+// LISTEN's table was the one place the six archetypes each got to sound like
+// themselves — a flooded gallery carrying sound across still water, a fungal
+// grotto eating it. FOCUS is subject-led and has twelve beats where LISTEN had
+// seventy-two, and the room is no longer what the sentence is about. If the
+// archetypes end up feeling thinner in play, this is where they went, and the
+// fix is to give FOCUS an archetype axis rather than to bring LISTEN back.
 // ---------------------------------------------------------------------------
-
-const LISTEN: ByArchetype = {
-  hewnChamber: {
-    criticalFailure: {
-      lit: 'You hold still to listen and your own pack shifts against the stone, which is the only thing you learn.',
-      dark: 'You hold still to listen and your own pack shifts against the stone, which is the only thing you learn.',
-    },
-    failure: {
-      lit: 'You listen. The square room gives you back your own breathing, flattened.',
-      dark: 'You listen. The square room gives you back your own breathing, flattened.',
-    },
-    mixed: {
-      lit: 'You listen, and the cut walls hand you the doorways one at a time, a beat late each.',
-      dark: 'You listen, and the cut walls hand you the doorways one at a time, a beat late each.',
-    },
-    success: {
-      lit: 'You stand still in the middle of the plain stone and let the four doorways report.',
-      dark: 'You stand still in the middle of the plain stone and let the four doorways report.',
-    },
-    strongSuccess: {
-      lit: 'Squared rock carries sound honestly. You get all four doorways clean, and the quiet between them.',
-      dark: 'Squared rock carries sound honestly. You get all four doorways clean, and the quiet between them.',
-    },
-    criticalSuccess: {
-      lit: 'You settle into the room until you are part of its acoustics, and it tells you everything it has.',
-      dark: 'You settle into the room until you are part of its acoustics, and it tells you everything it has.',
-    },
-  },
-  floodedGallery: {
-    criticalFailure: {
-      lit: 'You go still to listen, but your own ripples are still crossing the room and they drown the rest.',
-      dark: 'You go still to listen, but your own ripples are still crossing the room and they drown the rest.',
-    },
-    failure: {
-      lit: 'Water everywhere, dripping out of time with itself. You sort very little of it.',
-      dark: 'Water everywhere, dripping out of time with itself. You sort very little of it.',
-    },
-    mixed: {
-      lit: 'You wait for the surface to settle, and it does, and then the doorways come through under the drips.',
-      dark: 'You wait for the surface to settle, and it does, and then the doorways come through under the drips.',
-    },
-    success: {
-      lit: 'You let the water go flat and listen across it. Sound travels well over standing water.',
-      dark: 'You let the water go flat and listen across it. Sound travels well over standing water.',
-    },
-    strongSuccess: {
-      lit: 'The gallery is a drum skin and you have stopped hitting it. Every doorway arrives distinct.',
-      dark: 'The gallery is a drum skin and you have stopped hitting it. Every doorway arrives distinct.',
-    },
-    criticalSuccess: {
-      lit: 'You hold so still the water forgets you, and then it carries the whole labyrinth to you across its surface.',
-      dark: 'You hold so still the water forgets you, and then it carries the whole labyrinth to you across its surface.',
-    },
-  },
-  fungalGrotto: {
-    criticalFailure: {
-      lit: 'You hold your breath to listen and get a lungful of spores for it. The coughing is the report.',
-      dark: 'You hold your breath to listen and get a lungful of spores for it. The coughing is the report.',
-    },
-    failure: {
-      lit: 'The growth eats sound. You strain at it and come away with almost nothing.',
-      dark: 'The growth eats sound. You strain at it and come away with almost nothing.',
-    },
-    mixed: {
-      lit: 'You get the doorways, but every one of them arrives muffled through a room packed with soft bodies.',
-      dark: 'You get the doorways, but every one of them arrives muffled through a room packed with soft bodies.',
-    },
-    success: {
-      lit: 'You crouch among the caps and listen past them. The grotto muffles, but it does not lie.',
-      dark: 'You crouch among the caps and listen past them. The grotto muffles, but it does not lie.',
-    },
-    strongSuccess: {
-      lit: 'You work out which stalks are deadening which direction, listen around them, and get all four clean.',
-      dark: 'You work out which stalks are deadening which direction, listen around them, and get all four clean.',
-    },
-    criticalSuccess: {
-      lit: 'You go quiet enough that the grotto stops deadening and starts carrying, and everything arrives at once.',
-      dark: 'You go quiet enough that the grotto stops deadening and starts carrying, and everything arrives at once.',
-    },
-  },
-  collapsedShrine: {
-    criticalFailure: {
-      lit: 'You shift your weight to listen and a shard goes over somewhere behind you, and that is the whole of your turn.',
-      dark: 'You shift your weight to listen and a shard goes over somewhere behind you, and that is the whole of your turn.',
-    },
-    failure: {
-      lit: 'The rubble is still settling from a collapse that happened a very long time ago. It talks over everything.',
-      dark: 'The rubble is still settling from a collapse that happened a very long time ago. It talks over everything.',
-    },
-    mixed: {
-      lit: 'You listen between the settlings. The doorways come through, in the gaps, when the stone lets them.',
-      dark: 'You listen between the settlings. The doorways come through, in the gaps, when the stone lets them.',
-    },
-    success: {
-      lit: 'You find a block that has finished moving, stand on it, and let the four doorways report.',
-      dark: 'You find a block that has finished moving, stand on it, and let the four doorways report.',
-    },
-    strongSuccess: {
-      lit: 'You learn the shrine’s own rhythm of small collapses and listen in the spaces. All four, clean.',
-      dark: 'You learn the shrine’s own rhythm of small collapses and listen in the spaces. All four, clean.',
-    },
-    criticalSuccess: {
-      lit: 'The rubble goes quiet for you, the way a room does when it decides you are not the thing it was worried about.',
-      dark: 'The rubble goes quiet for you, the way a room does when it decides you are not the thing it was worried about.',
-    },
-  },
-  carvedHall: {
-    criticalFailure: {
-      lit: 'You listen, and the hall gives you back the sound of your own listening, twice, from both ends.',
-      dark: 'You listen, and the hall gives you back the sound of your own listening, twice, from both ends.',
-    },
-    failure: {
-      lit: 'Everything echoes here and the echoes arrive out of order. You cannot tell which doorway anything came from.',
-      dark: 'Everything echoes here and the echoes arrive out of order. You cannot tell which doorway anything came from.',
-    },
-    mixed: {
-      lit: 'You count the echoes back to their doorways. It works, and it takes the whole turn to do it.',
-      dark: 'You count the echoes back to their doorways. It works, and it takes the whole turn to do it.',
-    },
-    success: {
-      lit: 'You stand where the hall narrows, which is where it stops arguing with itself, and listen.',
-      dark: 'You stand where the hall narrows, which is where it stops arguing with itself, and listen.',
-    },
-    strongSuccess: {
-      lit: 'You use the hall instead of fighting it. Worked stone throws sound a long way, and all four doorways come in.',
-      dark: 'You use the hall instead of fighting it. Worked stone throws sound a long way, and all four doorways come in.',
-    },
-    criticalSuccess: {
-      lit: 'Whoever cut this hall cut it to carry a voice. You stand in the spot they meant and it gives you everything.',
-      dark: 'Whoever cut this hall cut it to carry a voice. You stand in the spot they meant and it gives you everything.',
-    },
-  },
-  heartChamber: {
-    criticalFailure: {
-      lit: 'You listen in a round room and every direction answers at once, which is the same as none of them answering.',
-      dark: 'You listen in a round room and every direction answers at once, which is the same as none of them answering.',
-    },
-    failure: {
-      lit: 'The chamber is too big and too still. Whatever you are listening for, it has room to be elsewhere.',
-      dark: 'The chamber is too big and too still. Whatever you are listening for, it has room to be elsewhere.',
-    },
-    mixed: {
-      lit: 'You get the doorways. You also get the sense, quite strongly, of being listened back at.',
-      dark: 'You get the doorways. You also get the sense, quite strongly, of being listened back at.',
-    },
-    success: {
-      lit: 'You stand off-centre, out of the round of the room, and let the four doorways report.',
-      dark: 'You stand off-centre, out of the round of the room, and let the four doorways report.',
-    },
-    strongSuccess: {
-      lit: 'You find the dead spot the curve makes, stand in it, and hear all four ways in with nothing overlapping.',
-      dark: 'You find the dead spot the curve makes, stand in it, and hear all four ways in with nothing overlapping.',
-    },
-    criticalSuccess: {
-      lit: 'The chamber holds its breath with you. For one turn you hear this place the way it hears itself.',
-      dark: 'The chamber holds its breath with you. For one turn you hear this place the way it hears itself.',
-    },
-  },
-}
 
 // ---------------------------------------------------------------------------
 // SEARCH — GDD 2.7, 2.8.1
 //
-// Costs an extra point of oil, which is what makes oil an action budget rather
-// than a second clock: it bites when you dawdle.
+// FOCUS's cheap, weak sibling as of 18 Sep 2026: the lowest price on the board
+// (`OIL_PRICE.search`) bought with the latest find gate in the game
+// (`SEARCH_FIND_BAND` — success, not mixed). These lines were written against
+// the old model, where SEARCH cost an extra point of oil on top of the passive
+// burn; the mixed row in particular reads as "you found it and it cost you",
+// which is still true, but the cost is now the band's own oil delta rather than
+// a surcharge. No line here claims a number, so none of them became false.
+//
+// The original note, kept because the reasoning still holds: it is what makes
+// oil an action budget rather than a second clock: it bites when you dawdle.
 //
 // Mechanically SEARCH is TWO-valued: mixed-or-better takes the oil flask if the
 // room has one, and that is all. There is no trinket, no map glimpse, no LCK
@@ -869,185 +748,17 @@ const SEARCH: ByArchetype = {
 }
 
 // ---------------------------------------------------------------------------
-// READ — GDD 2.7
-//
-// The poor cousin of a grellhound: one turn and one point of oil buys, once,
-// what the hound gives you every turn for free.
-//
-// Mechanically READ is TWO-valued — mixed-or-better names the hazards in the
-// adjacent rooms. That reveal is its OWN beat (`carvingsWarn`), one per hazard,
-// so these lines describe the reading and never the finding. A failed READ must
-// not imply the carvings were silent about a hazard that is there: the carvings
-// did not lie, you did not manage to read them, and the difference matters
-// because "tells never lie" is the invariant this verb sits closest to.
-// ---------------------------------------------------------------------------
-
-const READ: ByArchetype = {
-  hewnChamber: {
-    criticalFailure: {
-      lit: 'There is barely anything cut into a room like this, and what you make of the little there is, is nonsense.',
-      dark: 'There is barely anything cut into a room like this, and what your fingers make of the little there is, is nonsense.',
-    },
-    failure: {
-      lit: 'Tool marks are not writing, however long you stare at them.',
-      dark: 'Tool marks are not writing, however long you work along them.',
-    },
-    mixed: {
-      lit: 'Someone scratched a working note into the stone here. You get it, eventually, and the getting takes the whole turn.',
-      dark: 'Someone scratched a working note into the stone here. You get it, eventually, and the getting takes the whole turn.',
-    },
-    success: {
-      lit: 'A digger’s tally, cut where a digger would cut one. You read it.',
-      dark: 'A digger’s tally, cut where a digger would cut one. You read it off under your fingers.',
-    },
-    strongSuccess: {
-      lit: 'The marks are a shift record, and a shift record is a map of where the work went. You read it straight through.',
-      dark: 'The marks are a shift record, and a shift record is a map of where the work went. You read it straight through by touch.',
-    },
-    criticalSuccess: {
-      lit: 'Plain stone, plainly marked, by people who wanted the next shift to know what they knew. You take all of it.',
-      dark: 'Plain stone, plainly marked, by people who wanted the next shift to know what they knew. You take all of it.',
-    },
-  },
-  floodedGallery: {
-    criticalFailure: {
-      lit: 'The carvings run down below the waterline and what you drag up out of it is illegible and half dissolved.',
-      dark: 'The carvings run down below the waterline. What your hands find under there is soft-edged and says nothing.',
-    },
-    failure: {
-      lit: 'Water has been working on this wall longer than you have. Most of the letters are gone.',
-      dark: 'Water has been working on this wall longer than you have. Most of the letters are gone from under your fingers.',
-    },
-    mixed: {
-      lit: 'You get the sense of it: a warning, cut by someone standing where you are standing. The words themselves have washed off.',
-      dark: 'You get the sense of it: a warning, cut by someone standing where you are standing. The words themselves have washed off.',
-    },
-    success: {
-      lit: 'Above the waterline it is intact. You read the dry half.',
-      dark: 'Above the waterline it is intact. You read the dry half by hand.',
-    },
-    strongSuccess: {
-      lit: 'The dry half tells you what the wet half said, because whoever cut it repeated themselves. They were worried.',
-      dark: 'The dry half tells you what the wet half said, because whoever cut it repeated themselves. They were worried.',
-    },
-    criticalSuccess: {
-      lit: 'You read it the way it was meant to be read, standing in the water, and it is addressed to exactly the person doing that.',
-      dark: 'You read it the way it was meant to be read, standing in the water, and it is addressed to exactly the person doing that.',
-    },
-  },
-  fungalGrotto: {
-    criticalFailure: {
-      lit: 'You clear the growth off the wall to read it and take the top layer of stone with it. Whatever it said, it does not now.',
-      dark: 'You clear the growth off the wall to read it and take the top layer of stone with it. Whatever it said, it does not now.',
-    },
-    failure: {
-      lit: 'The caps have grown into the cuts. You cannot tell the writing from what is eating it.',
-      dark: 'The caps have grown into the cuts. Your fingers cannot tell the writing from what is eating it.',
-    },
-    mixed: {
-      lit: 'You scrape enough of it clear to read, and the scraping fills the room with spores and noise.',
-      dark: 'You scrape enough of it clear to read, and the scraping fills the room with spores and noise.',
-    },
-    success: {
-      lit: 'The growth has spared the deep cuts. You read what is left.',
-      dark: 'The growth has spared the deep cuts. You read what is left under your hands.',
-    },
-    strongSuccess: {
-      lit: 'The mushrooms avoid one panel entirely, which tells you something about the panel before you have read a word of it.',
-      dark: 'The mushrooms avoid one panel entirely, which tells you something about the panel before you have read a word of it.',
-    },
-    criticalSuccess: {
-      lit: 'You read it under the growth without disturbing the growth, and it turns out to have been written by someone who also did not want to.',
-      dark: 'You read it under the growth without disturbing the growth, and it turns out to have been written by someone who also did not want to.',
-    },
-  },
-  collapsedShrine: {
-    criticalFailure: {
-      lit: 'The inscription is in four pieces on the floor and you put them together wrong. What you get is worse than nothing.',
-      dark: 'The inscription is in four pieces on the floor and you put them together wrong. What you get is worse than nothing.',
-    },
-    failure: {
-      lit: 'Devotional script, and none of it in an order you can follow now the wall it was on is down.',
-      dark: 'Devotional script, and none of it in an order you can follow now the wall it was on is down.',
-    },
-    mixed: {
-      lit: 'You get it by hauling pieces of it around until they line up. It is loud work and it is somebody’s prayer.',
-      dark: 'You get it by hauling pieces of it around until they line up. It is loud work and it is somebody’s prayer.',
-    },
-    success: {
-      lit: 'You find the piece with the beginning on it and work outward from there.',
-      dark: 'You find the piece with the beginning on it and work outward from there.',
-    },
-    strongSuccess: {
-      lit: 'It is a list of what the shrine was for keeping out. You get far enough down it to be glad you read it.',
-      dark: 'It is a list of what the shrine was for keeping out. You get far enough down it to be glad you read it.',
-    },
-    criticalSuccess: {
-      lit: 'You read the whole of it, in order, and understand both what they were asking for and that they did not get it.',
-      dark: 'You read the whole of it, in order, and understand both what they were asking for and that they did not get it.',
-    },
-  },
-  carvedHall: {
-    criticalFailure: {
-      lit: 'There is far too much of it and you read the wrong register entirely — a whole wall of something that turns out to be a border.',
-      dark: 'There is far too much of it and you read the wrong register entirely — a whole wall of something that turns out to be a border.',
-    },
-    failure: {
-      lit: 'A hall of carvings is a hall of carvings. Knowing where to start is the skill, and you do not have it today.',
-      dark: 'A hall of carvings is a hall of carvings. Knowing where to start is the skill, and you do not have it today.',
-    },
-    mixed: {
-      lit: 'You find the register that matters and follow it. Following it means walking the hall, and the hall notes that you did.',
-      dark: 'You find the register that matters and follow it. Following it means walking the hall, and the hall notes that you did.',
-    },
-    success: {
-      lit: 'This is the room that was cut to be read. You read it.',
-      dark: 'This is the room that was cut to be read. You read it, walking with a hand on the wall.',
-    },
-    strongSuccess: {
-      lit: 'You notice the carvings are newer than the wall, and that changes who you think was warning whom.',
-      dark: 'The cuts are sharper than stone this old has any business being. That changes who you think was warning whom.',
-    },
-    criticalSuccess: {
-      lit: 'You take the hall at the pace it was cut for and it gives you the whole account, including the part added later, in a different hand.',
-      dark: 'You take the hall at the pace it was cut for and it gives you the whole account, including the part added later, in a different hand.',
-    },
-  },
-  heartChamber: {
-    criticalFailure: {
-      lit: 'The plinth has writing round its base. You get it badly wrong, and the version you end up with is reassuring.',
-      dark: 'The plinth has writing round its base. You get it badly wrong, and the version you end up with is reassuring.',
-    },
-    failure: {
-      lit: 'Whatever is cut round the plinth is not in any hand you know, and it was not cut for you.',
-      dark: 'Whatever is cut round the plinth is not in any hand you know, and it was not cut for you.',
-    },
-    mixed: {
-      lit: 'You work your way round the base reading it, which means going round the plinth, which means the chamber hears you do it.',
-      dark: 'You work your way round the base reading it, which means going round the plinth, which means the chamber hears you do it.',
-    },
-    success: {
-      lit: 'The inscription round the plinth is instructions. You read them.',
-      dark: 'The inscription round the plinth is instructions. You read them off under your fingers.',
-    },
-    strongSuccess: {
-      lit: 'Instructions, and a condition on them. You get both, which is more than the last person to stand here managed.',
-      dark: 'Instructions, and a condition on them. You get both, which is more than the last person to stand here managed.',
-    },
-    criticalSuccess: {
-      lit: 'You read every word cut into the plinth, and none of it says the thing on top of it should not be moved. It says who by.',
-      dark: 'You read every word cut into the plinth, and none of it says the thing on top of it should not be moved. It says who by.',
-    },
-  },
-}
-
-// ---------------------------------------------------------------------------
 // REST — GDD 2.7
 //
-// Costs an extra point of oil. Mechanically TWO-valued: mixed-or-better
-// recovers one point of health, capped at the maximum, and the recovery is its
-// own beat (`caughtBreath`) so a REST at full health narrates the rest without
-// claiming a heal that did not happen.
+// NO LONGER HEALS, because there is nothing to heal (GDD 2.6, 18 Sep 2026). It
+// is still mechanically two-valued and the beat is still `caughtBreath`; what a
+// good REST recovers is its own price — `OIL_PRICE_OVERRIDE.rest` charges 0.5
+// for a bad one and nothing for a mixed-or-better. It can never profit, or
+// sitting down would be how you fill a lamp.
+//
+// THESE LINES WERE AUDITED AGAINST THAT and they hold: not one of them claims a
+// wound closing or a hurt easing. They are about a person stopping for a moment,
+// which is what the verb always actually was.
 //
 // Resting is the only thing in the game the player does for its own sake, so
 // this is where the cozy half of cozy horror gets its turn. The room is still
@@ -1215,9 +926,7 @@ const REST: ByArchetype = {
 
 export const ROOM_LED_OUTCOMES: Record<RoomLedAction, ByArchetype> = {
   move: MOVE,
-  listen: LISTEN,
   search: SEARCH,
-  read: READ,
   rest: REST,
 }
 
@@ -1653,6 +1362,100 @@ const DODGE: ByBand = {
   },
 }
 
+
+/**
+ * FOCUS — GDD 2.7. One doorway, resolved.
+ *
+ * ONE-VALUED BY DESIGN, and this is the constraint every line below is written
+ * under: FOCUS always resolves the doorway it is pointed at. The band scales
+ * what the looking cost in oil and nothing else, because GDD 2.8.1 rejects
+ * probabilistic tells outright — a FOCUS that sometimes came back empty would be
+ * one, wearing a hat.
+ *
+ * So NO LINE HERE MAY IMPLY THAT A BETTER ROLL LEARNED MORE. What the six bands
+ * describe is how the looking went: how long you stood there, how much of
+ * yourself you spent on it, what it took out of you to hold still in a place
+ * like this with a doorway open in front of you. The thing on the far side is
+ * reported by the tell, not by these.
+ *
+ * `{direction}` is always supplied — `resolveFocus` passes it, because a beat
+ * about a doorway that cannot name which doorway is half a beat.
+ */
+const FOCUS: ByBand = {
+  criticalFailure: {
+    lit: 'You lean into the {direction} doorway and give it far longer than you meant to, and what comes back arrives all at once and late, and your hands are unsteady after.',
+    dark: 'You lean into the {direction} doorway and give it far longer than you meant to, and what comes back arrives all at once and late, and your hands are unsteady after.',
+  },
+  failure: {
+    lit: 'You work at the {direction} doorway until it gives, which takes more out of the lamp and out of you than a doorway ought to.',
+    dark: 'You work at the {direction} doorway until it gives, which takes more out of you than a doorway ought to.',
+  },
+  mixed: {
+    lit: 'You put yourself in the {direction} doorway and wait, and it tells you, and you are more tired standing there than you were walking.',
+    dark: 'You put yourself in the {direction} doorway and wait, and it tells you, and you are more tired standing there than you were walking.',
+  },
+  success: {
+    lit: 'You go still in the {direction} doorway and let it come to you.',
+    dark: 'You go still in the {direction} doorway and let it come to you.',
+  },
+  strongSuccess: {
+    lit: 'One breath held at the {direction} doorway and it gives itself up, cheaply, the way a thing does when you have asked it the right way.',
+    dark: 'One breath held at the {direction} doorway and it gives itself up, cheaply, the way a thing does when you have asked it the right way.',
+  },
+  criticalSuccess: {
+    lit: 'You read the {direction} doorway the way you would read a page, and it costs you nothing you notice — less than nothing; the lamp seems glad of the pause.',
+    dark: 'You read the {direction} doorway the way you would read a page in the dark, by every sense but the one you want, and the lamp seems glad of the pause.',
+  },
+}
+
+/**
+ * DISARM — GDD 2.7. The hazard, taken out of the room for good.
+ *
+ * The only verb in the game that changes the terrain, and the lines carry that:
+ * what the others buy is passage, and what this buys is a room that has stopped
+ * being dangerous — which matters on the way back out with the Heart, and
+ * nowhere else. Every line is written so it would still be true whether you were
+ * pulling a bloom up by the roots or taking a snare's mechanism apart, because
+ * one table serves both (`HAZARD_VERB_OUTCOMES.disarm`) and `{hazard}` is what
+ * names which.
+ *
+ * TWO-VALUED, and the split is not where the other hazard verbs put theirs: a
+ * mixed-or-better DISARM clears the thing permanently, and a failure gets you
+ * past it like any other verb but leaves it standing (`disarmClears`). So the
+ * bottom two lines must not sound like a clearing, and the top four must.
+ *
+ * It carries no stat, which is the one thing the prose deliberately does NOT
+ * dramatise — there is no line here about brute strength or quick fingers or a
+ * clever read, because any of those would imply a build the verb does not have.
+ * It is patient work anybody can do badly.
+ */
+const DISARM: ByBand = {
+  criticalFailure: {
+    lit: 'You get your hands into the {hazard} and it teaches you, at length and in detail, why it was left here. You come away past it and it is exactly as ready for the next person as it was for you.',
+    dark: 'You get your hands into the {hazard} and it teaches you, at length and in detail, why it was left here. You come away past it and it is exactly as ready for the next person as it was for you.',
+  },
+  failure: {
+    lit: 'You take it as far as you can take it and then you stop, because the next thing you do to it will be the wrong thing. You step through. It stays.',
+    dark: 'You take it as far as you can take it and then you stop, because the next thing you do to it will be the wrong thing. You step through. It stays.',
+  },
+  mixed: {
+    lit: 'It comes apart slowly and not tidily, and it takes a long time, and at the end of it the {hazard} is a mess on the floor instead of a thing waiting in a doorway.',
+    dark: 'It comes apart slowly and not tidily, and it takes a long time, and at the end of it the {hazard} is a mess on the floor instead of a thing waiting in a doorway.',
+  },
+  success: {
+    lit: 'You take the {hazard} apart. It will not be here on the way back.',
+    dark: 'You take the {hazard} apart by feel. It will not be here on the way back.',
+  },
+  strongSuccess: {
+    lit: 'You find the part of it that is holding the rest together, and after that it is only tidying. The room is a room now.',
+    dark: 'You find the part of it that is holding the rest together, and after that it is only tidying. The room is a room now.',
+  },
+  criticalSuccess: {
+    lit: 'Whoever set this knew what they were doing and so, it turns out, do you. You leave the {hazard} in pieces and the way back open behind you.',
+    dark: 'Whoever set this knew what they were doing and so, it turns out, do you. You leave the {hazard} in pieces and the way back open behind you.',
+  },
+}
+
 export const SUBJECT_LED_OUTCOMES: Record<SubjectLedAction, ByBand> = {
   sneak: SNEAK,
   fight: FIGHT,
@@ -1665,6 +1468,8 @@ export const SUBJECT_LED_OUTCOMES: Record<SubjectLedAction, ByBand> = {
   endure: ENDURE,
   avoid: AVOID,
   dodge: DODGE,
+  focus: FOCUS,
+  disarm: DISARM,
 }
 
 // ---------------------------------------------------------------------------
@@ -1752,7 +1557,6 @@ export type EndingBeat = Extract<
   | 'caughtWalkedInto'
   | 'caughtCameForYou'
   | 'killedByHazard'
-  | 'killedByDamage'
   | 'outOfTurns'
   | 'escaped'
   | 'retreated'
@@ -1773,10 +1577,10 @@ export const ENDINGS: Record<EndingBeat, Beat> = {
     lit: 'The floor was never there. The lamp goes with you, and the dark takes you both.',
     dark: 'The floor was never there. The lamp goes with you, and the dark takes you both.',
   },
-  killedByDamage: {
-    lit: 'You sit down to get your breath and find that getting it is no longer something you do. You do not get up.',
-    dark: 'You sit down to get your breath and find that getting it is no longer something you do. You do not get up.',
-  },
+  // `killedByDamage` was here, and it is gone with health (GDD 2.6). Its line —
+  // a lanternbearer sitting down to get a breath that does not come — was the
+  // only death in the game that was not the pit or the Wumpus, and there is no
+  // longer any road to it. Two deaths, both sudden, both announced beforehand.
   outOfTurns: {
     lit: 'The dark closes over the way you came, and then over the way you were going, and then over the rest of it.',
     dark: 'The dark closes over the way you came, and then over the way you were going, and then over the rest of it.',
@@ -1841,10 +1645,9 @@ export const NOTES: Record<NoteBeat, Beat> = {
     lit: 'The grellhound points itself {direction} and will not settle. There is a {hazard} that way.',
     dark: 'The grellhound points itself {direction} and will not settle. There is a {hazard} that way.',
   },
-  carvingsWarn: {
-    lit: 'The carvings warn of a {hazard} to the {direction}.',
-    dark: 'Under your fingers the carvings warn of a {hazard} to the {direction}.',
-  },
+  // `carvingsWarn` was READ's adjacent-hazard reveal and went with READ itself
+  // (GDD 2.7). What it did is now FOCUS's job, one doorway at a time and at a
+  // price, and the grellhound still does the free version for a companion slot.
   companionReveals: {
     lit: 'It goes to the doorway and back, and you understand it is telling you about the room to the {direction}.',
     dark: 'It goes to the doorway and back, and you understand it is telling you about the room to the {direction}.',
@@ -1878,19 +1681,27 @@ export const NOTES: Record<NoteBeat, Beat> = {
     dark: 'The {hazard} has the room, corner to corner, and your hands find no edge of it to walk along. Whatever you do about it, you do it here.',
   },
   /**
-   * The hazard reward (GDD 2.8). Written to make the flask DIEGETIC rather than
-   * a prize dispensed for a good roll: a bloom grows on what the labyrinth has
-   * already taken, and a snare is set over something worth setting it over. The
-   * player earned it by clearing the room, not by winning a lottery.
+   * Clearing a hazard well. REWRITTEN IN 1i, because the thing it described
+   * stopped happening: it used to announce the flask a strongSuccess-or-better
+   * paid out, and the flask reward is gone — the band's own oil delta pays now
+   * (`BAND_OIL_MULTIPLIER`), and a line promising an object the player will not
+   * find in their inventory is the game lying to them.
+   *
+   * What is left is the thing that is still true at the top bands: you came out
+   * of it with more lamp than you expected to.
    */
   hazardCleared: {
-    lit: 'On the far side of the {hazard}, where nobody has had reason to stand in a long time, there is a flask. Somebody else got this far.',
-    dark: 'On the far side of the {hazard}, where nobody has had reason to stand in a long time, your hand finds a flask. Somebody else got this far.',
+    lit: 'You come out of the {hazard} the right way round, with the lamp steadier than it has any business being.',
+    dark: 'You come out of the {hazard} the right way round, with the lamp steadier than it has any business being.',
   },
-  /** A driven-off creature leaves its scrapings behind. See FightOutcome. */
+  /**
+   * A driven-off creature leaves its scrapings behind. Same rewrite as
+   * `hazardCleared` and for the same reason: no flask is handed over any more,
+   * so the line no longer says one is.
+   */
   spoilsTaken: {
-    lit: 'The {creature} leaves in a hurry and leaves its hoard with it — a flask among the bones and the bottle caps.',
-    dark: 'The {creature} leaves in a hurry and leaves its hoard with it. You go through it by hand and come up with a flask.',
+    lit: 'The {creature} leaves in a hurry and leaves its hoard with it — bones, bottle caps, and a little oil nobody is going to miss.',
+    dark: 'The {creature} leaves in a hurry and leaves its hoard with it. You go through it by hand and come up with a little oil nobody is going to miss.',
   },
   /**
    * The loudest thing in the game (`SCENT.heartTaken` = 6) and the escalation
@@ -1901,6 +1712,41 @@ export const NOTES: Record<NoteBeat, Beat> = {
   heartTaken: {
     lit: 'You lift it off the plinth. It is heavier than a thing that size should be, and the whole labyrinth goes very quiet, the way a room does when someone has stopped talking to listen.',
     dark: 'You lift it off the plinth. It is heavier than a thing that size should be, and the whole labyrinth goes very quiet, the way a room does when someone has stopped talking to listen.',
+  },
+  /**
+   * A bad ENTER PORTAL (GDD 2.8). You surface holding a Heart you never went to
+   * find, in a labyrinth you have never seen, with the escalation already fired.
+   *
+   * It has to read as ARRIVING WRONG rather than as a reward: the same object,
+   * the same weight, none of the walk that earns it, and no map at all. DROP
+   * HEART is the way out of this and the line is written so that occurring to
+   * the player is natural rather than prompted.
+   */
+  heartThrustUpon: {
+    lit: 'You come up out of the hum with your hands already full. It is the same weight and the same wrongness and it is not the same Heart, and you have no idea at all which way the door is.',
+    dark: 'You come up out of the hum with your hands already full. It is the same weight and the same wrongness and it is not the same Heart, and you have no idea at all which way the door is.',
+  },
+  /**
+   * DROP HEART (GDD 2.9.1). The trail goes cold; the labyrinth stays awake.
+   *
+   * The line must not offer relief it cannot deliver. Setting it down cancels
+   * the carrying multiplier and nothing else — the tier jump and the reveal
+   * already happened and do not come back off — so this reads as putting down a
+   * noise, not as undoing a mistake.
+   */
+  heartDropped: {
+    lit: 'You set it down and step back from it, and the air stops being quite so interested in you. Nothing else changes. It knows you were here.',
+    dark: 'You set it down and step back from it, and the air stops being quite so interested in you. Nothing else changes. It knows you were here.',
+  },
+  /**
+   * DISARM cleared the hazard for good (GDD 2.7). The one line in the game that
+   * promises something about a room the player is going to walk back through,
+   * so it has to be exactly as true as it sounds: `Room.hazardCleared` is set,
+   * `activeHazardOf` returns null from here on, and the tell stops.
+   */
+  hazardDisarmed: {
+    lit: 'The {hazard} is finished. Not stepped around, not survived — finished, and the room behind you is only a room now.',
+    dark: 'The {hazard} is finished. Not stepped around, not survived — finished, and the room behind you is only a room now.',
   },
   wumpusEscalates: {
     lit: 'Somewhere below you, something that was taking its time stops taking its time.',
@@ -2020,6 +1866,34 @@ export function endingText(beat: EndingBeat, dark: boolean): string {
 
 export function noteText(beat: NoteBeat, dark: boolean, slots: Slots = {}): string {
   return fill(say(NOTES[beat], dark), slots)
+}
+
+/**
+ * What the lamp says about a doorway nothing has resolved. GDD 2.7, 2.8.1.
+ *
+ * ONE OF THE MOST-READ LINES IN THE GAME after 18 Sep, so it is one of the ones
+ * that has to be exactly right, and it is written under two hard constraints.
+ *
+ * It must not hint at WHAT. Every noun that would narrow it down — a draft, a
+ * sweetness, a skittering — is a tell the player has not paid for, and leaking
+ * one here would make `FOCUS` pointless and its price a lie.
+ *
+ * It must not read as a WARNING. Much of what leaks through a doorway is a
+ * creature that can be talked round, or the Heart itself; a line that sounded
+ * like danger would turn the whole map into a threat display and quietly undo
+ * the cozy half of cozy horror.
+ *
+ * So: presence, plainly, with the doorway named and nothing else claimed. It is
+ * not a `NoteBeat` because no reducer step emits it — it belongs to the sensing
+ * query, alongside `tellText`, and is emitted as its own `presence` event.
+ */
+export const PRESENCE: Beat = {
+  lit: 'Something comes through the {direction} doorway that you have not looked at properly.',
+  dark: 'Something comes through the {direction} doorway that you have not put a name to.',
+}
+
+export function presenceText(direction: Direction, dark: boolean): string {
+  return fill(say(PRESENCE, dark), { direction })
 }
 
 export function companionLossText(

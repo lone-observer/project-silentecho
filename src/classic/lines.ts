@@ -96,8 +96,14 @@ export function eventsToLines(events: readonly GameEvent[], labyrinth: Labyrinth
         out.push({ text: event.text, tone: 'tell' })
         break
 
-      case 'damage':
-        out.push({ text: `−${event.amount} health  ·  ${event.cause}`, tone: 'effect' })
+      case 'presence':
+        // The other half of the sensing pair, and it carries the same tone as a
+        // tell for the same reason: it is something the doorways told you. Like
+        // `tell`, the classic screen shows it on the doorway rather than in the
+        // scrollback, and filters this tone out there — but it goes through the
+        // projection so the log stays total and `AgentView.log` can choose
+        // differently.
+        out.push({ text: event.text, tone: 'tell' })
         break
 
       case 'oilChanged':

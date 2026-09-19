@@ -512,6 +512,10 @@ function assemble(
       id, x, y, archetype,
       exits: a.exits[id] as Partial<Record<Direction, RoomId>>,
       hazard,
+      // Nothing is generated already disarmed. Only a player's DISARM sets this,
+      // which is what keeps every difficulty contract a statement about what
+      // generation BUILT rather than about what survived contact (GDD 2.7).
+      hazardCleared: false,
       creature: a.pop.creatures[id] ?? null,
       // Nothing starts angry. Hostility is earned, by a critically failed tame.
       creatureHostile: false,

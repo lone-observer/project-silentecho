@@ -126,6 +126,45 @@ export interface Tell {
   readonly kind: TellKind
 }
 
+/**
+ * What the player knows about ONE doorway this turn. GDD 2.7, 2.8.1 (18 Sep 2026).
+ *
+ * The base lamp is honest about PRESENCE and silent about identity: it tells you
+ * a doorway has something behind it, never what. `FOCUS` buys the identity, one
+ * doorway at a time, capped per room by difficulty. So a doorway is now in one
+ * of four states and a renderer that cannot tell them apart is a renderer that
+ * lets the player read silence as safety:
+ *
+ *   tells non-empty, unresolved false   you know exactly what is through there
+ *   tells empty,     unresolved false   nothing is through there, and that is a FACT
+ *   tells empty,     unresolved true    something is, and you have not looked
+ *   suppressed true                     Confused: this doorway reports nothing at all
+ *
+ * The mixed case is real and load-bearing: the Wumpus's stench and a companion's
+ * informational passives are free and automatic, so a doorway can carry a
+ * resolved stench AND an unresolved remainder at the same time.
+ *
+ * THIS IS THE ENGINE ANSWERING 1h FINDING 1. `tellsFor` used to return the tells
+ * it found and nothing about the doorways it did not check, so "nothing is
+ * there", "your lamp does not reach" and "you are too Confused" arrived at every
+ * renderer as the same absence — and `src/classic/view.ts` re-derived the
+ * distinction by duplicating engine logic. `FOCUS` makes that gap fatal rather
+ * than merely untidy, so the set moves into the engine where CLAUDE.md 3's
+ * honesty guarantee can be true by construction instead of true if every
+ * renderer remembers.
+ */
+export interface DoorwaySense {
+  readonly direction: Direction
+  /** Exhaustive for this doorway when `unresolved` is false. Never partial lies. */
+  readonly tells: readonly Tell[]
+  /** Something leaks through that FOCUS has not resolved. */
+  readonly unresolved: boolean
+  /** Confused (GDD 2.8.2). Nothing is reported, and the player is told so. */
+  readonly suppressed: boolean
+  /** A FOCUS on this doorway is available: not already resolved, cap not spent. */
+  readonly focusable: boolean
+}
+
 export interface Room {
   readonly id: RoomId
   readonly x: number
@@ -134,6 +173,20 @@ export interface Room {
   /** Doorways to adjacent rooms. A missing direction is a wall. */
   readonly exits: Partial<Record<Direction, RoomId>>
   readonly hazard: HazardKind | null
+  /**
+   * A `DISARM` took this hazard out of the room permanently. GDD 2.7, 18 Sep 2026.
+   *
+   * A FLAG RATHER THAN NULLING `hazard`, deliberately. Generation's contracts —
+   * the pit-free route, the hazard-free route counts, the min safe detour — are
+   * all statements about where generation PUT things, and they must stay
+   * checkable after a player has been through. `activeHazard(room)` is what the
+   * rest of the engine asks; `hazard` remains the record of what was built here.
+   *
+   * This is not world drift and does not touch "terrain never drifts" (GDD
+   * 2.9.1): drift is what the labyrinth does on its own, and this is what the
+   * player did to it with a turn and a roll.
+   */
+  readonly hazardCleared: boolean
   readonly creature: CreatureKind | null
   /**
    * The creature in this room has turned on the player — the result of a
@@ -222,13 +275,21 @@ export interface Player {
   readonly roomId: RoomId
   /**
    * The direction of the player's last MOVE — what they are facing.
-   * At low oil only this doorway leaks a tell (GDD 2.8.1); null means they
-   * have not committed to a direction yet and sense all four.
+   *
+   * It no longer restricts tells: the oil-band tell-range mechanism is retired
+   * (GDD 2.8.1, 18 Sep 2026) and `FOCUS` replaced it. What still reads this is
+   * FLEE's retreat direction and the renderer's "(go back)" label.
    */
   readonly facing: Direction | null
   readonly stats: Stats
-  readonly health: number
-  readonly maxHealth: number
+  /**
+   * THERE IS NO HEALTH. Retired 18 Sep 2026 (GDD 2.6) — cost is margin, not
+   * injury, and every action's oil price scales with the band it rolls instead.
+   * Only a pit and the Wumpus end a run; nothing else "hurts" you.
+   *
+   * Oil is fractional now (the price table prices a MOVE below 1), so nothing
+   * may assume this is an integer. `oilBandFor` floors before it looks up.
+   */
   readonly oil: number
   readonly maxOil: number
   readonly fortune: number
@@ -247,7 +308,16 @@ export interface Player {
 
 export type Action =
   | { readonly kind: 'move'; readonly direction: Direction }
-  | { readonly kind: 'listen' }
+  /**
+   * Resolve ONE doorway's tells. GDD 2.7, 18 Sep 2026.
+   *
+   * Replaces `LISTEN` (which bought back tell range in the dark) and `READ`
+   * (which named adjacent hazards) with one verb that does the job both were
+   * circling. It carries a direction because it resolves a doorway, not a room —
+   * that is the whole difference from `LISTEN`, and it is why difficulty can cap
+   * how many of them a room is worth.
+   */
+  | { readonly kind: 'focus'; readonly direction: Direction }
   | { readonly kind: 'search' }
   /**
    * The four hazard verbs. GDD 2.8: every hazard but the pit offers a choice,
@@ -267,15 +337,32 @@ export type Action =
   | { readonly kind: 'endure' }
   | { readonly kind: 'avoid' }
   | { readonly kind: 'dodge' }
+  /**
+   * Clear a bloom or snare PERMANENTLY, rather than getting past it once.
+   * GDD 2.7, 18 Sep 2026. Offered alongside that hazard's own two verbs.
+   *
+   * The only stat-agnostic roll in the game — see `STAT_AGNOSTIC_ACTIONS` in
+   * data/tuning.ts for why that is the point rather than an omission.
+   */
+  | { readonly kind: 'disarm' }
   | { readonly kind: 'sneak'; readonly direction: Direction }
   | { readonly kind: 'fight' }
   | { readonly kind: 'tame' }
   | { readonly kind: 'flee'; readonly direction: Direction }
   | { readonly kind: 'use'; readonly item: string }
   | { readonly kind: 'send'; readonly direction: Direction }
-  | { readonly kind: 'read' }
   | { readonly kind: 'enterPortal' }
   | { readonly kind: 'rest' }
+  /**
+   * Set the Heart back down. Free, unconditional, no roll (GDD 2.9.1).
+   *
+   * Cancels the carrying scent multiplier and NOTHING ELSE: the Wumpus tier jump
+   * and the one-turn position reveal fired when the Heart was first lifted, and
+   * the labyrinth does not un-notice. It is the release valve for a bad
+   * ENTER PORTAL roll, which lands you already holding a Heart you never went
+   * looking for.
+   */
+  | { readonly kind: 'dropHeart' }
 
 export type ActionKind = Action['kind']
 
@@ -328,6 +415,30 @@ export interface GameState {
    * `encounterRoomId` can never both be live.
    */
   readonly hazardRoomId: RoomId | null
+  /**
+   * Which doorways `FOCUS` has resolved, per room, for the rest of the run.
+   * GDD 2.7 (18 Sep 2026): difficulty caps how many doorways a room is worth.
+   *
+   * PERMISSION, NOT KNOWLEDGE. What is stored is which doorways you have paid to
+   * look through; what is through them is recomputed from the live world every
+   * turn. That distinction is the honesty guarantee (CLAUDE.md 3): creatures
+   * wander and the Wumpus moves, so a remembered ANSWER would go stale and start
+   * lying, while a remembered PERMISSION cannot.
+   *
+   * Keyed per room for the whole run rather than reset on arrival, so walking
+   * out of a Ravening room and back in does not buy a second look. "Capped per
+   * room" is read literally.
+   */
+  readonly focusedByRoom: Readonly<Record<RoomId, readonly Direction[]>>
+  /**
+   * The Heart has left its plinth at least once this run.
+   *
+   * Separate from `player.carryingHeart` because `DROP HEART` exists: the tier
+   * jump and the position reveal are one-time consequences of the labyrinth
+   * NOTICING (GDD 2.10), and setting the Heart down and picking it back up must
+   * not fire them twice.
+   */
+  readonly heartTaken: boolean
   /** Every action taken, in order. With the seed, this replays the run exactly. */
   readonly actionLog: readonly Action[]
 }
@@ -356,7 +467,8 @@ export type NarrationBeat =
   | 'caughtWalkedInto'
   | 'caughtCameForYou'
   | 'killedByHazard'
-  | 'killedByDamage'
+  // 'killedByDamage' retired 18 Sep 2026 with health itself (GDD 2.6). Only a
+  // pit and the Wumpus end a run, so nothing could ever have emitted it again.
   | 'outOfTurns'
   | 'escaped'
   | 'retreated'
@@ -373,15 +485,22 @@ export type NarrationBeat =
   | 'caughtBreath'
   | 'grellhoundGrowls'
   | 'grellhoundReveals'
-  | 'carvingsWarn'
+  // 'carvingsWarn' retired 18 Sep 2026: it was READ's adjacent-hazard reveal,
+  // and READ is gone. The grellhound still has its own version of the beat.
   | 'companionReveals'
   | 'braveOverride'
   | 'creatureWanders'
   | 'creatureFound'
   | 'hazardBlocks'
   | 'hazardCleared'
+  /** DISARM took it out of the room for good, not merely got you past it. */
+  | 'hazardDisarmed'
   | 'spoilsTaken'
   | 'heartTaken'
+  /** A bad ENTER PORTAL: you surface already holding the new labyrinth's Heart. */
+  | 'heartThrustUpon'
+  /** DROP HEART. The trail goes cold; the labyrinth stays awake. */
+  | 'heartDropped'
   | 'wumpusEscalates'
   | 'confusedSettles'
   | 'confusedLifts'
@@ -415,7 +534,15 @@ export type GameEvent =
     }
   | { readonly kind: 'moved'; readonly from: RoomId; readonly to: RoomId; readonly direction: Direction }
   | { readonly kind: 'tell'; readonly tell: Tell; readonly text: string }
-  | { readonly kind: 'damage'; readonly amount: number; readonly cause: string }
+  /**
+   * Something leaks through this doorway and you have not resolved what.
+   *
+   * The event-stream half of `DoorwaySense.unresolved`, so text parity holds
+   * (CLAUDE.md 2.3): presence is a fact the player learns, so the event stream
+   * has to be able to say it. A doorway with nothing behind it emits neither
+   * this nor a `tell`, which is what makes silence mean something again.
+   */
+  | { readonly kind: 'presence'; readonly direction: Direction; readonly text: string }
   | {
       readonly kind: 'oilChanged'
       readonly delta: number
@@ -483,10 +610,25 @@ export interface AgentView {
   readonly turn: number
   readonly maxTurns: number
   readonly room: string
-  readonly tells: readonly { direction: Direction; kind: TellKind; text: string }[]
+  /**
+   * One entry per doorway, not one per tell — the shape `tellsFor` returns.
+   *
+   * A model that is handed only the tells that fired cannot tell an empty
+   * doorway from an unresolved one, which is the same defect 1h found in the
+   * text renderer, and it would make `FOCUS` unplayable for an agent: there
+   * would be nothing to decide which doorway is worth the turn.
+   */
+  readonly doorways: readonly {
+    direction: Direction
+    tells: readonly { kind: TellKind; text: string }[]
+    unresolved: boolean
+    suppressed: boolean
+    focusable: boolean
+  }[]
   readonly legalActions: readonly { action: Action; label: string; dc?: number }[]
   readonly status: {
-    readonly health: number
+    // `health` removed 18 Sep 2026 — see GDD 2.6 and 2.15. One fewer thing for a
+    // model to track, for free (GDD 2.17's status budget).
     readonly oil: number
     readonly fortune: number
     readonly companion: CreatureKind | null

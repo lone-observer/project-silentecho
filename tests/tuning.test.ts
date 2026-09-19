@@ -1,15 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import {
   ACTION_DC,
+  BAND_OIL_MULTIPLIER,
+  DIFFICULTY,
   HAZARD_COUNTS,
   OIL,
   OIL_BANDS,
+  OIL_PRICE,
+  oilCostFor,
+  RUN,
   SCENT_BY_ACTION,
   TAME_DC,
+  wumpusReach,
   WUMPUS_TIERS,
   oilBandFor,
 } from '../src/engine/data/tuning.ts'
 import type { Action, ActionKind, CreatureKind, HazardKind, WumpusTier } from '../src/engine/types.ts'
+import { BAND_ORDER } from '../src/engine/types.ts'
 
 /**
  * Exhaustive lists, derived from the union types. If someone adds an action,
@@ -17,8 +24,9 @@ import type { Action, ActionKind, CreatureKind, HazardKind, WumpusTier } from '.
  * below then force it into every tuning table.
  */
 const ALL_ACTIONS = [
-  'move', 'listen', 'search', 'force', 'endure', 'avoid', 'dodge', 'sneak',
-  'fight', 'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
+  'move', 'focus', 'search', 'force', 'endure', 'avoid', 'dodge', 'disarm',
+  'sneak', 'fight', 'tame', 'flee', 'use', 'send', 'enterPortal', 'rest',
+  'dropHeart',
 ] as const
 const ALL_CREATURES: readonly CreatureKind[] = [
   'goblin', 'lumewing', 'grellhound', 'quietOne',
@@ -82,14 +90,22 @@ describe('oil bands', () => {
     }
   })
 
-  it('restrict tell RANGE only in the two deepest bands (GDD 2.8.1)', () => {
-    // The first oil threshold is purely arithmetic; the deep one changes state.
-    expect(oilBandFor(12).tellRange).toBe('all')
-    expect(oilBandFor(7).tellRange).toBe('all')
-    expect(oilBandFor(6).tellRange).toBe('all')
-    expect(oilBandFor(3).tellRange).toBe('all')
-    expect(oilBandFor(2).tellRange).toBe('facing')
-    expect(oilBandFor(0).tellRange).toBe('facing')
+  // The tell-range test that stood here is gone with the mechanism it guarded:
+  // `OilBand.tellRange` restricted Ember and Dark to the facing doorway, and
+  // FOCUS replaced it outright on 18 Sep 2026 (GDD 2.8.1). What replaces the
+  // test is the FOCUS-cap coverage further down, which checks the thing that
+  // now gates information.
+
+  it('never gate INFORMATION on oil — only the roll and the lantern (GDD 2.8.1)', () => {
+    // The surviving half of the darkness decision, as an assertion rather than a
+    // comment. Oil may make you worse at things and may shrink what you can see
+    // in the diorama; it may not decide what a doorway is willing to tell you.
+    // If a band ever grows a field that gates a tell, this fails.
+    for (const b of OIL_BANDS) {
+      expect(Object.keys(b).sort()).toEqual(
+        ['label', 'lanternRadius', 'max', 'min', 'modifier', 'name'],
+      )
+    }
   })
 
   it('every modifier carries a label — unlabelled modifiers are a bug', () => {
@@ -105,17 +121,122 @@ describe('oil bands', () => {
   })
 })
 
-describe('oil budget', () => {
-  it('outlasts a clean run — oil is an action budget, not a second death clock', () => {
-    const passiveBurn = Math.floor(20 / OIL.burnEveryNTurns)
-    expect(OIL.starting).toBeGreaterThan(passiveBurn)
+describe('the oil price model (GDD 2.6, 2.8.1)', () => {
+  it('prices every action', () => {
+    for (const a of ALL_ACTIONS) expect(OIL_PRICE[a]).toBeTypeOf('number')
   })
 
-  it('only charges extra for actions that linger', () => {
-    for (const action of Object.keys(OIL.extraCost) as ActionKind[]) {
-      expect(ALL_ACTIONS).toContain(action)
+  it('charges more for a worse roll, all the way down', () => {
+    // The shape of "cost is margin, not injury". Monotone, with no flat spot in
+    // the middle where a worse roll stopped costing more.
+    for (let i = 1; i < BAND_ORDER.length; i++) {
+      const worse = BAND_ORDER[i - 1]!
+      const better = BAND_ORDER[i]!
+      expect(BAND_OIL_MULTIPLIER[worse]).toBeGreaterThan(BAND_OIL_MULTIPLIER[better])
     }
-    expect(OIL.extraCost.listen).toBeUndefined() // LISTEN is the dark-band escape valve
+  })
+
+  it('pays a little back at the top two bands and nowhere else', () => {
+    expect(BAND_OIL_MULTIPLIER.strongSuccess).toBeLessThan(0)
+    expect(BAND_OIL_MULTIPLIER.criticalSuccess).toBeLessThan(0)
+    for (const band of ['criticalFailure', 'failure', 'mixed', 'success'] as const) {
+      expect(BAND_OIL_MULTIPLIER[band]).toBeGreaterThan(0)
+    }
+  })
+
+  /**
+   * THE ANTI-FARMING INVARIANT, and the one test in this file worth breaking on
+   * purpose to check.
+   *
+   * 1g's first reward model paid a whole flask at mixed-or-better, measured at
+   * +1.75 oil per bloom — every hazard in the labyrinth an oil farm. That was
+   * fixed by moving the gate to a rarer band, which works until someone widens
+   * the band again. This fixes it by SHAPE: the best possible outcome of an
+   * action returns strictly less than that action's own price, so no sequence of
+   * good rolls on any verb is ever a net source of oil.
+   */
+  it('never lets a perfect roll return more than the action costs to attempt', () => {
+    for (const a of ALL_ACTIONS) {
+      const best = -oilCostFor(a, 'criticalSuccess')
+      expect(best, `${a} pays out more than it costs — that is an oil farm`)
+        .toBeLessThan(OIL_PRICE[a] + 1e-9)
+    }
+  })
+
+  it('never lets REST profit — sitting down is not how you fill a lamp', () => {
+    for (const band of BAND_ORDER) {
+      expect(oilCostFor('rest', band)).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('leaves DROP HEART free at every band (GDD 2.9.1)', () => {
+    for (const band of BAND_ORDER) expect(oilCostFor('dropHeart', band)).toBe(0)
+  })
+
+  /**
+   * OIL IS ALLOWED TO BIND NOW, AND THAT IS THE POINT — but it must not be a
+   * death clock, and the difference is what this asserts.
+   *
+   * GDD 2.2.1 deliberately makes Drowsing and Stirring oil-constrained rather
+   * than turn-constrained, so a player who spends all 50 turns walking SHOULD
+   * run out of lamp; the old "starting oil outlasts a clean run" claim is from
+   * the 20-turn game and would now be asserting the opposite of the design.
+   *
+   * What has to stay true is that running dry is survivable and reachable-back:
+   * a lamp at zero is a -6 and a dark lantern (GDD 2.8.1, "0 oil is not a third
+   * death"), and a single flask has to buy back a meaningful stretch of walking
+   * or the ambient flask count is decoration.
+   */
+  it('lets oil bind without becoming a death clock', () => {
+    const perMove = oilCostFor('move', 'mixed')
+    expect(perMove).toBeGreaterThan(0)
+    // A flask buys at least six clean moves back — enough that finding one
+    // changes a route decision rather than merely deferring the inevitable.
+    expect(OIL.flaskValue / perMove).toBeGreaterThanOrEqual(6)
+    // And the starting lamp alone covers a real expedition: at least as many
+    // moves as the deepest Heart is rooms away, there and back, twice over.
+    expect(OIL.starting / perMove).toBeGreaterThanOrEqual(RUN.maxHeartDistance * 2)
+  })
+})
+
+describe('the FOCUS cap (GDD 2.7)', () => {
+  it('gives every difficulty a cap, and tightens it as difficulty rises', () => {
+    const caps = (['drowsing', 'stirring', 'hunting', 'ravening'] as const).map(
+      (d) => DIFFICULTY[d].focusesPerRoom,
+    )
+    for (const c of caps) expect(c).toBeGreaterThan(0)
+    for (let i = 1; i < caps.length; i++) {
+      expect(caps[i]!).toBeLessThanOrEqual(caps[i - 1]!)
+    }
+  })
+
+  it('lets the two teaching difficulties resolve a whole room', () => {
+    expect(DIFFICULTY.drowsing.focusesPerRoom).toBeGreaterThanOrEqual(4)
+    expect(DIFFICULTY.stirring.focusesPerRoom).toBeGreaterThanOrEqual(4)
+  })
+
+  it('forces a guess at the top two (GDD 2.2.1)', () => {
+    expect(DIFFICULTY.hunting.focusesPerRoom).toBeLessThan(4)
+    expect(DIFFICULTY.ravening.focusesPerRoom).toBeLessThan(4)
+  })
+})
+
+describe('turn caps (GDD 2.2.1)', () => {
+  it('give the easy difficulties room to explore and tighten toward the top', () => {
+    const turns = (['drowsing', 'stirring', 'hunting', 'ravening'] as const).map(
+      (d) => DIFFICULTY[d].maxTurns,
+    )
+    for (let i = 1; i < turns.length; i++) {
+      expect(turns[i]!).toBeLessThan(turns[i - 1]!)
+    }
+  })
+
+  it('never place the Wumpus further than it can travel in the budget', () => {
+    // The 1b defect, re-asserted against the NEW caps: a start band whose
+    // ceiling exceeds the tier's reach places a monster that cannot arrive.
+    for (const d of ['drowsing', 'stirring', 'hunting', 'ravening'] as const) {
+      expect(DIFFICULTY[d].wumpusStartDistance[1]).toBeLessThanOrEqual(wumpusReach(d))
+    }
   })
 })
 

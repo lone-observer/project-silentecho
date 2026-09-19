@@ -48,7 +48,7 @@ import type {
   OutcomeBand,
   RoomArchetype,
 } from '../src/engine/types.ts'
-import { ENTRY_HAZARDS, OIL_BANDS } from '../src/engine/data/tuning.ts'
+import { DARK_PROSE_BAND, ENTRY_HAZARDS, OIL_BANDS } from '../src/engine/data/tuning.ts'
 import {
   allBeats,
   ARCHETYPES,
@@ -62,6 +62,7 @@ import {
   HAZARD_WORD,
   isDarkProse,
   NARRATED_ACTIONS,
+  NOTE_LED_ACTIONS,
   NOTES,
   outcomeBeat,
   ROOM_LED_ACTIONS,
@@ -83,8 +84,9 @@ import {
  * guard bites.
  */
 const ALL_ACTION_KINDS = [
-  'move', 'listen', 'search', 'force', 'endure', 'avoid', 'dodge', 'sneak',
-  'fight', 'tame', 'flee', 'use', 'send', 'read', 'enterPortal', 'rest',
+  'move', 'focus', 'search', 'force', 'endure', 'avoid', 'dodge', 'disarm',
+  'sneak', 'fight', 'tame', 'flee', 'use', 'send', 'enterPortal', 'rest',
+  'dropHeart',
 ] as const
 
 // Compile-time guard, in both directions: every ActionKind is listed, and
@@ -207,16 +209,35 @@ describe('coverage — the lookup is total', () => {
    * prose or written down why they have not. Removing FORCE from
    * DEFERRED_ACTIONS without writing its prose fails it too.
    */
-  it('classifies every ActionKind as either narrated or deliberately deferred', () => {
-    const classified = new Set<ActionKind>([...NARRATED_ACTIONS, ...DEFERRED_ACTIONS])
+  it('classifies every ActionKind as narrated, note-led, or deliberately deferred', () => {
+    // THREE CATEGORIES SINCE 1i, not two. `dropHeart` does not roll (GDD 2.9.1),
+    // so it has no six bands to fill and a `ByBand` table for it would be five
+    // beats nothing can emit — the dead content this file deleted along with
+    // LISTEN and READ. It is still fully narrated: its line is `NOTES.heartDropped`.
+    //
+    // Note-led is NOT deferred, and the distinction is the whole point of
+    // keeping them apart: deferred means "no player can ever choose this", which
+    // the assertion below still enforces and which would be false here.
+    const classified = new Set<ActionKind>([
+      ...NARRATED_ACTIONS,
+      ...NOTE_LED_ACTIONS,
+      ...DEFERRED_ACTIONS,
+    ])
     for (const kind of ALL_ACTION_KINDS) {
-      expect(classified.has(kind), `${kind} is neither narrated nor deferred`).toBe(true)
+      expect(classified.has(kind), `${kind} is neither narrated, note-led nor deferred`).toBe(true)
     }
     expect(classified.size).toBe(ALL_ACTION_KINDS.length)
     // Disjoint: a verb cannot be both written and deferred.
     for (const kind of DEFERRED_ACTIONS) {
       expect(NARRATED_ACTIONS).not.toContain(kind)
+      expect(NOTE_LED_ACTIONS).not.toContain(kind)
     }
+    // A note-led verb has a note to be led by. Without this the category would
+    // be a hole in the coverage assertion rather than a third way of writing.
+    for (const kind of NOTE_LED_ACTIONS) {
+      expect(NARRATED_ACTIONS).not.toContain(kind)
+    }
+    expect(NOTES.heartDropped, 'dropHeart is note-led and has no note').toBeDefined()
     // Room-led and subject-led partition the narrated set.
     expect([...ROOM_LED_ACTIONS, ...SUBJECT_LED_ACTIONS].sort()).toEqual([...NARRATED_ACTIONS].sort())
   })
@@ -256,8 +277,10 @@ describe('coverage — the lookup is total', () => {
     // GDD 2.17. Retreat is the one this exists for — it shipped through 1e as a
     // placeholder, which made the second-best outcome in the game read as the
     // run simply stopping.
+    // `killedByDamage` is gone, 18 Sep 2026: health is retired and only a pit
+    // and the Wumpus end a run (GDD 2.6), so nothing could reach it again.
     const endings: NarrationBeat[] = [
-      'caughtWalkedInto', 'caughtCameForYou', 'killedByHazard', 'killedByDamage',
+      'caughtWalkedInto', 'caughtCameForYou', 'killedByHazard',
       'outOfTurns', 'escaped', 'retreated',
     ]
     for (const beat of endings) {
@@ -379,16 +402,26 @@ describe('quality — the ways a full table still rots', () => {
     expect(CREATURE_WORD.quietOne).toBe('Quiet One')
   })
 
-  it('puts the prose register change where the oil table puts the range change', () => {
-    // Derived from OIL_BANDS rather than restated, so moving the threshold in
-    // one place moves it in both. GDD 2.8.1.
-    for (const band of OIL_BANDS) {
-      const oil = band.min
-      expect(isDarkProse(oil), `oil ${oil} (${band.name})`).toBe(band.tellRange === 'facing')
+  it('puts the prose register change at the band tuning.ts names', () => {
+    // Was derived from `OIL_BANDS[].tellRange`, which is retired along with the
+    // oil-band tell-range mechanism (GDD 2.8.1, 18 Sep 2026). The threshold is
+    // now stated once, in `DARK_PROSE_BAND`, and read here rather than restated
+    // — so moving it still moves it in both places.
+    // AT OR BELOW the named band, not equal to it. Equality would put a player
+    // at zero oil back into the lit register — reading about what they could
+    // see, in the dark — which is what the monotonicity check below catches.
+    const threshold = OIL_BANDS.findIndex((b) => b.name === DARK_PROSE_BAND)
+    for (const [i, band] of OIL_BANDS.entries()) {
+      expect(isDarkProse(band.min), `oil ${band.min} (${band.name})`).toBe(i >= threshold)
     }
-    expect(isDarkProse(12)).toBe(false)
-    expect(isDarkProse(2)).toBe(true)
-    expect(isDarkProse(0)).toBe(true)
+    // And the register only ever gets darker as the lamp does: no band above the
+    // threshold may read dark, and none below it may read lit.
+    let seenDark = false
+    for (const band of OIL_BANDS) {
+      const dark = isDarkProse(band.min)
+      if (seenDark) expect(dark, `${band.name} must stay dark once the register has turned`).toBe(true)
+      if (dark) seenDark = true
+    }
   })
 })
 
@@ -485,35 +518,36 @@ describe('use — the reducer speaks only from the table', () => {
     // check protects — if you add one to this list, you are saying out loud
     // that it is unverified.
     //
-    //   grellhoundGrowls  needs a tamed grellhound ALIVE within radius 2 of
-    //                     the Wumpus
     //   goblinScrounges   needs a tamed goblin and a 10% roll
     //   braveOverride     a natural 20 on a tame that also succeeds
     //   actionUnavailable only an agent asking for something illegal
     //
-    // THREE OF THE FOUR STILL NEED A COMPANION, and neither policy ever tames
-    // deliberately. The companion system remains the least-exercised part of
-    // the reducer — carried to 1i, whose heuristic bot should tame on purpose.
+    // WAS SEVEN BEATS, IS NOW THREE, and the movement is worth reading rather
+    // than just updating. Three came OFF the list because the 1i economy gave
+    // these policies longer runs to spend: 50 turns instead of 20 means a
+    // grellhound tamed early is still alive when the Wumpus closes, so
+    // `grellhoundGrowls` and `grellhoundReveals` finally fire, and `spoilsTaken`
+    // with them. That is the turn-cap change showing up somewhere nobody aimed
+    // it — the companion system has been the least-exercised part of the reducer
+    // since 1d, and it is less so now for free.
     //
-    // WAS SIX BEATS, IS NOW FOUR, and nobody aimed at either of the two that
-    // came off. Making bloom and snare cost a verb changed what these policies
-    // spend a turn on, which changed where the RNG stream lands, which got a
-    // grellhound and a skittish companion tamed somewhere in the 320 runs.
-    // `grellhoundReveals` and `skittishUpkeep` are now genuinely exercised.
+    // NOTHING CAME ON, which is the half worth checking rather than assuming.
+    // `SEARCH_FIND_BAND` moved from mixed-or-better to success-or-better in this
+    // step — GDD 2.7's "finds loot at lower reliability", the price of SEARCH
+    // being FOCUS's cheap sibling — and a sweep with a narrower route policy
+    // does lose `foundFlask` to it. These two still reach it, so it stays
+    // verified; the near miss is flagged in PHASE-1-PROGRESS as the first place
+    // to look if SEARCH stops being worth a turn.
     //
     // That is the ledger doing exactly its job: coverage here is stated rather
     // than assumed, so a change three modules away that silently improved it
     // showed up as a failing test instead of as nothing at all. Note also which
-    // direction it moved — an incidental RNG shift can take a beat OFF this
-    // list as easily as it could have put one on, and only one of those two
-    // gets noticed if the list is not asserted in both directions.
+    // direction it moved — an incidental shift can take a beat OFF this list as
+    // easily as put one on, and only one of those two gets noticed if the list
+    // is not asserted in both directions.
     const unreached: NarrationBeat[] = [
-      'grellhoundGrowls',
-      'grellhoundReveals',
       'goblinScrounges',
-      'skittishUpkeep',
       'braveOverride',
-      'spoilsTaken',
       'actionUnavailable',
     ]
     for (const beat of unreached) {

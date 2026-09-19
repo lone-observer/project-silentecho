@@ -172,7 +172,10 @@ describe('taming', () => {
     const r = resolveEncounter('tame', 'criticalFailure', ctx(l), createRng(1))
     expect(r.hostile).toBe(true)
     expect(r.creatureRemains).toBe(true)
-    expect(r.damage).toBeGreaterThan(0)
+    // It used to cost a point of health as well. Health is retired (GDD 2.6);
+    // what a critically failed tame costs now is the oil the band charges and
+    // the fact that the thing is standing in front of you and can never be
+    // tamed again, which was always the part that mattered.
     expect(r.companionGained).toBeNull()
   })
 
@@ -352,21 +355,33 @@ describe('companion passives', () => {
 })
 
 describe('skittish companions', () => {
-  it('bolt on DAMAGE, never on a failed roll (GDD 2.9)', () => {
+  /**
+   * THE TRIGGER MOVED IN 1i, from damage taken to a critical failure, because
+   * health stopped existing (GDD 2.6) and a trigger nothing can fire is worse
+   * than no trigger at all — the GDD goes on claiming the mechanic is there.
+   *
+   * What these tests still guard is the reasoning behind the ORIGINAL choice,
+   * which is the part worth keeping: an ordinary failed roll must NOT scare the
+   * animal off, because failures are common and that would make a Mixed Success
+   * tame worthless.
+   */
+  it('bolt on a CRITICAL failure, never on an ordinary one (GDD 2.9)', () => {
     const skittish = companion({ skittish: true })
-    expect(skittishBolts(skittish, 1, false)).toBe(true)
-    expect(skittishBolts(skittish, 0, false)).toBe(false)
+    expect(skittishBolts(skittish, 'criticalFailure', false)).toBe(true)
+    expect(skittishBolts(skittish, 'failure', false)).toBe(false)
+    expect(skittishBolts(skittish, 'mixed', false)).toBe(false)
+    expect(skittishBolts(skittish, 'criticalSuccess', false)).toBe(false)
   })
 
   it('can be kept by spending a Fortune point', () => {
     const skittish = companion({ skittish: true })
-    expect(skittishBolts(skittish, 2, true)).toBe(false)
+    expect(skittishBolts(skittish, 'criticalFailure', true)).toBe(false)
     expect(COMPANION.skittishFortuneSave).toBeGreaterThan(0)
   })
 
-  it('a calm companion never bolts, whatever the damage', () => {
-    expect(skittishBolts(companion({ skittish: false }), 3, false)).toBe(false)
-    expect(skittishBolts(null, 3, false)).toBe(false)
+  it('a calm companion never bolts, whatever the roll', () => {
+    expect(skittishBolts(companion({ skittish: false }), 'criticalFailure', false)).toBe(false)
+    expect(skittishBolts(null, 'criticalFailure', false)).toBe(false)
   })
 
   it('cost oil to keep, and starve rather than push the lamp negative', () => {
@@ -416,8 +431,8 @@ describe('skittish companions', () => {
 describe('SEND', () => {
   const player = (l: Labyrinth, c: Companion | null): Player => ({
     roomId: l.entranceId, facing: null,
-    stats: { str: 8, agi: 8, int: 8, lck: 8 },
-    health: 3, maxHealth: 3, oil: 12, maxOil: 12, fortune: 2,
+    stats: { str: 10, agi: 10, int: 10, lck: 10 },
+    oil: 12, maxOil: 12, fortune: 2,
     carryingHeart: false, companion: c, inventory: [], statuses: {},
   })
 
@@ -439,39 +454,52 @@ describe('SEND', () => {
     const wall = DIRECTIONS.find((d) => exits[d] === undefined)
     if (!wall) return // fully connected entrance; nothing to assert
     expect(canSend(l, player(l, companion({ brave: true })), wall)).toBe(false)
-    expect(sendCompanion(l, player(l, companion({ brave: true })), wall)).toBeNull()
+    expect(sendCompanion(l, player(l, companion({ brave: true })), wall, 'success')).toBeNull()
   })
 
   it('drops its marker in the TARGET room, not the player’s', () => {
     const l = lab(1)
     const dir = DIRECTIONS.find((d) => (l.rooms[l.entranceId] as Room).exits[d] !== undefined)
     if (!dir) return
-    const result = sendCompanion(l, player(l, companion({ brave: true })), dir)
+    const result = sendCompanion(l, player(l, companion({ brave: true })), dir, 'success')
     expect(result).not.toBeNull()
     expect(result?.targetRoomId).toBe((l.rooms[l.entranceId] as Room).exits[dir])
     expect(result?.targetRoomId).not.toBe(l.entranceId)
-    expect(result?.scent).toBe(sendScentFor('goblin'))
+    expect(result?.scent).toBe(sendScentFor('success'))
   })
 
-  it('scales the decoy with the tame DC — the Quiet One is the quiet one', () => {
+  /**
+   * THE DECOY IS THE ROLL'S, NOT THE CREATURE'S — superseding the 17 Sep tiering
+   * (GDD 2.9, 18 Sep 2026).
+   *
+   * The old test asserted the opposite: that a Quiet One made a weaker decoy
+   * than a goblin, keyed off TAME_DC. That coupled the escape valve's strength
+   * to a tame roll made several turns earlier, on a creature the player may have
+   * had no choice about. Now every companion bids the same and the send itself
+   * decides.
+   */
+  it('scales the decoy with the ROLL, and not with which creature you tamed', () => {
     const l = lab(1)
     const dir = DIRECTIONS.find((d) => (l.rooms[l.entranceId] as Room).exits[d] !== undefined)
     if (!dir) return
     for (const kind of ALL_CREATURES) {
-      const result = sendCompanion(l, player(l, companion({ kind, brave: true })), dir)
-      expect(result?.scent, `${kind} decoy strength`).toBe(sendScentFor(kind))
+      const good = sendCompanion(l, player(l, companion({ kind, brave: true })), dir, 'success')
+      const bad = sendCompanion(l, player(l, companion({ kind, brave: true })), dir, 'failure')
+      expect(good?.scent, `${kind} on a good send`).toBe(sendScentFor('success'))
+      expect(bad?.scent, `${kind} on a bad send`).toBe(sendScentFor('failure'))
+      // The thing the old tiering made false, asserted directly: no creature is
+      // a worse decoy than any other.
+      expect(good?.scent, `${kind} must bid the same as every other creature`)
+        .toBe(sendScentFor('success'))
     }
-    // The split is keyed off TAME_DC, not off a hand-written creature list, so
-    // a fifth creature inherits a decoy strength instead of forgetting one.
-    expect(sendScentFor('goblin')).toBe(sendScentFor('grellhound'))
-    expect(sendScentFor('quietOne')).toBeLessThan(sendScentFor('goblin'))
+    expect(sendScentFor('failure')).toBeLessThan(sendScentFor('success'))
   })
 
   it('returns no path home — the companion does not come back (CLAUDE.md 3)', () => {
     const l = lab(1)
     const dir = DIRECTIONS.find((d) => (l.rooms[l.entranceId] as Room).exits[d] !== undefined)
     if (!dir) return
-    const result = sendCompanion(l, player(l, companion({ brave: true })), dir)
+    const result = sendCompanion(l, player(l, companion({ brave: true })), dir, 'success')
     expect(COMPANION.sendIsPermanent).toBe(true)
     // The result describes a departure and nothing else. If a `returns` or
     // `returnChance` field ever appears here, the invariant has been softened.
@@ -480,24 +508,22 @@ describe('SEND', () => {
 
   it('is louder than anything the player can do short of taking the Heart', () => {
     const loudestPlayerAction = Math.max(...Object.values(SCENT_BY_ACTION))
-    for (const kind of ALL_CREATURES) {
-      expect(sendScentFor(kind), `${kind} decoy vs loudest player action`).toBeGreaterThan(
+    for (const band of BAND_ORDER) {
+      expect(sendScentFor(band), `${band} decoy vs loudest player action`).toBeGreaterThan(
         loudestPlayerAction,
       )
-      expect(sendScentFor(kind)).toBeLessThan(SCENT.heartTaken + sendScentFor(kind))
     }
   })
 
-  it('out-smells the player for exactly sendDecoyTurns turns — both tiers, both Heart states', () => {
+  it('out-smells the player for exactly sendDecoyTurns turns — both rolls, both Heart states', () => {
     // sendDecoyTurns is DERIVED from sendScent and the decay factor, not a free
     // setting. Changing sendScent without changing it fails here rather than
-    // quietly making the GDD's promise a lie.
+    // quietly making GDD 2.9's promise a lie.
     //
-    // Four cases now, not one. The flat sendScent = 5 made the decoy weakest
-    // exactly when it was needed — one turn against a Heart-carrying player,
-    // against a GDD promising 2-3 — so the strength is keyed to the tame DC.
-    // A shared decayFactor makes 3-without / 1-with arithmetically impossible,
-    // which is why the two tiers land on 3/2 and 2/1 rather than both on 3/1.
+    // Four cases, and they are the same four the 17 Sep arithmetic produced —
+    // what changed is what selects between them. A shared decayFactor makes
+    // 3-without / 1-with arithmetically impossible, which is why the two
+    // qualities land on 3/2 and 2/1 rather than both on 3/1.
     const walking = SCENT_BY_ACTION.move
     const carrying = SCENT_BY_ACTION.move * HEART.carryScentMultiplier
 
@@ -510,21 +536,29 @@ describe('SEND', () => {
       return turns
     }
 
-    for (const kind of ALL_CREATURES) {
-      const decoy = sendScentFor(kind)
-      expect(dominatesFor(decoy, walking), `${kind}, walking`).toBe(
-        sendDecoyTurnsFor(kind, false),
+    for (const band of BAND_ORDER) {
+      const decoy = sendScentFor(band)
+      expect(dominatesFor(decoy, walking), `${band}, walking`).toBe(
+        sendDecoyTurnsFor(band, false),
       )
-      expect(dominatesFor(decoy, carrying), `${kind}, carrying the Heart`).toBe(
-        sendDecoyTurnsFor(kind, true),
+      expect(dominatesFor(decoy, carrying), `${band}, carrying the Heart`).toBe(
+        sendDecoyTurnsFor(band, true),
       )
     }
 
-    // And the shape the design asked for: carrying the Heart always costs you a
-    // turn of cover, never more and never none.
-    for (const kind of ALL_CREATURES) {
-      expect(sendDecoyTurnsFor(kind, true)).toBe(sendDecoyTurnsFor(kind, false) - 1)
+    // The shape the design asked for: carrying the Heart always costs a turn of
+    // cover, never more and never none — and it stacks with the roll rather
+    // than replacing it (GDD 2.9).
+    for (const band of BAND_ORDER) {
+      expect(sendDecoyTurnsFor(band, true)).toBe(sendDecoyTurnsFor(band, false) - 1)
     }
+
+    // And the headline numbers, stated outright so a regression is legible:
+    // 3 turns on a good send, 2 on a bad one, halved to 2 and 1 with the Heart.
+    expect(sendDecoyTurnsFor('success', false)).toBe(3)
+    expect(sendDecoyTurnsFor('success', true)).toBe(2)
+    expect(sendDecoyTurnsFor('failure', false)).toBe(2)
+    expect(sendDecoyTurnsFor('failure', true)).toBe(1)
   })
 })
 
@@ -750,7 +784,7 @@ describe('world drift', () => {
 describe('a creature that has turned on you', () => {
   const withCreature = (hostile: boolean): Room => ({
     id: roomIdAt(1, 1), x: 1, y: 1, archetype: 'hewnChamber', exits: {},
-    hazard: null, creature: 'goblin', creatureHostile: hostile,
+    hazard: null, hazardCleared: false, creature: 'goblin', creatureHostile: hostile,
     isEntrance: false, hasHeart: false, oilFlask: false, grave: null, visited: true,
   })
 

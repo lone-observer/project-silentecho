@@ -44,8 +44,12 @@ import {
   HAZARD_OUTCOMES,
   HAZARD_VERB_OUTCOMES,
   HAZARD_VERB_STAT,
+  isStatAgnostic,
+  STAT_AGNOSTIC_ACTIONS,
+  oilCostFor,
+  OIL_PRICE,
+  PLAYER,
   HAZARD_VERBS,
-  FIGHT_OUTCOMES,
   OIL,
   POPULATION,
   SCENT_BY_ACTION,
@@ -127,13 +131,17 @@ function naturalFor(verb: HazardVerb, band: OutcomeBand, stat = 8): number | nul
   return null
 }
 
-function resolveAt(state: GameState, verb: HazardVerb, band: OutcomeBand, stat = 8) {
+function resolveAt(state: GameState, verb: HazardVerb, band: OutcomeBand, stat = PLAYER.startingStat) {
   const natural = naturalFor(verb, band, stat)
   if (natural === null) throw new Error(`no natural die reaches ${band} for ${verb} at stat ${stat}`)
-  const withStat: GameState = {
-    ...state,
-    player: { ...state.player, stats: { ...state.player.stats, [HAZARD_VERB_STAT[verb]]: stat } },
-  }
+  // DISARM tests no stat (STAT_AGNOSTIC_ACTIONS), so there is nothing to set for
+  // it — and setting one would make the helper quietly disagree with the
+  // reducer about what that verb's roll is made of.
+  const key = HAZARD_VERB_STAT[verb]
+  const withStat: GameState =
+    key === undefined
+      ? state
+      : { ...state, player: { ...state.player, stats: { ...state.player.stats, [key]: stat } } }
   return applyAction(withStat, { kind: verb } as Action, forcedRng(natural))
 }
 
@@ -250,10 +258,15 @@ describe('the pit has no options, by design', () => {
     expect(pit?.criticalFailure.fatal).toBe(true)
     expect(pit?.failure.fatal).toBe(true)
     expect(pit?.mixed.fatal).toBe(false)
-    // And it pays nothing for being survived, at any band — you did not clear
-    // it, you failed to fall in.
-    for (const band of BAND_ORDER) {
-      expect(pit?.[band].rewardFlasks, `pit must never pay at ${band}`).toBe(0)
+
+    // BINARY, 18 Sep 2026. The pit was the one hazard with a partial-credit
+    // band — mixed cost you a point of health and two oil and let you through —
+    // and it went with health itself (GDD 2.8). Every band above `failure` is
+    // now literally the same row, and nothing about surviving a pit costs or
+    // pays anything: you did not clear it, you failed to fall in.
+    for (const band of ['mixed', 'success', 'strongSuccess', 'criticalSuccess'] as const) {
+      expect(pit?.[band], `pit at ${band} must be indistinguishable from a clean pass`)
+        .toEqual({ fatal: false, extraTurns: 0, applies: null, statusTurns: 0 })
     }
   })
 })
@@ -444,65 +457,122 @@ describe('a status survives the turn that applied it', () => {
 // 6. The reward
 // ---------------------------------------------------------------------------
 
-describe('clearing a hazard pays an oil flask', () => {
-  it('pays on the same bands for every verb, and never on a failure', () => {
+/**
+ * THE REWARD IS THE BAND'S OWN OIL DELTA NOW — there is no flask to hand over.
+ *
+ * 1g's model was a flat price plus a conditional flask at strongSuccess-or-
+ * better, and GDD 2.8 collapsed it into one number per band on 18 Sep: the
+ * verb's price scaled by `BAND_OIL_MULTIPLIER`, negative at the top two bands.
+ * These tests replace the `rewardFlasks` suite entirely, and they check the same
+ * thing it was there to check — that clearing hazards cannot become an income.
+ */
+describe('clearing a hazard pays in oil, and never pays well', () => {
+  it('charges every hazard verb more for a worse roll', () => {
     for (const verb of HAZARD_VERBS) {
-      const table = HAZARD_VERB_OUTCOMES[verb]
-      expect(table.criticalFailure.rewardFlasks, `${verb} must not pay on a critical failure`).toBe(0)
-      expect(table.failure.rewardFlasks, `${verb} must not pay on a failure`).toBe(0)
-      // Reachable at starting stats. The gate that is never reached is the bug
-      // the 1d sweep found in TAME_OUTCOMES.brave — a reward nobody can earn is
-      // a mechanic that does not exist, and nobody notices for three steps.
-      expect(table.strongSuccess.rewardFlasks, `${verb} must pay somewhere reachable`)
-        .toBeGreaterThan(0)
+      for (let i = 1; i < BAND_ORDER.length; i++) {
+        const worse = BAND_ORDER[i - 1]!
+        const better = BAND_ORDER[i]!
+        expect(oilCostFor(verb, worse), `${verb}: ${worse} must cost more than ${better}`)
+          .toBeGreaterThan(oilCostFor(verb, better))
+      }
     }
-    // One gate, not four. If these diverge it should be a decision, not a typo.
-    const gates = HAZARD_VERBS.map((v) =>
-      BAND_ORDER.filter((b) => HAZARD_VERB_OUTCOMES[v][b].rewardFlasks > 0).join(','),
-    )
-    expect(new Set(gates).size, 'every hazard verb should pay on the same bands').toBe(1)
   })
 
-  it('actually puts a flask in the pack', () => {
+  it('never pays out at a failure, for any verb', () => {
+    for (const verb of HAZARD_VERBS) {
+      expect(oilCostFor(verb, 'criticalFailure')).toBeGreaterThan(0)
+      expect(oilCostFor(verb, 'failure')).toBeGreaterThan(0)
+    }
+  })
+
+  /**
+   * THE OIL-FARM GUARD, and the one that matters most.
+   *
+   * 1g measured its first reward model at +1.75 oil per bloom and closed it by
+   * moving the gate to a rarer band — which holds until someone widens a band.
+   * This closes it by shape: the whole point of folding the reward into the
+   * price is that a perfect roll returns less than the attempt cost, so no
+   * amount of skill on any verb turns a labyrinth full of hazards into a lamp.
+   */
+  it('cannot be farmed — even a perfect clear never returns more than it cost', () => {
+    for (const verb of HAZARD_VERBS) {
+      const best = -oilCostFor(verb, 'criticalSuccess')
+      // AT MOST the price of attempting it, and only on the rarest band in the
+      // game — a critical needs margin +12, which against these DCs is a
+      // natural 20 at starting stats. Every other band is a net spend, so the
+      // expected value of walking into hazards is firmly negative however good
+      // the player gets. That is the property 1g's gate-moving was reaching
+      // for, held by the shape of the curve instead of by a chosen band.
+      expect(best, `${verb} pays out more than it costs — that is an oil farm`)
+        .toBeLessThanOrEqual(OIL_PRICE[verb])
+      // And one clear can never be worth a meaningful slice of the lamp.
+      expect(best).toBeLessThan(OIL.flaskValue)
+    }
+  })
+
+  it('actually moves the lamp, and tells the player it did', () => {
     for (const hazard of VERB_HAZARDS) {
       for (const verb of VERBS_FOR_HAZARD[hazard] ?? []) {
         const state = standingIn(hazard)
-        const paid = resolveAt(state, verb, 'strongSuccess')
-        const unpaid = resolveAt(state, verb, 'failure')
-        expect(paid.state.player.inventory.filter((i) => i === 'oilFlask').length, `${verb} paid`)
-          .toBe(HAZARD_VERB_OUTCOMES[verb].strongSuccess.rewardFlasks)
-        expect(unpaid.state.player.inventory).toHaveLength(0)
-        // And the player is TOLD. A reward the event stream cannot express is a
-        // text-parity failure (CLAUDE.md 2.3), which is how three beats shipped
-        // silent through 1e.
-        const narration = paid.events.filter((e) => e.kind === 'narration')
-        expect(narration.some((e) => e.kind === 'narration' && e.beat === 'hazardCleared')).toBe(true)
+        // The top band this verb can actually REACH at starting stats, which is
+        // not the same for every verb and that difference is the design.
+        //
+        // The Easy-DC pair reaches strongSuccess on a natural 16-19. DISARM
+        // rolls at Moderate with no stat modifier, so its ceiling at stat 10 is
+        // a plain `success` — it cannot return oil at all until the player has
+        // invested in stats, which is what "priced higher than the pass-through
+        // options" means once the band distribution is doing the pricing rather
+        // than a bigger number in the table. See the progression test below.
+        const top = naturalFor(verb, 'strongSuccess') === null ? 'success' : 'strongSuccess'
+        const good = resolveAt(state, verb, top)
+        const bad = resolveAt(state, verb, 'criticalFailure')
+        expect(good.state.player.oil, `${verb} at the top band`)
+          .toBeGreaterThan(bad.state.player.oil)
+        // And the player is TOLD. An oil change the event stream cannot express
+        // is a text-parity failure (CLAUDE.md 2.3), which is how three beats
+        // shipped silent through 1e.
+        expect(good.events.some((e) => e.kind === 'oilChanged')).toBe(true)
       }
     }
   })
 
-  it('pays a driven-off creature\'s hoard on the same gate as the hazards', () => {
-    // GDD 2.8's reward pass covers a successful FIGHT too. Gated on `driven`,
-    // so a band that paid without clearing the room would be visible here.
+  /**
+   * DISARM'S PRICE IS ITS BAND DISTRIBUTION, not a bigger number in a table, and
+   * that is worth an assertion because it is invisible in `OIL_PRICE` — DISARM
+   * and FORCE both sit at 1.
+   *
+   * Rolling at Moderate with no stat modifier puts DISARM's ceiling at a plain
+   * `success` for a fresh character: it can never hand oil back, only spend it,
+   * and it spends more often because its failure bands are likelier. Investment
+   * opens the top bands up, which keeps it a progression curve rather than a
+   * verb that is simply worse — the shape 1g asked of `rewardFlasks` and the
+   * reason its gate was not set to criticalSuccess.
+   */
+  it('puts DISARM beyond a fresh character\'s reach at the top, and inside it later', () => {
+    expect(naturalFor('disarm', 'strongSuccess', PLAYER.startingStat)).toBeNull()
+    expect(naturalFor('disarm', 'strongSuccess', PLAYER.maxStat)).not.toBeNull()
+    // And the pair it sits beside is reachable from the start, which is what
+    // makes DISARM the expensive option rather than the only one.
+    expect(naturalFor('force', 'strongSuccess', PLAYER.startingStat)).not.toBeNull()
+  })
+
+  it('pays a FIGHT on the same curve as a hazard verb', () => {
+    // 1g left this explicitly open: FIGHT's gate was aligned with the hazard
+    // verbs as the conservative guess because no sweep policy ever fought, and
+    // the argument for paying it a band earlier (TAME pays its companion from
+    // mixed up) was never settled. The unified model answers it by construction
+    // — both are the same curve — so there is no gate left to disagree about.
     for (const band of BAND_ORDER) {
-      const out = FIGHT_OUTCOMES[band]
-      if (out.rewardFlasks > 0) {
-        expect(out.driven, `FIGHT pays at ${band} without driving the creature off`).toBe(true)
-      }
+      expect(Math.sign(oilCostFor('fight', band))).toBe(Math.sign(oilCostFor('force', band)))
     }
-    expect(FIGHT_OUTCOMES.criticalFailure.rewardFlasks).toBe(0)
-    expect(FIGHT_OUTCOMES.failure.rewardFlasks).toBe(0)
-    expect(FIGHT_OUTCOMES.strongSuccess.rewardFlasks).toBeGreaterThan(0)
   })
 
   it('keeps earned oil worth less than a whole lamp', () => {
     // A guard rail rather than a balance number: whatever the reward is retuned
     // to, one cleared hazard must not refill the lamp. If this ever fails,
     // someone has made oil a formality.
-    const best = Math.max(...HAZARD_VERBS.map((v) =>
-      Math.max(...BAND_ORDER.map((b) => HAZARD_VERB_OUTCOMES[v][b].rewardFlasks)),
-    ))
-    expect(best * OIL.flaskValue).toBeLessThan(OIL.max)
+    const best = Math.max(...HAZARD_VERBS.map((v) => -oilCostFor(v, 'criticalSuccess')))
+    expect(best).toBeLessThan(OIL.max)
     // And the ambient supply is still an ambient supply. Sized together with
     // the reward in 1g; see POPULATION.oilFlasks for the measured table.
     expect(POPULATION.oilFlasks[0]).toBeGreaterThan(0)
@@ -546,36 +616,80 @@ describe('every stat has exactly one hazard it cannot answer', () => {
   it('leaves at least one stat with no option against each verb hazard', () => {
     // MUTATION-CHECKED. Adding 'dodge' to the bloom's verb list fails this —
     // which is the exact change that would give AGI a free pass.
+    /**
+     * DISARM IS EXCLUDED, AND ITS EXCLUSION IS THE DESIGN.
+     *
+     * GDD 2.7 left "stat-gated or stat-agnostic" open and leaned agnostic "so it
+     * doesn't disturb the existing every-stat-has-exactly-one-hazard-it-can't-
+     * touch design". 1i built agnostic, which in a d20 game has to mean no stat
+     * modifier at all — so DISARM contributes nothing to this matrix, by having
+     * no row in `HAZARD_VERB_STAT` at all. If someone gives it one, the filter
+     * below stops removing it and the assertions underneath fail, which is
+     * exactly the alarm that should ring.
+     */
+    const statsFor = (hazard: HazardKind): Set<StatKey> =>
+      new Set(
+        (VERBS_FOR_HAZARD[hazard] ?? [])
+          .map((v) => HAZARD_VERB_STAT[v])
+          .filter((x): x is StatKey => x !== undefined),
+      )
+
     const stats: readonly StatKey[] = ['str', 'agi', 'int']
     for (const hazard of VERB_HAZARDS) {
-      const covered = new Set((VERBS_FOR_HAZARD[hazard] ?? []).map((v) => HAZARD_VERB_STAT[v]))
+      const covered = statsFor(hazard)
       const missing = stats.filter((s) => !covered.has(s))
       expect(missing.length, `${hazard} must leave a stat with no answer`).toBeGreaterThan(0)
     }
     // Bloom is the STR/INT one and snare is the INT/AGI one. Stated explicitly
     // because "some stat is missing somewhere" is satisfiable by a matrix that
     // walls the same stat out of everything.
-    expect(new Set((VERBS_FOR_HAZARD.sporeBloom ?? []).map((v) => HAZARD_VERB_STAT[v])))
-      .toEqual(new Set(['str', 'int']))
-    expect(new Set((VERBS_FOR_HAZARD.snareCarving ?? []).map((v) => HAZARD_VERB_STAT[v])))
-      .toEqual(new Set(['int', 'agi']))
+    expect(statsFor('sporeBloom')).toEqual(new Set(['str', 'int']))
+    expect(statsFor('snareCarving')).toEqual(new Set(['int', 'agi']))
+  })
+
+  it('has exactly one stat-agnostic verb, and it is DISARM', () => {
+    // The universal option, asserted as data rather than left as a comment. A
+    // second member of this list would be a second build-independent answer,
+    // and the matrix above would start meaning less with every one added.
+    expect([...STAT_AGNOSTIC_ACTIONS]).toEqual(['disarm'])
+    expect(HAZARD_VERB_STAT.disarm).toBeUndefined()
   })
 
   it('keeps ACTION_STAT and HAZARD_VERB_STAT in step', () => {
     // Two tables describing one fact is the drift CLAUDE.md 2.4 warns about;
     // the same assertion already exists for ACTION_STAT vs ENCOUNTER_STAT.
     for (const verb of HAZARD_VERBS) {
+      // A stat-agnostic verb has no row to agree with. `ACTION_STAT` is total by
+      // type and carries a value for it that nothing ever reads — `rollForAction`
+      // short-circuits on `isStatAgnostic` before the table is consulted — so
+      // comparing them here would be asserting that a dead value matches a
+      // deliberate absence.
+      if (isStatAgnostic(verb)) continue
       expect(ACTION_STAT[verb], `${verb}`).toBe(HAZARD_VERB_STAT[verb])
     }
   })
 
-  it('gives both options on a hazard the same DC', () => {
-    // The choice is between two COST MODELS, never between an easy option and a
-    // hard one — a cheaper roll as well as a cheaper price would collapse it
-    // into one right answer per build.
+  it('gives the two STAT-GATED options on a hazard the same DC', () => {
+    // The choice between them is between two COST MODELS, never between an easy
+    // option and a hard one — a cheaper roll as well as a cheaper price would
+    // collapse it into one right answer per build.
     for (const hazard of VERB_HAZARDS) {
-      const dcs = new Set((VERBS_FOR_HAZARD[hazard] ?? []).map((v) => ACTION_DC[v]))
-      expect(dcs.size, `${hazard}'s options must share a DC`).toBe(1)
+      const pair = (VERBS_FOR_HAZARD[hazard] ?? []).filter((v) => !isStatAgnostic(v))
+      const dcs = new Set(pair.map((v) => ACTION_DC[v]))
+      expect(dcs.size, `${hazard}'s two options must share a DC`).toBe(1)
+    }
+  })
+
+  it('prices DISARM at a HARDER DC than the pair it sits beside', () => {
+    // The counterweight to carrying no stat modifier. Without it, DISARM would
+    // roll at the same DC as FORCE with strictly better odds at every stat —
+    // a universal option that is also the best option, which is the collapse the
+    // shared-DC rule above exists to prevent.
+    for (const hazard of VERB_HAZARDS) {
+      const verbs = VERBS_FOR_HAZARD[hazard] ?? []
+      if (!verbs.includes('disarm')) continue
+      const pairDc = ACTION_DC[verbs.find((v) => !isStatAgnostic(v))!]
+      expect(ACTION_DC.disarm, `${hazard}: DISARM must roll harder`).toBeGreaterThan(pairDc)
     }
   })
 })
@@ -609,8 +723,13 @@ describe('a hazard roll looks exactly like every other roll', () => {
         expect(event.hazard).toBeUndefined()
         expect(event.result.dc).toBe(ACTION_DC[verb])
         expect(event.result.band).toBe('success')
-        // Every modifier labelled (CLAUDE.md 4), including the stat's.
-        expect(event.result.modifiers.length).toBeGreaterThan(0)
+        // EVERY modifier labelled (CLAUDE.md 4). Note the assertion is about the
+        // modifiers that exist, not about there being any: DISARM carries no
+        // stat line at all, deliberately, and at full oil its breakdown is
+        // genuinely empty. That is the absence of a modifier, not an unlabelled
+        // one — and the emptiness is itself legible, because it is what "the
+        // same for everybody" looks like on the roll panel.
+        if (!isStatAgnostic(verb)) expect(event.result.modifiers.length).toBeGreaterThan(0)
         for (const m of event.result.modifiers) expect(m.source).not.toBe('')
       }
     }

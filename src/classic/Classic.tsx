@@ -65,7 +65,13 @@ function keyFor(index: number): string | null {
  * RENUMBER. `legalActions` returns what is available this turn, so "Move N" is
  * 1 in a two-exit room and 3 in another, and the player re-reads the list every
  * single turn to find the same move. Directions never renumber. The numbers
- * stay for everything that has no compass (Listen, Search, Fight, Tame).
+ * stay for everything that has no compass (Search, Rest, Fight, Tame).
+ *
+ * FOCUS is directional too as of 1i, and it is deliberately NOT reachable this
+ * way. `actionForDirection` prefers a MOVE, and FOCUS is only ever offered on a
+ * doorway that also has a MOVE, so the compass keys keep meaning "walk" and
+ * never quietly spend a turn looking instead. Same instinct as excluding SEND:
+ * a key that walks must not sometimes do something else.
  */
 const DIRECTION_KEYS: Record<string, Direction> = {
   W: 'N',
@@ -86,10 +92,7 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
   const ended = run.state.outcome !== 'inProgress'
 
   const room = useMemo(() => roomView(run.state), [run.state])
-  const doors = useMemo(
-    () => doorways(run.state, run.tells, run.sensed),
-    [run.state, run.tells, run.sensed],
-  )
+  const doors = useMemo(() => doorways(run.state, run.senses), [run.state, run.senses])
   const chunks = useMemo(() => statusChunks(run.state), [run.state])
   const lastRoll = useMemo(() => lastRollOf(run.turns), [run.turns])
   const chart = useMemo(() => chartedMap(run.state), [run.state])
@@ -240,10 +243,22 @@ function Status({ chunks }: { chunks: readonly StatusChunk[] }): React.JSX.Eleme
  * voice; the game's voice is in `data/outcomes.ts` and stays there.
  */
 const UNSENSED_TEXT: Record<UnsensedReason, string> = {
-  range: 'beyond your lamp',
+  // Says there is something and refuses to say what, which is exactly the state
+  // the lamp leaves a doorway in. It must not read as danger (much of what leaks
+  // through a doorway is a creature you could talk round, or the Heart) and it
+  // must not read as an apology — it is a price tag, and FOCUS is the price.
+  unresolved: 'something, unlooked at',
   confused: 'you cannot tell',
 }
 
+/**
+ * A doorway that reported nothing, and MEANT it.
+ *
+ * Under the old model this was nearly always what an empty doorway said and it
+ * carried almost no weight. It is load-bearing now: the lamp is honest about
+ * presence, so "nothing" is a complete answer about that doorway and the one
+ * thing on the panel a player can act on without spending a turn first.
+ */
 const NOTHING_TEXT = 'nothing'
 
 /**
@@ -262,13 +277,31 @@ function Doorways({ doors }: { doors: readonly DoorwayView[] }): React.JSX.Eleme
             {door.word}
             {door.wayBack && <span className="back"> ↩</span>}
           </span>
+          {/*
+            THE STENCH IS PRINTED EVEN ON AN UNRESOLVED DOORWAY, and this
+            ordering is the reason this is not a ternary chain any more.
+
+            The Wumpus's stench and a companion's reveals are exempt from the
+            FOCUS economy (GDD 2.8.1), so a doorway can carry a resolved tell AND
+            an unresolved remainder at the same time — two rooms away is the
+            Wumpus, and also something nobody has looked at. A chain that showed
+            `unsensed` first would swallow the one tell CLAUDE.md 3 says may
+            never be hidden, on exactly the turns it matters most.
+          */}
+          {door.tells.length > 0 && (
+            <span className="sense">{door.tells.map((t) => t.text).join('; ')}</span>
+          )}
           {door.unsensed !== null ? (
             <span className="unsensed">{UNSENSED_TEXT[door.unsensed]}</span>
           ) : door.tells.length === 0 ? (
             <span className="quiet">{NOTHING_TEXT}</span>
-          ) : (
-            <span className="sense">{door.tells.map((t) => t.text).join('; ')}</span>
-          )}
+          ) : null}
+          {/*
+            Which doorways are still worth a turn. At Hunting and Ravening there
+            is exactly one FOCUS per room, so knowing the allowance is spent is
+            as much a part of the decision as knowing what is unresolved.
+          */}
+          {door.focusable && <span className="focusable">· focusable</span>}
         </li>
       ))}
     </ul>

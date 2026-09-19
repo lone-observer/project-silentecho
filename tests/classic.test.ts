@@ -28,7 +28,6 @@ import { DIRECTIONS } from '../src/engine/types.ts'
 import { applyAction, legalActions } from '../src/engine/resolve.ts'
 import type { LegalAction } from '../src/engine/resolve.ts'
 import { rngFromState } from '../src/engine/rng.ts'
-import { oilBandFor } from '../src/engine/data/tuning.ts'
 import { eventsToLines, toStrings } from '../src/classic/lines.ts'
 import {
   actionForDirection,
@@ -258,81 +257,108 @@ describe('classic renderer — the doorways', () => {
    * choosing what to do with what they just paid a turn to learn. Drop the term
    * and the assertion asks the screen to throw that away one beat early.
    */
-  it('separates "nothing is there" from "you cannot sense that far"', () => {
-    let sawRestricted = 0
+  it('separates "nothing is there" from "you have not looked"', () => {
+    let sawUnresolved = 0
     let sawConfused = 0
+    let sawEmpty = 0
 
     for (const difficulty of DIFFICULTIES) {
       for (let seed = 1; seed <= 30; seed++) {
-        drive(seed, difficulty, (run, previous) => {
+        drive(seed, difficulty, (run) => {
           const { player } = run.state
           const confused = (player.statuses.confused ?? 0) > 0
-          const listened = previous?.kind === 'listen'
-          const restricted =
-            oilBandFor(player.oil).tellRange === 'facing' &&
-            player.facing !== null &&
-            !confused &&
-            !listened
-          const doors = doorways(run.state, run.tells, run.sensed)
+          const doors = doorways(run.state, run.senses)
 
           if (confused) {
             sawConfused += 1
             expect(doors.every((d) => !d.sensed)).toBe(true)
             // And it says WHICH silence this is. Confused is suppression on its
-            // own clock (GDD 2.8.2); the lamp is range, bought back by LISTEN
-            // (GDD 2.8.1). Reporting a Confused doorway as a lamp problem
-            // points the player at the wrong lever.
+            // own clock (GDD 2.8.2); an unresolved doorway is something you can
+            // buy with a turn (GDD 2.7). Reporting one as the other points the
+            // player at a lever that will not move.
             expect(doors.every((d) => d.unsensed === 'confused')).toBe(true)
-          } else if (restricted) {
-            sawRestricted += 1
-            for (const door of doors) {
-              expect(door.sensed).toBe(door.direction === player.facing)
-              expect(door.unsensed).toBe(door.sensed ? null : 'range')
-            }
+            return
           }
 
-          // A tell may never appear on a doorway the player could not sense,
-          // and `unsensed` is set on exactly the doorways that were not.
           for (const door of doors) {
+            if (door.unsensed === 'unresolved') {
+              sawUnresolved += 1
+              // An unresolved doorway names nothing it has not paid for. The
+              // one exception is the stench, which is exempt from FOCUS
+              // entirely (GDD 2.8.1) and may appear alongside.
+              expect(door.tells.every((t) => t.kind === 'stench')).toBe(true)
+            } else if (door.sensed && door.tells.length === 0) {
+              sawEmpty += 1
+            }
             expect(door.unsensed === null).toBe(door.sensed)
-            if (!door.sensed) expect(door.tells).toEqual([])
           }
         })
       }
     }
 
-    // A vacuous pass is the failure mode here: both branches must be reached or
-    // the assertions above proved nothing. This is the same lesson as 1f
-    // finding 3 — a mutation that passes because the sweep never got there.
-    expect(sawRestricted, 'the sweep never got the lamp down to Ember').toBeGreaterThan(0)
+    // All three states have to actually occur, or the test is asserting about
+    // a case the sweep never produced — which is how the grellhound mutation
+    // check in `tests/outcomes.test.ts` came to pass for the wrong reason.
     expect(sawConfused, 'the sweep was never Confused').toBeGreaterThan(0)
+    expect(sawUnresolved, 'the sweep never met an unresolved doorway').toBeGreaterThan(0)
+    expect(sawEmpty, 'the sweep never met a doorway with nothing behind it').toBeGreaterThan(0)
   })
 
   /**
-   * The other side of the carve-out above, asserted rather than assumed.
+   * SILENCE IS A FACT NOW, and this is the test that says so.
    *
-   * GDD 2.8.1: "LISTEN reveals all four, truthfully, for the price of a turn.
-   * Information costs turns; it never lies." That promise is only kept if the
-   * four doorways are still reported on the screen where the player spends what
-   * they learned — a panel that reverts the instant the turn resolves sells
-   * them a line of scrollback instead of a decision.
+   * Under the old model an empty doorway and an out-of-range one looked alike
+   * often enough that "nothing" carried almost no weight. The lamp is honest
+   * about presence now, so a doorway reporting nothing is a complete answer
+   * about that doorway — and it is the only thing on the panel a player can act
+   * on without spending a turn first.
    */
-  it('shows all four doorways on the turn after a LISTEN, however low the lamp', () => {
-    let checked = 0
-
+  it('never reports an empty doorway as unresolved, or a full one as empty', () => {
     for (const difficulty of DIFFICULTIES) {
-      for (let seed = 1; seed <= 30; seed++) {
-        drive(seed, difficulty, (run, previous) => {
-          if (previous?.kind !== 'listen') return
+      for (let seed = 1; seed <= 20; seed++) {
+        drive(seed, difficulty, (run) => {
           if ((run.state.player.statuses.confused ?? 0) > 0) return
-          const doors = doorways(run.state, run.tells, run.sensed)
-          for (const door of doors) expect(door.sensed).toBe(true)
-          if (oilBandFor(run.state.player.oil).tellRange === 'facing') checked += 1
+          const room = run.state.labyrinth.rooms[run.state.player.roomId]!
+          for (const door of doorways(run.state, run.senses)) {
+            const beyond = run.state.labyrinth.rooms[room.exits[door.direction]!]!
+            const somethingThere =
+              (beyond.hazard !== null && !beyond.hazardCleared) ||
+              beyond.creature !== null ||
+              (beyond.hasHeart && !run.state.player.carryingHeart)
+            if (!somethingThere) {
+              expect(door.unsensed, `${door.direction} is empty and must say so`).toBeNull()
+              expect(door.tells.filter((t) => t.kind !== 'stench')).toHaveLength(0)
+            }
+          }
         })
       }
     }
+  })
 
-    expect(checked, 'the sweep never listened with the lamp at Ember or below').toBeGreaterThan(0)
+  /**
+   * THE STENCH IS NEVER HIDDEN BEHIND THE UNRESOLVED MARKER.
+   *
+   * The Wumpus's tell is exempt from the FOCUS economy (GDD 2.8.1), so a
+   * doorway can carry a resolved stench AND an unresolved remainder at once.
+   * The renderer prints the tells before the marker for exactly this reason: a
+   * chain that showed "unresolved" first would swallow the one tell CLAUDE.md 3
+   * says may never be hidden, on the turns it matters most.
+   */
+  it('shows the stench even on a doorway nothing has resolved', () => {
+    let checked = 0
+    for (const difficulty of DIFFICULTIES) {
+      for (let seed = 1; seed <= 30; seed++) {
+        drive(seed, difficulty, (run) => {
+          for (const door of doorways(run.state, run.senses)) {
+            if (door.tells.some((t) => t.kind === 'stench')) {
+              checked += 1
+              expect(door.alarming).toBe(true)
+            }
+          }
+        })
+      }
+    }
+    expect(checked, 'the sweep never got within two rooms of the Wumpus').toBeGreaterThan(0)
   })
 
   it('lists a doorway for every exit and none for a wall', () => {
@@ -341,7 +367,7 @@ describe('classic renderer — the doorways', () => {
         const room = run.state.labyrinth.rooms[run.state.player.roomId]
         if (room === undefined) throw new Error(`no room ${run.state.player.roomId}`)
         const expected = DIRECTIONS.filter((d) => room.exits[d] !== undefined)
-        expect(doorways(run.state, run.tells, run.sensed).map((d) => d.direction)).toEqual(expected)
+        expect(doorways(run.state, run.senses).map((d) => d.direction)).toEqual(expected)
       })
     }
   })
@@ -355,7 +381,7 @@ describe('classic renderer — the doorways', () => {
     for (const difficulty of DIFFICULTIES) {
       for (let seed = 1; seed <= 20; seed++) {
         drive(seed, difficulty, (run) => {
-          for (const door of doorways(run.state, run.tells, run.sensed)) {
+          for (const door of doorways(run.state, run.senses)) {
             expect(door.alarming).toBe(door.tells.some((t) => t.kind === 'stench'))
           }
         })
@@ -380,7 +406,12 @@ describe('classic renderer — the status line', () => {
 
         expect(labels.filter((l) => l === 'Lamp')).toHaveLength(1)
         expect(labels).not.toContain('Oil band')
-        expect(labels.slice(0, 4)).toEqual(['Turn', 'Lamp', 'Health', 'Fortune'])
+        // HEALTH IS GONE FROM THE LINE, 18 Sep 2026 (GDD 2.6, 2.17). The status
+        // budget was already over its seven-item limit before this step, so a
+        // fact removed is a slot returned — and asserted here so that nothing
+        // quietly takes the space back without someone deciding it should.
+        expect(labels).not.toContain('Health')
+        expect(labels.slice(0, 3)).toEqual(['Turn', 'Lamp', 'Fortune'])
 
         expect(labels.includes('Companion')).toBe(run.state.player.companion !== null)
         expect(labels.includes('Carrying')).toBe(run.state.player.carryingHeart)
@@ -517,7 +548,7 @@ describe('classic renderer — getting around', () => {
           }
 
           // At most one doorway is ever the way back.
-          const marked = doorways(run.state, run.tells, run.sensed).filter((d) => d.wayBack)
+          const marked = doorways(run.state, run.senses).filter((d) => d.wayBack)
           expect(marked.length).toBeLessThanOrEqual(1)
         })
       }
@@ -571,16 +602,25 @@ describe('classic renderer — getting around', () => {
     // its MOVE, the fallback must still refuse it.
     const sendOnly: LegalAction[] = [
       { action: { kind: 'send', direction: 'N' }, label: 'Send the goblin N', dc: 5 },
-      { action: { kind: 'listen' }, label: 'Listen', dc: 5 },
+      { action: { kind: 'rest' }, label: 'Rest', dc: 5 },
     ]
     expect(actionForDirection(sendOnly, 'N')).toBeNull()
 
     // And with the MOVE present, the key means the move — not the send.
     const both: LegalAction[] = [
       { action: { kind: 'send', direction: 'N' }, label: 'Send the goblin N', dc: 5 },
-      { action: { kind: 'move', direction: 'N' }, label: 'Move N', dc: 5 },
+      { action: { kind: 'move', direction: 'N' }, label: 'Move north', dc: 5 },
     ]
     expect(actionForDirection(both, 'N')?.kind).toBe('move')
+
+    // FOCUS is directional too as of 1i, and the MOVE preference is what keeps
+    // a compass key meaning "walk" rather than sometimes meaning "look". A key
+    // that walks must not occasionally spend the turn on something else.
+    const moveAndFocus: LegalAction[] = [
+      { action: { kind: 'focus', direction: 'N' }, label: 'Focus north', dc: 5 },
+      { action: { kind: 'move', direction: 'N' }, label: 'Move north', dc: 5 },
+    ]
+    expect(actionForDirection(moveAndFocus, 'N')?.kind).toBe('move')
 
     // A live state, for the co-occurrence claim above rather than for the guard.
     let checked = 0

@@ -39,9 +39,25 @@ export const BAD_BANDS: readonly OutcomeBand[] = ['criticalFailure', 'failure'] 
 
 /** `+2` / `−1` / `0`, with a real minus sign rather than a hyphen. */
 export function signed(n: number): string {
-  if (n > 0) return `+${n}`
-  if (n < 0) return `−${Math.abs(n)}`
+  if (n > 0) return `+${trim(n)}`
+  // A real minus sign, not a hyphen-minus. 1h finding 7: the roll breakdown
+  // rendered `= -3` beside `Agility −1` — two different characters for the same
+  // idea on one line — and it was found by reading a pit death in the log.
+  if (n < 0) return `−${trim(Math.abs(n))}`
   return '0'
+}
+
+/**
+ * At most two decimals, with trailing zeros dropped: `1`, `0.5`, `0.25`.
+ *
+ * Oil went fractional on 18 Sep (a MOVE costs half a point, a good one hands a
+ * quarter back), so these numbers are no longer always integers. Printing them
+ * raw put `+0.125 oil` in the log against a status line reading `Lamp 11.5` —
+ * two different precisions for one resource, on one screen. The engine now
+ * quantizes oil to `OIL_QUANTUM`; this is the presentation half of that.
+ */
+function trim(n: number): string {
+  return Number(n.toFixed(2)).toString()
 }
 
 /**

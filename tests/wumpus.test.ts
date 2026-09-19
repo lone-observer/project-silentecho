@@ -6,8 +6,10 @@ import {
   getTells, hasCaught, moveWumpus, perceive, scentAt, wumpusIsNear,
 } from '../src/engine/wumpus.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
-import type { Labyrinth, RoomId, ScentField, WumpusTier } from '../src/engine/types.ts'
-import { SCENT, WUMPUS_TIERS } from '../src/engine/data/tuning.ts'
+import type {
+  Direction, DoorwaySense, Labyrinth, RoomId, ScentField, Tell, WumpusTier,
+} from '../src/engine/types.ts'
+import { SCENT, WUMPUS, WUMPUS_TIERS } from '../src/engine/data/tuning.ts'
 
 const lab = (seed: number): Labyrinth => generateLabyrinth(createRng(seed), { difficulty: 'stirring' })
 const L = lab(1)
@@ -218,20 +220,40 @@ describe('movement', () => {
   })
 })
 
+
+/**
+ * The tells across every doorway, flattened — the shape these assertions were
+ * written against before `getTells` started returning per-doorway senses.
+ *
+ * Kept as a local helper rather than rewriting forty assertions, because the
+ * facts being asserted did not change: a tell still appears when its source is
+ * there and never when it is not. What changed is that the function now also
+ * reports the doorways it did NOT resolve, which the new tests below cover.
+ */
+function flat(senses: readonly DoorwaySense[]): Tell[] {
+  return senses.flatMap((s) => s.tells)
+}
+
+/** Everything resolved, which is what the old `tellRange: 'all'` meant. */
+const ALL_RESOLVED = { confused: false, resolved: [...DIRECTIONS] }
+
 describe('tells', () => {
   it('reports a stench when, and only when, the Wumpus is adjacent', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const l = lab(seed)
       const here = l.entranceId
       const adj = neighboursOf(l, here)
-      const opts = { tellRange: 'all' as const, confused: false, facing: null }
+      const opts = ALL_RESOLVED
 
       for (const w of adj) {
-        const tells = getTells(l, here, w, opts)
-        expect(tells.filter((t) => t.kind === 'stench')).toHaveLength(1)
+        const tells = flat(getTells(l, here, w, opts))
+        expect(tells.filter((t) => t.kind === 'stench').length).toBeGreaterThanOrEqual(1)
       }
-      const far = Object.keys(distancesFrom(l, here)).find((id) => (distancesFrom(l, here)[id] as number) > 1)!
-      expect(getTells(l, here, far, opts).some((t) => t.kind === 'stench')).toBe(false)
+      // WIDENED TO RADIUS 2, 18 Sep 2026 (GDD 2.10). What must stay silent is a
+      // Wumpus further away than the floor reaches — three rooms or more.
+      const dist = distancesFrom(l, here)
+      const far = Object.keys(dist).find((id) => (dist[id] as number) > WUMPUS.mandatoryStenchRadius)!
+      expect(flat(getTells(l, here, far, opts)).some((t) => t.kind === 'stench')).toBe(false)
     }
   })
 
@@ -239,7 +261,7 @@ describe('tells', () => {
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       const l = lab(seed)
       for (const room of Object.values(l.rooms)) {
-        const tells = getTells(l, room.id, 'nowhere', { tellRange: 'all', confused: false, facing: null })
+        const tells = flat(getTells(l, room.id, 'nowhere', ALL_RESOLVED))
         for (const dir of DIRECTIONS) {
           const n = room.exits[dir]
           if (n === undefined) continue
@@ -256,7 +278,7 @@ describe('tells', () => {
   it('never invents a tell with no source behind it', () => {
     const l = lab(2)
     for (const room of Object.values(l.rooms)) {
-      const tells = getTells(l, room.id, 'nowhere', { tellRange: 'all', confused: false, facing: null })
+      const tells = flat(getTells(l, room.id, 'nowhere', ALL_RESOLVED))
       for (const tell of tells) {
         const n = room.exits[tell.direction]
         expect(n, `${room.id} reported ${tell.kind} through a wall`).toBeDefined()
@@ -270,10 +292,10 @@ describe('tells', () => {
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       const l = lab(seed)
       for (const adj of neighboursOf(l, l.heartRoomId)) {
-        const onPlinth = getTells(l, adj, 'nowhere', { tellRange: 'all', confused: false, facing: null })
+        const onPlinth = flat(getTells(l, adj, 'nowhere', ALL_RESOLVED))
         expect(onPlinth.some((t) => t.kind === 'metallic'), `${seed}: no call from ${adj}`).toBe(true)
 
-        const carried = getTells(l, adj, 'nowhere', { tellRange: 'all', confused: false, facing: null, heartTaken: true })
+        const carried = flat(getTells(l, adj, 'nowhere', { ...ALL_RESOLVED, heartTaken: true }))
         expect(carried.some((t) => t.kind === 'metallic'), `${seed}: still calling after being lifted`).toBe(false)
       }
     }
@@ -282,7 +304,7 @@ describe('tells', () => {
   it('only the Heart room calls — nothing else sounds metallic', () => {
     const l = lab(3)
     for (const room of Object.values(l.rooms)) {
-      const tells = getTells(l, room.id, 'nowhere', { tellRange: 'all', confused: false, facing: null })
+      const tells = flat(getTells(l, room.id, 'nowhere', ALL_RESOLVED))
       for (const t of tells.filter((x) => x.kind === 'metallic')) {
         expect(l.rooms[room.exits[t.direction]!]!.hasHeart).toBe(true)
       }
@@ -292,22 +314,125 @@ describe('tells', () => {
   it('Confused suppresses everything — absence, never falsehood', () => {
     const l = lab(1)
     const w = neighboursOf(l, l.entranceId)[0]!
-    expect(getTells(l, l.entranceId, w, { tellRange: 'all', confused: true, facing: null })).toEqual([])
+    const senses = getTells(l, l.entranceId, w, { confused: true, resolved: [...DIRECTIONS] })
+    expect(flat(senses)).toEqual([])
+    // AND IT SAYS SO, per doorway. An empty tell list would leave a renderer
+    // unable to tell suppression from safety, which is the distinction GDD
+    // 2.8.2 exists to preserve: the player is told plainly that they are
+    // Confused and for how long.
+    expect(senses.every((s) => s.suppressed)).toBe(true)
+    expect(senses.every((s) => !s.unresolved)).toBe(true)
   })
 
-  it('darkness restricts WHICH doorways report, and LISTEN buys them back', () => {
-    const l = lab(1)
-    const here = l.entranceId
-    const facing = DIRECTIONS.find((d) => l.rooms[here]!.exits[d] !== undefined)!
-    const all = getTells(l, here, 'nowhere', { tellRange: 'all', confused: false, facing })
-    const dark = getTells(l, here, 'nowhere', { tellRange: 'facing', confused: false, facing })
-    const listened = getTells(l, here, 'nowhere', { tellRange: 'facing', confused: false, facing, listening: true })
+  /**
+   * THE INFORMATION ECONOMY, replacing the darkness/LISTEN test that stood here.
+   *
+   * The old mechanism restricted which doorways reported at all, by oil band,
+   * and LISTEN bought the full set back for a turn. Both are retired (GDD 2.8.1,
+   * 18 Sep 2026). What replaced them has to hold the same line — you may receive
+   * LESS, you may never receive something FALSE — so these are the assertions
+   * that line now needs.
+   */
+  it('an unresolved doorway reports PRESENCE, never identity', () => {
+    const l = lab(2)
+    for (const room of Object.values(l.rooms)) {
+      const senses = getTells(l, room.id, 'nowhere', { confused: false, resolved: [] })
+      for (const sense of senses) {
+        const n = l.rooms[room.exits[sense.direction]!]!
+        const hasSomething = n.hazard !== null || n.creature !== null || n.hasHeart
+        // Presence is exact: something behind it means unresolved, nothing
+        // behind it means a clean, honest silence.
+        expect(sense.unresolved, `${room.id} ${sense.direction}`).toBe(hasSomething)
+        // And nothing is named. The only tell that may appear unresolved is the
+        // Wumpus's stench, which is exempt by design — and there is no Wumpus
+        // in this labyrinth.
+        expect(sense.tells).toEqual([])
+      }
+    }
+  })
 
-    expect(dark.every((t) => t.direction === facing)).toBe(true)
-    expect(dark.length).toBeLessThanOrEqual(all.length)
-    expect(listened).toEqual(all)
-    // Whatever darkness DOES report is identical to what full light reported.
-    for (const t of dark) expect(all).toContainEqual(t)
+  it('FOCUS resolves exactly the doorway it is spent on, and no other', () => {
+    const l = lab(2)
+    for (const room of Object.values(l.rooms)) {
+      const open = DIRECTIONS.filter((d) => room.exits[d] !== undefined)
+      if (open.length < 2) continue
+      const [first, second] = open as [Direction, Direction]
+
+      const senses = getTells(l, room.id, 'nowhere', { confused: false, resolved: [first] })
+      const a = senses.find((x) => x.direction === first)!
+      const b = senses.find((x) => x.direction === second)!
+      expect(a.unresolved).toBe(false)
+      const behindB = l.rooms[room.exits[second]!]!
+      expect(b.unresolved).toBe(behindB.hazard !== null || behindB.creature !== null || behindB.hasHeart)
+      break
+    }
+  })
+
+  it('resolving a doorway never changes what is true about it', () => {
+    // The honesty half, stated as an equality: what a FOCUS returns is exactly
+    // what a fully-resolved room would have said about that doorway. Buying
+    // information cannot change the information.
+    const l = lab(4)
+    for (const room of Object.values(l.rooms)) {
+      const everything = getTells(l, room.id, 'nowhere', ALL_RESOLVED)
+      for (const dir of DIRECTIONS) {
+        if (room.exits[dir] === undefined) continue
+        const one = getTells(l, room.id, 'nowhere', { confused: false, resolved: [dir] })
+        expect(one.find((x) => x.direction === dir)!.tells)
+          .toEqual(everything.find((x) => x.direction === dir)!.tells)
+      }
+    }
+  })
+
+  it('the stench is exempt from FOCUS entirely (GDD 2.8.1)', () => {
+    // The mandatory-adjacency guarantee has to survive the information economy
+    // or the whole rework is a fairness regression. Nothing is resolved here.
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const l = lab(seed)
+      const here = l.entranceId
+      for (const w of neighboursOf(l, here)) {
+        const senses = getTells(l, here, w, { confused: false, resolved: [] })
+        expect(flat(senses).some((t) => t.kind === 'stench'), `seed ${seed}`).toBe(true)
+      }
+    }
+  })
+
+  it('a companion resolving a doorway is as good as a FOCUS on it', () => {
+    const l = lab(2)
+    const room = Object.values(l.rooms).find((r) =>
+      DIRECTIONS.some((d) => r.exits[d] !== undefined && l.rooms[r.exits[d]!]!.hazard !== null),
+    )!
+    const dir = DIRECTIONS.find(
+      (d) => room.exits[d] !== undefined && l.rooms[room.exits[d]!]!.hazard !== null,
+    )!
+    const senses = getTells(l, room.id, 'nowhere', {
+      confused: false,
+      resolved: [],
+      freeDirections: [dir],
+    })
+    const sense = senses.find((x) => x.direction === dir)!
+    expect(sense.tells.length).toBeGreaterThan(0)
+    expect(sense.unresolved).toBe(false)
+  })
+
+  it('a disarmed hazard stops calling', () => {
+    // CLAUDE.md 3, the half nobody usually tests: a tell never appears for
+    // something that is not there. DISARM makes a hazard not be there.
+    const l = lab(2)
+    const room = Object.values(l.rooms).find((r) =>
+      DIRECTIONS.some((d) => r.exits[d] !== undefined && l.rooms[r.exits[d]!]!.hazard !== null),
+    )!
+    const dir = DIRECTIONS.find(
+      (d) => room.exits[d] !== undefined && l.rooms[room.exits[d]!]!.hazard !== null,
+    )!
+    const target = room.exits[dir]!
+    const cleared: Labyrinth = {
+      ...l,
+      rooms: { ...l.rooms, [target]: { ...l.rooms[target]!, hazardCleared: true } },
+    }
+    const before = getTells(l, room.id, 'nowhere', ALL_RESOLVED).find((x) => x.direction === dir)!
+    const after = getTells(cleared, room.id, 'nowhere', ALL_RESOLVED).find((x) => x.direction === dir)!
+    expect(before.tells.length).toBeGreaterThan(after.tells.length)
   })
 })
 
@@ -363,7 +488,7 @@ describe('THE FAIRNESS INVARIANT', () => {
           break
         }
 
-        warned = getTells(l, player, w.roomId, { tellRange: 'all', confused: false, facing: null })
+        warned = flat(getTells(l, player, w.roomId, ALL_RESOLVED))
           .some((t) => t.kind === 'stench')
         scent = decayScent(scent)
       }

@@ -41,6 +41,7 @@ import type {
   Action,
   ActionKind,
   Companion,
+  DoorwaySense,
   CompanionLossReason,
   CreatureKind,
   Difficulty,
@@ -61,7 +62,7 @@ import type {
   Stats,
   Tell,
 } from './types.ts'
-import { DIRECTIONS } from './types.ts'
+import { BAND_ORDER, DIRECTIONS } from './types.ts'
 import type { Rng } from './rng.ts'
 import { createRng, rngFromState } from './rng.ts'
 import { isSuccess, roll, statModifierOf } from './dice.ts'
@@ -72,6 +73,7 @@ import {
   roomsAtLeast,
 } from './generate.ts'
 import {
+  activeHazardOf,
   createWumpus,
   decayScent,
   depositScent,
@@ -100,19 +102,23 @@ import {
   ACTION_STAT,
   DEFAULT_DIFFICULTY,
   DIFFICULTY,
+  disarmClears,
   ENTRY_HAZARDS,
   HAZARD_DC,
   HAZARD_OUTCOMES,
   HAZARD_STAT,
   HAZARD_VERB_OUTCOMES,
   HEART,
+  isStatAgnostic,
   OIL,
   oilBandFor,
+  oilCostFor,
   PLAYER,
+  quantizeOil,
   PORTAL,
-  REST,
   SCENT,
   SCENT_BY_ACTION,
+  SEARCH_FIND_BAND,
   STATUS,
   VERB_HAZARDS,
   VERBS_FOR_HAZARD,
@@ -121,12 +127,14 @@ import type { HazardVerb } from './data/tuning.ts'
 import type { EndingBeat, NoteBeat, Slots } from './data/outcomes.ts'
 import {
   companionLossText,
+  DIRECTION_WORD,
   endingText,
   HAZARD_WORD,
   hazardText,
   isDarkProse,
   noteText,
   outcomeText,
+  presenceText,
 } from './data/outcomes.ts'
 
 // ---------------------------------------------------------------------------
@@ -255,21 +263,33 @@ export function hasStatus(player: Player, status: StatusEffect): boolean {
 
 const ACTION_LABEL: Record<ActionKind, string> = {
   move: 'Move',
-  listen: 'Listen',
+  focus: 'Focus',
   search: 'Search the room',
   force: 'Force',
   endure: 'Endure',
   avoid: 'Avoid',
   dodge: 'Dodge',
+  disarm: 'Disarm',
   sneak: 'Sneak',
   fight: 'Fight',
   tame: 'Tame',
   flee: 'Flee',
   use: 'Use',
-  read: 'Read the carvings',
   enterPortal: 'Enter the portal',
   rest: 'Rest',
   send: 'Send',
+  dropHeart: 'Set down the Heart',
+}
+
+/**
+ * Directional labels spell the compass out. 1h finding 5: the menu said
+ * `Move N` while the doorway list six lines above it said `north`, and
+ * `DIRECTION_WORD` exists precisely because — in its own comment — "compass
+ * letters read badly in a sentence". Both spellings were on screen at once.
+ * Settled in 1i with the screen in front of us, per Gautham.
+ */
+function directionalLabel(verb: ActionKind, direction: Direction): string {
+  return `${ACTION_LABEL[verb]} ${DIRECTION_WORD[direction]}`
 }
 
 // ---------------------------------------------------------------------------
@@ -295,8 +315,6 @@ export function createRun(seed: number, options: CreateRunOptions = {}): GameSta
     roomId: labyrinth.entranceId,
     facing: null,
     stats,
-    health: PLAYER.maxHealth,
-    maxHealth: PLAYER.maxHealth,
     oil: OIL.starting,
     maxOil: OIL.max,
     fortune: Math.floor(stats.lck / PLAYER.fortuneDivisor),
@@ -319,6 +337,8 @@ export function createRun(seed: number, options: CreateRunOptions = {}): GameSta
     outcome: 'inProgress',
     encounterRoomId: null,
     hazardRoomId: null,
+    focusedByRoom: {},
+    heartTaken: false,
     actionLog: [],
   }
 }
@@ -396,10 +416,10 @@ export function legalActions(state: GameState): LegalAction[] {
         for (const direction of DIRECTIONS) {
           const to = here.exits[direction]
           if (to === undefined || direction === retreat) continue
-          out.push({ action: { kind: 'sneak', direction }, label: `Sneak ${direction}`, dc })
+          out.push({ action: { kind: 'sneak', direction }, label: directionalLabel('sneak', direction), dc })
         }
       } else if (retreat !== null) {
-        out.push({ action: { kind: 'flee', direction: retreat }, label: `Flee ${retreat}`, dc })
+        out.push({ action: { kind: 'flee', direction: retreat }, label: directionalLabel('flee', retreat), dc })
       }
     }
     return out
@@ -407,13 +427,35 @@ export function legalActions(state: GameState): LegalAction[] {
 
   for (const direction of DIRECTIONS) {
     if (here.exits[direction] === undefined) continue
-    out.push({ action: { kind: 'move', direction }, label: `Move ${direction}`, dc: dcOf('move') })
+    out.push({
+      action: { kind: 'move', direction },
+      label: directionalLabel('move', direction),
+      dc: dcOf('move'),
+    })
   }
 
-  out.push({ action: { kind: 'listen' }, label: ACTION_LABEL.listen, dc: dcOf('listen') })
+  // FOCUS, one entry per doorway still worth looking through. The filtering is
+  // the mechanic (GDD 2.7): a doorway already resolved is not offered, and once
+  // the room's difficulty-set allowance is spent none of them are. GDD 2.17
+  // forbids showing an unavailable verb greyed out, so a Ravening player who has
+  // spent their one look simply has no FOCUS in the menu — which is what makes
+  // the remaining doorways a guess rather than a purchase.
+  for (const direction of focusableDirections(state)) {
+    out.push({
+      action: { kind: 'focus', direction },
+      label: directionalLabel('focus', direction),
+      dc: dcOf('focus'),
+    })
+  }
+
   out.push({ action: { kind: 'search' }, label: ACTION_LABEL.search, dc: dcOf('search') })
-  out.push({ action: { kind: 'read' }, label: ACTION_LABEL.read, dc: dcOf('read') })
   out.push({ action: { kind: 'rest' }, label: ACTION_LABEL.rest, dc: dcOf('rest') })
+
+  // Free and unconditional, and offered only while there is a Heart in your
+  // hands to set down (GDD 2.9.1). No DC: it does not roll.
+  if (player.carryingHeart) {
+    out.push({ action: { kind: 'dropHeart' }, label: ACTION_LABEL.dropHeart })
+  }
 
   if (here.hazard === 'portal') {
     out.push({ action: { kind: 'enterPortal' }, label: ACTION_LABEL.enterPortal, dc: dcOf('enterPortal') })
@@ -429,7 +471,7 @@ export function legalActions(state: GameState): LegalAction[] {
     if (!canSend(labyrinth, player, direction)) continue
     out.push({
       action: { kind: 'send', direction },
-      label: `Send the ${player.companion?.kind ?? 'companion'} ${direction}`,
+      label: `Send the ${player.companion?.kind ?? 'companion'} ${DIRECTION_WORD[direction]}`,
       dc: dcOf('send'),
     })
   }
@@ -440,6 +482,48 @@ export function legalActions(state: GameState): LegalAction[] {
   // they are ever offered. FORCE in particular is not a door-opener: GDD 2.7.
 
   return out
+}
+
+// ---------------------------------------------------------------------------
+// FOCUS — the information economy. GDD 2.7, 2.8.1 (18 Sep 2026)
+// ---------------------------------------------------------------------------
+
+/** Doorways FOCUS has already resolved in a room. */
+export function focusedIn(state: GameState, roomId: RoomId): readonly Direction[] {
+  return state.focusedByRoom[roomId] ?? []
+}
+
+/** How many more doorways this room is worth looking through. */
+export function focusesLeft(state: GameState): number {
+  const cap = DIFFICULTY[state.labyrinth.difficulty].focusesPerRoom
+  return Math.max(0, cap - focusedIn(state, state.player.roomId).length)
+}
+
+/**
+ * Doorways a FOCUS is available on right now.
+ *
+ * Four things have to be true, and each one is a different rule: you are not
+ * Confused, the room's allowance is not spent (difficulty), this doorway is not
+ * already resolved (no paying twice for the same answer), and there is a doorway
+ * there at all.
+ *
+ * CONFUSED REMOVES THE VERB rather than letting it fail. Confused suppresses
+ * every tell for its duration (GDD 2.8.2), so a FOCUS taken under it would spend
+ * a turn and an oil price to learn precisely nothing — and GDD 2.17 says
+ * `legalActions` is filtered to what is ACTUALLY available, not padded with
+ * options that cannot work. Offering it anyway would be a trap dressed as a
+ * choice, which is a different thing from a hard decision.
+ *
+ * It costs the player nothing they would have wanted: the allowance is per room
+ * for the whole run, so the doorway is still there to be bought once the
+ * sweetness thins.
+ */
+export function focusableDirections(state: GameState): Direction[] {
+  if (hasStatus(state.player, 'confused')) return []
+  if (focusesLeft(state) <= 0) return []
+  const here = roomOf(state.labyrinth, state.player.roomId)
+  const already = new Set(focusedIn(state, state.player.roomId))
+  return DIRECTIONS.filter((d) => here.exits[d] !== undefined && !already.has(d))
 }
 
 function isEncounterLive(state: GameState): boolean {
@@ -460,13 +544,21 @@ function isEncounterLive(state: GameState): boolean {
 function liveHazardKind(state: GameState): HazardKind | null {
   if (state.hazardRoomId === null) return null
   if (state.hazardRoomId !== state.player.roomId) return null
-  const hazard = roomOf(state.labyrinth, state.player.roomId).hazard
+  // The LIVE hazard: a DISARM earlier in the run takes the room out of this
+  // branch for good, which is the whole point of the verb (GDD 2.7).
+  const hazard = activeHazardOf(roomOf(state.labyrinth, state.player.roomId))
   if (hazard === null || !VERB_HAZARDS.includes(hazard)) return null
   return hazard
 }
 
 function isHazardVerb(kind: ActionKind): kind is HazardVerb {
-  return kind === 'force' || kind === 'endure' || kind === 'avoid' || kind === 'dodge'
+  return (
+    kind === 'force' ||
+    kind === 'endure' ||
+    kind === 'avoid' ||
+    kind === 'dodge' ||
+    kind === 'disarm'
+  )
 }
 
 /** Where FLEE goes: back the way you came. Null if you have not moved yet. */
@@ -498,17 +590,17 @@ interface Draft {
   playerRoomId: RoomId
   facing: Direction | null
   stats: Stats
-  health: number
   oil: number
   fortune: number
   companion: Companion | null
   carryingHeart: boolean
+  heartTaken: boolean
   inventory: string[]
   statuses: Partial<Record<StatusEffect, number>>
   scent: ScentField
+  focusedByRoom: Record<RoomId, readonly Direction[]>
   /** Deposits owed at step 4, keyed by the room they land in. */
   pendingScent: { roomId: RoomId; amount: number; fromPlayer: boolean }[]
-  damage: number
   oilDelta: number
   applyStatus: StatusEffect | null
   /** Turns `applyStatus` lasts. Meaningless while `applyStatus` is null. */
@@ -516,6 +608,12 @@ interface Draft {
   turnCost: number
   fatal: boolean
   takesHeart: boolean
+  /**
+   * Where the Heart being picked up is coming FROM. Normally the room the player
+   * is standing in; a bad ENTER PORTAL makes it the new labyrinth's Heart room,
+   * because you surface already holding a Heart you never walked to (GDD 2.8).
+   */
+  heartFromRoomId: RoomId | null
   encounterRoomId: RoomId | null
   hazardRoomId: RoomId | null
   events: GameEvent[]
@@ -552,22 +650,23 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     playerRoomId: state.player.roomId,
     facing: state.player.facing,
     stats: state.player.stats,
-    health: state.player.health,
     oil: state.player.oil,
     fortune: state.player.fortune,
     companion: state.player.companion,
     carryingHeart: state.player.carryingHeart,
+    heartTaken: state.heartTaken,
     inventory: [...state.player.inventory],
     statuses: { ...state.player.statuses },
     scent: state.scent,
+    focusedByRoom: { ...state.focusedByRoom },
     pendingScent: [],
-    damage: 0,
     oilDelta: 0,
     applyStatus: null,
     applyStatusTurns: STATUS.confusedTurns,
     turnCost: 1,
     fatal: false,
     takesHeart: false,
+    heartFromRoomId: null,
     encounterRoomId: state.encounterRoomId,
     hazardRoomId: state.hazardRoomId,
     events: [],
@@ -577,7 +676,6 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
 
   let wumpus = state.wumpus
   const outcome = state.outcome
-  let listening = false
 
   // =========================================================================
   // 1. Player acts — the action resolves, the roll lands, the outcome applies
@@ -585,7 +683,23 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   const rollResult = rollForAction(state, d, action, rng)
   if (rollResult) d.events.push({ kind: 'roll', action: action.kind, result: rollResult })
 
-  listening = action.kind === 'listen'
+  // THE PRICE OF DOING IT, BEFORE ANYTHING IT DID.
+  //
+  // GDD 2.6 (18 Sep 2026): cost is margin, not injury. Every action carries an
+  // oil price and the band it rolled scales that price — a bad roll spends more
+  // of what you were already spending, a good one spends less, and the top two
+  // bands hand a little back. This one line replaces the whole of the old model:
+  // the passive burn every two turns, `OIL.extraCost` for the quiet verbs, the
+  // `oilLoss` column on the hazard tables, and the conditional flask reward.
+  //
+  // It is charged HERE, uniformly, before `applyActionOutcome` gets to say what
+  // the action did — so no verb can quietly acquire a second price further down,
+  // which is exactly how the old model grew three of them.
+  //
+  // An unrolled action (DROP HEART) prices at the `success` band, which for it
+  // is zero anyway; `oilCostFor` is what decides that, not this call site.
+  d.oilDelta -= oilCostFor(action.kind, rollResult?.band ?? 'success')
+
   applyActionOutcome(state, d, action, rollResult, rng)
 
   // =========================================================================
@@ -600,21 +714,29 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   // =========================================================================
   if (d.oilDelta !== 0) {
     const beat: NoteBeat = d.oilDelta > 0 ? 'lampBrightens' : 'lampGutters'
-    d.oil = Math.max(0, Math.min(OIL.max, d.oil + d.oilDelta))
-    d.events.push({ kind: 'oilChanged', delta: d.oilDelta, text: noteText(beat, dark(d)), beat })
+    // Quantized on every write, not just on the price: oil accumulates across a
+    // whole run, and rounding only the inputs still lets the total drift into
+    // binary dust (CLAUDE.md 2.5 — GameState must JSON round-trip unchanged).
+    d.oil = quantizeOil(Math.max(0, Math.min(OIL.max, d.oil + d.oilDelta)))
+    d.events.push({
+      kind: 'oilChanged',
+      delta: quantizeOil(d.oilDelta),
+      text: noteText(beat, dark(d)),
+      beat,
+    })
   }
 
-  if (d.damage > 0) {
-    d.health -= d.damage
-    d.events.push({ kind: 'damage', amount: d.damage, cause: action.kind })
-    // Skittish companions bolt on DAMAGE TAKEN, never on a failed roll — failed
-    // rolls are over 40% at starting stats, which would make a mixed tame
-    // worthless (GDD 2.9). Fortune could save it; spending is a renderer
-    // decision the reducer does not make for the player.
-    if (skittishBolts(d.companion, d.damage, false) && d.companion !== null) {
-      lostCompanion(d, d.companion.kind, 'bolted')
-      d.companion = null
-    }
+  // Skittish companions bolt on a CRITICAL FAILURE — the band where the world
+  // escalates. This replaced "bolts on damage taken" when health was retired;
+  // see `skittishBolts`. Fortune could save it, and spending is a renderer
+  // decision the reducer does not make for the player.
+  if (
+    rollResult !== null &&
+    skittishBolts(d.companion, rollResult.band, false) &&
+    d.companion !== null
+  ) {
+    lostCompanion(d, d.companion.kind, 'bolted')
+    d.companion = null
   }
 
   if (d.applyStatus !== null) {
@@ -635,23 +757,42 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
   let revealedPlayerRoom: RoomId | null = null
   if (d.takesHeart) {
     d.carryingHeart = true
-    d.labyrinth = withRoom(d.labyrinth, d.playerRoomId, { hasHeart: false })
-    const before = wumpus.tier
-    wumpus = escalate(wumpus, HEART.tierEscalation)
-    // The loudest thing in the game, and the only moment it learns a position it
-    // did not smell for itself.
-    d.pendingScent.push({ roomId: d.playerRoomId, amount: SCENT.heartTaken, fromPlayer: false })
-    revealedPlayerRoom = d.playerRoomId
-    note(d, 'heartTaken')
-    d.events.push({ kind: 'heartTaken' })
-    if (wumpus.tier !== before) {
-      note(d, 'wumpusEscalates')
-      d.events.push({ kind: 'wumpusTierChanged', tier: wumpus.tier })
+    d.labyrinth = withRoom(d.labyrinth, d.heartFromRoomId ?? d.playerRoomId, { hasHeart: false })
+
+    // THE ESCALATION FIRES ONCE PER RUN, not once per pickup.
+    //
+    // `DROP HEART` (GDD 2.9.1) means the Heart can leave your hands and come
+    // back, and the tier jump plus the one-turn position reveal are what the
+    // labyrinth does when it NOTICES — "the labyrinth having noticed doesn't
+    // un-notice just because the Heart is back on the ground", and by the same
+    // token it does not notice twice. Without this gate, setting the Heart down
+    // and picking it up again would walk a Stirring Wumpus to Ravening for the
+    // price of two turns.
+    if (!d.heartTaken) {
+      d.heartTaken = true
+      const before = wumpus.tier
+      wumpus = escalate(wumpus, HEART.tierEscalation)
+      // The loudest thing in the game, and the only moment it learns a position
+      // it did not smell for itself.
+      d.pendingScent.push({ roomId: d.playerRoomId, amount: SCENT.heartTaken, fromPlayer: false })
+      revealedPlayerRoom = d.playerRoomId
+      note(d, d.heartFromRoomId === null ? 'heartTaken' : 'heartThrustUpon')
+      d.events.push({ kind: 'heartTaken' })
+      if (wumpus.tier !== before) {
+        note(d, 'wumpusEscalates')
+        d.events.push({ kind: 'wumpusTierChanged', tier: wumpus.tier })
+      }
+    } else {
+      // Picking it back up after a DROP. Quiet by comparison — the trail goes
+      // hot again (step 4's multiplier), and nothing else changes.
+      note(d, 'heartTaken')
+      d.events.push({ kind: 'heartTaken' })
     }
   }
 
+  // Only two things end a run in death, and this is one of them (GDD 2.6). The
+  // `killedByDamage` branch that stood here is gone with health itself.
   if (d.fatal) return finish(state, d, wumpus, 'killed', 'killedByHazard')
-  if (d.health <= 0) return finish(state, d, wumpus, 'killed', 'killedByDamage')
 
   // =========================================================================
   // 4. Scent deposited for the action taken
@@ -735,7 +876,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     const upkeep = companionUpkeep(d.companion, d.oil, rng)
     if (upkeep.oilDelta !== 0) {
       const beat: NoteBeat = upkeep.scrounged ? 'goblinScrounges' : 'skittishUpkeep'
-      d.oil = Math.max(0, Math.min(OIL.max, d.oil + upkeep.oilDelta))
+      d.oil = quantizeOil(Math.max(0, Math.min(OIL.max, d.oil + upkeep.oilDelta)))
       d.events.push({
         kind: 'oilChanged',
         delta: upkeep.oilDelta,
@@ -751,24 +892,13 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
 
   for (let step = 0; step < d.turnCost; step++) d.scent = decayScent(d.scent)
 
-  // Oil burns once every OIL.burnEveryNTurns turns, counted over the turns this
-  // action actually consumed — so a two-turn tame can cross a burn boundary.
-  let burned = 0
-  for (let t = state.turn; t < state.turn + d.turnCost; t++) {
-    if (t % OIL.burnEveryNTurns === 0) burned += 1
-  }
-  if (burned > 0) {
-    const before = d.oil
-    d.oil = Math.max(0, d.oil - burned)
-    if (d.oil !== before) {
-      d.events.push({
-        kind: 'oilChanged',
-        delta: d.oil - before,
-        text: noteText('lampBurnsDown', dark(d)),
-        beat: 'lampBurnsDown',
-      })
-    }
-  }
+  // THE PASSIVE BURN IS GONE. It stood here and took one oil every two turns
+  // whatever the player did (GDD 2.8.1, retired 18 Sep 2026). Oil is spent per
+  // ACTION now, at step 1, and the reason is the turn cap: a burn that was an
+  // anti-dawdling tax against 20 turns would be a second death clock against 50,
+  // which the oil design has rejected since 16 Sep and GDD 2.8.1 still forbids.
+  // `lampBurnsDown` survives as a beat because a flask spilling and a lamp
+  // guttering still need words; nothing in the reducer emits it on a timer.
 
   // Statuses tick here, at the end of the turn, so a status applied this turn
   // is still in force for the tells the player reads before choosing next.
@@ -812,7 +942,7 @@ export function applyAction(state: GameState, action: Action, rng: Rng): ApplyRe
     return finish(state, d, wumpus, 'outOfTurns', 'outOfTurns', nextTurn)
   }
 
-  return commit(state, d, wumpus, outcome, nextTurn, listening, action, rng)
+  return commit(state, d, wumpus, outcome, nextTurn, action, rng)
 }
 
 /**
@@ -886,6 +1016,12 @@ function tickStatuses(
  * they rolled, and an unlabelled modifier is a bug (CLAUDE.md 4).
  */
 function rollForAction(state: GameState, d: Draft, action: Action, rng: Rng): RollResult | null {
+  // GDD 2.7: "Every action is a roll except DROP HEART, which is free and
+  // unconditional." Returning null before touching the rng matters as much as
+  // the rule does — a drawn-and-discarded d20 would move the generator, and
+  // (seed, actionLog) has to replay identically forever (CLAUDE.md 2.2).
+  if (action.kind === 'dropHeart') return null
+
   const here = roomOf(d.labyrinth, d.playerRoomId)
   const encounter = isEncounterLive(state)
 
@@ -901,8 +1037,17 @@ function rollForAction(state: GameState, d: Draft, action: Action, rng: Rng): Ro
   const band = oilBandFor(d.oil)
   // Every contribution is listed, including a zero one. A stat modifier of 0 is
   // a fact the player should see, not an omission — the roll breakdown is how
-  // the mechanic teaches itself (GDD 2.8.1, CLAUDE.md 4).
-  const modifiers: Modifier[] = [statModifierOf(d.stats, stat)]
+  // the mechanic teaches itself (GDD 2.8.1, CLAUDE.md 4). At the new starting
+  // stat of 10 that zero is what a fresh character sees on every line, which is
+  // the point of moving it off 8.
+  //
+  // DISARM IS THE ONE ACTION WITH NO STAT LINE AT ALL. That is not an unlabelled
+  // modifier sneaking in (CLAUDE.md 4 forbids those) — it is the absence of one,
+  // and it is the mechanic: DISARM is stat-agnostic so that no build gets a
+  // universal answer to both verb hazards (see STAT_AGNOSTIC_ACTIONS). Its
+  // breakdown reads as the die against a Moderate DC, plus the lamp, and that
+  // emptiness is itself legible: this one is the same for everybody.
+  const modifiers: Modifier[] = isStatAgnostic(action.kind) ? [] : [statModifierOf(d.stats, stat)]
   if (band.modifier !== 0) modifiers.push({ source: band.label, value: band.modifier })
   modifiers.push(...companionRollModifiers(d.companion, action.kind))
 
@@ -961,16 +1106,30 @@ function applyActionOutcome(
       return
     }
 
-    case 'listen':
     case 'search':
-    case 'read':
     case 'rest': {
       // Room-led, and the room is the one you are standing in. The line comes
-      // first; anything the action turned up (a flask, a breath, a carving) is
-      // its own beat after it.
+      // first; anything the action turned up (a flask, a breath) is its own beat
+      // after it.
       narrateOutcome(d, action.kind, band, d.playerRoomId)
       applyQuietAction(d, action.kind, band)
       pushPlayerScent(d, action.kind, band)
+      return
+    }
+
+    case 'focus': {
+      resolveFocus(d, action.direction, band)
+      return
+    }
+
+    case 'dropHeart': {
+      // Free, unconditional, unrolled (GDD 2.9.1). What it cancels is the
+      // carrying multiplier at step 4 and nothing else — the tier jump and the
+      // position reveal already happened and are not taken back.
+      d.carryingHeart = false
+      d.labyrinth = withRoom(d.labyrinth, d.playerRoomId, { hasHeart: true })
+      note(d, 'heartDropped')
+      pushPlayerScent(d, 'dropHeart', band)
       return
     }
 
@@ -979,7 +1138,15 @@ function applyActionOutcome(
       narrateOutcome(d, 'use', band, d.playerRoomId, { item: action.item })
       if (at >= 0) {
         d.inventory = [...d.inventory.slice(0, at), ...d.inventory.slice(at + 1)]
-        if (action.item === 'oilFlask') d.oilDelta += OIL.flaskValue
+        // ROLLED, NOT FLAT, as of 18 Sep 2026 (GDD 2.8.1). A good pour restores
+        // the whole flask; a bad one spills half of it. The flask is spent
+        // either way — that is what makes it a roll worth caring about rather
+        // than a button that always gives you four oil.
+        if (action.item === 'oilFlask') {
+          d.oilDelta += isSuccess(band)
+            ? OIL.flaskValue
+            : OIL.flaskValue * OIL.botchedFlaskFraction
+        }
       }
       pushPlayerScent(d, 'use', band)
       return
@@ -1008,10 +1175,41 @@ function applyActionOutcome(
     case 'endure':
     case 'avoid':
     case 'dodge':
+    case 'disarm':
       // Only reachable with no live hazard, which legalActions forbids — the
       // exact mirror of the fight/tame/flee case above.
       return
   }
+}
+
+/**
+ * FOCUS — buying one doorway's identity. GDD 2.7 (18 Sep 2026).
+ *
+ * IT ALWAYS RESOLVES. The band scales what the looking COST (step 1 already
+ * charged it) and never what came back, and that is not a softness — GDD 2.8.1
+ * rejects probabilistic tells outright, and a FOCUS that sometimes returned
+ * nothing would be exactly that with extra steps. The old `LISTEN` was
+ * one-valued for the same reason and it is the right shape.
+ *
+ * The doorway is recorded as resolved for the rest of the run. What is stored is
+ * the PERMISSION, never the answer: `tellsFor` recomputes what is actually
+ * through there every turn, so a creature that wanders off does not leave behind
+ * a remembered skittering that has become a lie.
+ */
+function resolveFocus(d: Draft, direction: Direction, band: OutcomeBand): void {
+  narrateOutcome(d, 'focus', band, d.playerRoomId, { direction })
+
+  const already = d.focusedByRoom[d.playerRoomId] ?? []
+  if (!already.includes(direction)) {
+    d.focusedByRoom = {
+      ...d.focusedByRoom,
+      // Sorted, so the same run replays to a byte-identical state whatever order
+      // the doorways were bought in. CLAUDE.md 2.2.
+      [d.playerRoomId]: [...already, direction].sort(),
+    }
+  }
+
+  pushPlayerScent(d, 'focus', band)
 }
 
 /**
@@ -1041,26 +1239,55 @@ function resolveHazardVerb(
   // ignored by the lookup and the room id is passed only to satisfy it.
   narrateOutcome(d, verb, band, d.playerRoomId, { hazard })
 
-  d.damage += out.damage
-  d.oilDelta -= out.oilLoss
+  // The verb's oil was charged at step 1 with every other action's, and the
+  // `damage`, `oilLoss` and `rewardFlasks` columns that used to be read here no
+  // longer exist (GDD 2.6). What a hazard row still owns is the clock and the
+  // status, which are the two things oil cannot say.
   d.turnCost += out.extraTurns
-  if (out.applies !== null) {
+  if (out.applies !== null && hazardCanApply(hazard, out.applies)) {
     d.applyStatus = out.applies
     d.applyStatusTurns = out.statusTurns
   }
 
-  if (out.rewardFlasks > 0) {
-    for (let i = 0; i < out.rewardFlasks; i++) d.inventory = [...d.inventory, 'oilFlask']
-    note(d, 'hazardCleared', { hazard })
+  // The beat for a clear that went WELL — the diegetic partner to the oil the
+  // band hands back. It used to announce a flask; the flask is gone and the
+  // line was rewritten to describe the thing that is still true at these bands,
+  // so it is gated on the same test: did this actually return oil?
+  //
+  // Wired rather than deleted because a `NoteBeat` nothing emits is dead content
+  // (the standard 1g applied to `HAZARD_NARRATION`'s bloom and snare rows), and
+  // `tests/outcomes.test.ts`'s beat ledger is what noticed it had come loose.
+  if (oilCostFor(verb, band) < 0) note(d, 'hazardCleared', { hazard })
+
+  if (verb === 'disarm' && disarmClears(band)) {
+    // GONE, not answered. This is the ONLY thing in the game that changes the
+    // terrain mid-run, and it is deliberate rather than an erosion of "terrain
+    // never drifts" (GDD 2.9.1): drift is what the labyrinth does on its own,
+    // and this is a turn and a roll the player spent on purpose. It is recorded
+    // as a flag so generation's contracts stay checkable — see `activeHazardOf`.
+    d.labyrinth = withRoom(d.labyrinth, d.playerRoomId, { hazardCleared: true })
+    note(d, 'hazardDisarmed', { hazard })
   }
 
-  // The hazard is ANSWERED, not removed. `Room.hazard` stays exactly where
-  // generation put it — terrain never drifts within a run (GDD 2.9.1), and a
-  // bloom you walked through is still a bloom to whoever comes back this way,
-  // including you. What clears is the encounter, not the world.
+  // Otherwise the hazard is ANSWERED, not removed. `Room.hazard` stays exactly
+  // where generation put it, and a bloom you walked through is still a bloom to
+  // whoever comes back this way, including you. What clears is the encounter.
   d.hazardRoomId = null
 
   pushPlayerScent(d, verb, band)
+}
+
+/**
+ * Whether a hazard can produce a status at all.
+ *
+ * DISARM has ONE row shape for both hazards, because it does the same job to
+ * each — but a bloom Confuses and a snare does not, and a player who took a
+ * snare apart badly must not come out of it blind. The table says what the verb
+ * costs; this says what the hazard is capable of doing to you.
+ */
+function hazardCanApply(hazard: HazardKind, status: StatusEffect): boolean {
+  if (status === 'confused') return hazard === 'sporeBloom'
+  return true
 }
 
 /**
@@ -1158,13 +1385,15 @@ function resolveHazard(d: Draft, hazard: HazardKind, rng: Rng): void {
   const text = hazardText(hazard, result.band, dark(d))
   if (text !== null) d.events.push({ kind: 'narration', text, beat: 'hazardOutcome' })
 
+  // BINARY, since 18 Sep 2026: `fatal` or nothing at all. The pit's Mixed
+  // Success survive-band went with health (GDD 2.8) — there is no honest
+  // currency left for catching the lip to be paid in, and "instant loss" is what
+  // a pit has always been in play anyway.
   const out = table[result.band]
   if (out.fatal) {
     d.fatal = true
     return
   }
-  d.damage += out.damage
-  d.oilDelta -= out.oilLoss
   d.turnCost += out.extraTurns
   if (out.applies !== null) {
     d.applyStatus = out.applies
@@ -1173,10 +1402,15 @@ function resolveHazard(d: Draft, hazard: HazardKind, rng: Rng): void {
 }
 
 function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
-  const extra = OIL.extraCost[kind] ?? 0
-  if (extra > 0) d.oilDelta -= extra
+  // `OIL.extraCost` is gone: SEARCH and REST are priced in `OIL_PRICE` with
+  // every other verb, and the surcharge that used to be applied here was the
+  // second of the old model's three separate places for "what this costs you".
 
-  if (kind === 'search' && isSuccess(band)) {
+  // SEARCH pays at SUCCESS-or-better, a band later than everything else in the
+  // game. That is GDD 2.7's "finds loot at lower reliability" — the price of
+  // being FOCUS's cheap sibling is a worse find rate, and this is where it is
+  // charged rather than in the oil.
+  if (kind === 'search' && bandAtLeast(band, SEARCH_FIND_BAND)) {
     const here = roomOf(d.labyrinth, d.playerRoomId)
     if (here.oilFlask) {
       d.labyrinth = withRoom(d.labyrinth, d.playerRoomId, { oilFlask: false })
@@ -1185,25 +1419,17 @@ function applyQuietAction(d: Draft, kind: ActionKind, band: OutcomeBand): void {
     }
   }
 
-  if (kind === 'read' && isSuccess(band)) {
-    // READ is the poor cousin of a grellhound: one turn and one point of oil
-    // buys, once, what the hound gives you every turn for free.
-    const here = roomOf(d.labyrinth, d.playerRoomId)
-    for (const direction of DIRECTIONS) {
-      const id = here.exits[direction]
-      if (id === undefined) continue
-      const hazard = roomOf(d.labyrinth, id).hazard
-      if (hazard) note(d, 'carvingsWarn', { hazard, direction })
-    }
-  }
+  // REST has nothing to heal any more (GDD 2.6). What a good one buys is its own
+  // price back — `OIL_PRICE_OVERRIDE.rest` makes a mixed-or-better REST cost
+  // nothing and a bad one cost 0.5 — so the beat is the refund, not a recovery.
+  // The world still turns through it: the Wumpus moves, creatures drift, and
+  // nothing in this game pauses.
+  if (kind === 'rest' && isSuccess(band)) note(d, 'caughtBreath')
+}
 
-  if (kind === 'rest' && isSuccess(band)) {
-    const healed = Math.min(REST.healOnSuccess, PLAYER.maxHealth - d.health)
-    if (healed > 0) {
-      d.health += healed
-      note(d, 'caughtBreath')
-    }
-  }
+/** True when `band` is at or above `floor` in BAND_ORDER. */
+function bandAtLeast(band: OutcomeBand, floor: OutcomeBand): boolean {
+  return BAND_ORDER.indexOf(band) >= BAND_ORDER.indexOf(floor)
 }
 
 /** Resolve one of the four encounter options against its band. */
@@ -1238,15 +1464,14 @@ function resolveEncounterAction(
   )
 
   d.turnCost = result.turnCost
-  d.damage += result.damage
   d.pendingScent.push({ roomId, amount: result.scent, fromPlayer: true })
 
-  // What you drove off was carrying something. GDD 2.8's hazard-reward pass
-  // covers a successful FIGHT for the same reason it covers the hazard verbs:
-  // a cleared room pays, and FIGHT is the only encounter option that clears one
-  // without already paying you a companion.
-  if (result.rewardFlasks > 0) {
-    for (let i = 0; i < result.rewardFlasks; i++) d.inventory = [...d.inventory, 'oilFlask']
+  // What you drove off was carrying something — and as of 18 Sep it pays in the
+  // same currency as everything else, through the band's own oil delta charged
+  // at step 1. There is no separate flask reward to hand out here, which is what
+  // closes 1g's open question about whether FIGHT should pay a band later than
+  // TAME: both are now paid on one curve.
+  if (result.creatureRemains === false && isSuccess(band) && action.kind === 'fight') {
     note(d, 'spoilsTaken', { creature })
   }
 
@@ -1325,8 +1550,6 @@ function resolveSend(d: Draft, direction: Direction, band: OutcomeBand): void {
     roomId: d.playerRoomId,
     facing: d.facing,
     stats: { str: 0, agi: 0, int: 0, lck: 0 },
-    health: d.health,
-    maxHealth: PLAYER.maxHealth,
     oil: d.oil,
     maxOil: OIL.max,
     fortune: d.fortune,
@@ -1335,14 +1558,16 @@ function resolveSend(d: Draft, direction: Direction, band: OutcomeBand): void {
     inventory: d.inventory,
     statuses: d.statuses,
   }
-  const sent = sendCompanion(d.labyrinth, player, direction)
+  // THE BAND IS NO LONGER INERT. Through 1h the decoy's strength came from which
+  // creature you had tamed; as of 18 Sep it comes from this roll — 3 turns of
+  // decoy on a good send, 2 on a bad one, halved either way while you carry the
+  // Heart (GDD 2.9). So the prose below now describes something that actually
+  // differs band to band.
+  const sent = sendCompanion(d.labyrinth, player, direction, band)
   if (sent === null) return
 
   d.pendingScent.push({ roomId: sent.targetRoomId, amount: sent.scent, fromPlayer: false })
 
-  // The band line first — how it went — then the loss. SEND's band is
-  // mechanically inert (see the SEND note in data/outcomes.ts), so these lines
-  // describe the MANNER of the going and never a difference in the decoy.
   narrateOutcome(d, 'send', band, d.playerRoomId, { companion: sent.sent, direction })
 
   // THE COMPANION DOES NOT COME BACK. No chance, no rescue, no un-choosing it
@@ -1357,9 +1582,19 @@ function resolveSend(d: Draft, direction: Direction, band: OutcomeBand): void {
  *
  * Everything you charted is gone, and so is every trail you laid: the Wumpus
  * loses your scent completely, which is the whole reason to take the gamble.
- * The INT band decides how deep you surface, never whether you arrive — a
- * portal that could strand you would be a second instant-loss check, and the
- * design only has room for one of those.
+ *
+ * THE TWO OUTCOMES ARE DELIBERATELY FAR APART, and GDD 2.8 marks this
+ * non-negotiable. A good read reseeds you into a fresh labyrinth with your oil
+ * intact and a clean scent field — the gamble paying off. A bad one surfaces you
+ * ALREADY HOLDING the new labyrinth's Heart: no exploration phase, no map, the
+ * Wumpus escalated and briefly certain of where you are, and nothing ahead but
+ * the escape problem. It still never strands you — a portal that could kill
+ * would be a second instant-loss check and the design has room for one.
+ *
+ * `DROP HEART` is what makes the bad half survivable rather than merely brutal
+ * (GDD 2.9.1): set it down, walk out clean, and the only thing it cost you is
+ * the run you were having. The escalation does not come back off, which is why
+ * it is a real decision and not an undo.
  */
 function resolvePortal(d: Draft, band: OutcomeBand, rng: Rng): void {
   const old = d.labyrinth
@@ -1375,13 +1610,23 @@ function resolvePortal(d: Draft, band: OutcomeBand, rng: Rng): void {
 
   // roomsAtLeast returns them sorted by distance, so the near half is literally
   // the front of the list. A good read puts you nearer the way out.
+  const good = isSuccess(band)
   const half = Math.max(1, Math.ceil(candidates.length / 2))
-  const pool = isSuccess(band) ? candidates.slice(0, half) : candidates.slice(half)
+  const pool = good ? candidates.slice(0, half) : candidates.slice(half)
   const landing = rng.pick(pool.length > 0 ? pool : candidates)
 
   let next = withRoom(fresh, landing, { visited: true })
   // You are still holding it. The new labyrinth does not get to hand you a second.
   if (d.carryingHeart) next = withRoom(next, next.heartRoomId, { hasHeart: false })
+  else if (!good) {
+    // A BAD READ PUTS IT IN YOUR HANDS. Routed through the ordinary Heart-pickup
+    // path at step 3 rather than escalating here, so a Heart taken through a
+    // portal and a Heart lifted off a plinth cannot diverge — same tier jump,
+    // same one-turn reveal, same once-per-run gate. `heartFromRoomId` is what
+    // tells step 3 to clear the plinth you never stood at.
+    d.takesHeart = true
+    d.heartFromRoomId = next.heartRoomId
+  }
 
   d.labyrinth = next
   d.playerRoomId = landing
@@ -1434,7 +1679,7 @@ function finish(
   // before `runEnded` and there is no path out of a run that skips it.
   d.events.push({ kind: 'narration', text: endingText(beat, dark(d)), beat })
   d.events.push({ kind: 'runEnded', outcome })
-  return commit(state, d, wumpus, outcome, turn, false, d.action, d.rng)
+  return commit(state, d, wumpus, outcome, turn, d.action, d.rng)
 }
 
 function commit(
@@ -1443,7 +1688,6 @@ function commit(
   wumpus: GameState['wumpus'],
   outcome: GameState['outcome'],
   turn: number,
-  listening: boolean,
   action: Action,
   rng: Rng,
 ): ApplyResult {
@@ -1453,8 +1697,6 @@ function commit(
     roomId: d.playerRoomId,
     facing: d.facing,
     stats: state.player.stats,
-    health: d.health,
-    maxHealth: state.player.maxHealth,
     oil: d.oil,
     maxOil: state.player.maxOil,
     fortune: d.fortune,
@@ -1477,15 +1719,32 @@ function commit(
     outcome: finalOutcome,
     encounterRoomId: d.encounterRoomId,
     hazardRoomId: d.hazardRoomId,
+    focusedByRoom: d.focusedByRoom,
+    heartTaken: d.heartTaken,
     actionLog: [...state.actionLog, action],
   }
 
-  // Tells are a QUERY, computed against the world as it stands at the end of
-  // the turn — which is after drift, so a tell can never describe a pre-drift
-  // labyrinth. LISTEN buys back all four doorways for a turn, whatever the oil.
+  // Senses are a QUERY, computed against the world as it stands at the end of
+  // the turn — which is after drift, so nothing reported here can describe a
+  // pre-drift labyrinth.
+  //
+  // Both registers reach the event stream, because both are facts the player
+  // learns and CLAUDE.md 2.3 requires every such fact to be expressible as text:
+  // a resolved doorway emits its `tell`s, an unresolved one emits a `presence`.
+  // A doorway with nothing behind it emits neither, and that silence is now
+  // load-bearing information rather than an absence of it.
   if (finalOutcome === 'inProgress') {
-    for (const tell of tellsFor(next, listening)) {
-      d.events.push({ kind: 'tell', tell, text: tellText(tell) })
+    for (const sense of tellsFor(next)) {
+      for (const tell of sense.tells) {
+        d.events.push({ kind: 'tell', tell, text: tellText(tell) })
+      }
+      if (sense.unresolved) {
+        d.events.push({
+          kind: 'presence',
+          direction: sense.direction,
+          text: presenceText(sense.direction, isDarkProse(next.player.oil)),
+        })
+      }
     }
   }
 
@@ -1496,13 +1755,36 @@ function commit(
 // Tells, for renderers and the agent view
 // ---------------------------------------------------------------------------
 
-export function tellsFor(state: GameState, listening = false): Tell[] {
-  const band = oilBandFor(state.player.oil)
+/**
+ * What the player knows about each doorway, right now.
+ *
+ * THE ONE PLACE THE ANSWER IS ASSEMBLED, for three renderers. Through 1h this
+ * returned only the tells that fired, so `src/classic/view.ts` had to re-derive
+ * which doorways had even been looked at by duplicating a branch out of
+ * `getTells` — and the diorama and `AgentView` were each going to duplicate it
+ * again (1h finding 1). With `FOCUS` that stops being untidy and becomes unsafe:
+ * a renderer that shows an unresolved doorway the way it shows an empty one
+ * hands the player silence and lets them read it as safety.
+ *
+ * The free channels are gathered here too, for the same reason. A grellhound
+ * names adjacent hazards whatever the lamp and whatever FOCUS has been spent
+ * (GDD 2.8.1), so its doorways arrive resolved — and a renderer that forgot to
+ * ask would show a hound-owning player an unresolved doorway the hound is
+ * currently barking at.
+ */
+export function tellsFor(state: GameState): DoorwaySense[] {
+  const free = companionSenses(
+    state.labyrinth,
+    state.player.companion,
+    state.player.roomId,
+    state.wumpus.roomId,
+  ).revealedHazards.map((h) => h.direction)
+
   return getTells(state.labyrinth, state.player.roomId, state.wumpus.roomId, {
-    tellRange: band.tellRange,
     confused: hasStatus(state.player, 'confused'),
-    facing: state.player.facing,
-    listening,
+    resolved: focusedIn(state, state.player.roomId),
+    focusable: focusableDirections(state),
+    freeDirections: free,
     heartTaken: state.player.carryingHeart,
   })
 }

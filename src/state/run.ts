@@ -14,13 +14,13 @@
 
 import { create } from 'zustand'
 
-import type { Action, Difficulty, Direction, GameState, Stats, Tell } from '../engine/types.ts'
+import type { Action, Difficulty, DoorwaySense, GameState, Stats } from '../engine/types.ts'
 import { rngFromState } from '../engine/rng.ts'
 import { applyAction, createRun, legalActions, tellsFor } from '../engine/resolve.ts'
 import type { LegalAction } from '../engine/resolve.ts'
 import { eventsToLines } from '../classic/lines.ts'
 import type { LogLine } from '../classic/lines.ts'
-import { rollView, sensedDirections } from '../classic/view.ts'
+import { rollView } from '../classic/view.ts'
 import type { RollView } from '../classic/view.ts'
 
 /** One resolved turn, kept whole so the log can be grouped rather than flat. */
@@ -42,9 +42,16 @@ export interface RunView {
   readonly menu: readonly LegalAction[]
   readonly turns: readonly TurnRecord[]
   /** What the doorways report right now — the last turn's step-8 emission. */
-  readonly tells: readonly Tell[]
-  /** Which doorways were in range for that emission. See `sensedDirections`. */
-  readonly sensed: readonly Direction[]
+  /**
+   * What each doorway is reporting, straight from the engine.
+   *
+   * ONE FIELD WHERE THERE WERE TWO. It used to be `tells` plus a `sensed` list
+   * of directions the renderer derived for itself, which is the duplication 1h
+   * flagged; `DoorwaySense` carries both halves plus the one the old pair could
+   * not express at all — whether a doorway has something behind it that nobody
+   * has looked at yet (GDD 2.7).
+   */
+  readonly senses: readonly DoorwaySense[]
 }
 
 export interface StartOptions {
@@ -69,8 +76,7 @@ export function startRun(seed: number, options: StartOptions = {}): RunView {
     // is the room heading and the doorways, which is what they can actually
     // perceive standing in the entrance.
     turns: [{ n: state.turn, action: null, label: 'The run begins', lines: [], roll: null }],
-    tells: tellsFor(state),
-    sensed: sensedDirections(state, false),
+    senses: tellsFor(state),
   }
 }
 
@@ -99,17 +105,18 @@ export function takeAction(run: RunView, action: Action): RunView {
       ? rollView(own.action, own.result, null)
       : null
 
-  // Step 8 emits the standing tells every turn a run survives. A run that ended
-  // returns early from `finish` and emits none, and there is nothing left to
-  // sense; `tellsFor` is the fallback for the case where a turn resolved with
-  // no emission at all, so the panel can never silently keep stale tells.
-  const emitted = events.filter((e): e is Extract<typeof e, { kind: 'tell' }> => e.kind === 'tell')
-  const tells =
-    emitted.length > 0
-      ? emitted.map((e) => e.tell)
-      : state.outcome === 'inProgress'
-        ? tellsFor(state)
-        : []
+  // The doorway panel is a QUERY against the state the turn produced, not a
+  // reassembly of the events it emitted.
+  //
+  // 1h built it the other way round — collect the `tell` events, fall back to
+  // `tellsFor` when none arrived — and that is how the end screen came to
+  // explain a bright doorway as a failed lamp (1h finding 7). `tellsFor` now
+  // returns the whole per-doorway picture including the doorways that reported
+  // NOTHING, which events by their nature cannot: an empty doorway emits no
+  // event, so an event-driven panel can never tell "nothing there" from "no
+  // events this turn". A finished run gets an empty panel, deliberately —
+  // nothing is being sensed by someone who has left.
+  const senses = state.outcome === 'inProgress' ? tellsFor(state) : []
 
   return {
     ...run,
@@ -119,8 +126,7 @@ export function takeAction(run: RunView, action: Action): RunView {
       ...run.turns,
       { n: before.turn, action, label, lines, roll },
     ],
-    tells,
-    sensed: state.outcome === 'inProgress' ? sensedDirections(state, action.kind === 'listen') : [],
+    senses,
   }
 }
 

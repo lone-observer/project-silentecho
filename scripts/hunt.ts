@@ -16,8 +16,8 @@ import {
   getTells, hasCaught, moveWumpus, perceive, scentAt, wumpusIsNear,
 } from '../src/engine/wumpus.ts'
 import { DIRECTIONS } from '../src/engine/types.ts'
-import type { Difficulty, Direction, Labyrinth, Room, RoomId, ScentField, WumpusTier } from '../src/engine/types.ts'
-import { DIFFICULTY, HEART, OIL, SCENT, SCENT_BY_ACTION, WUMPUS_TIERS, oilBandFor } from '../src/engine/data/tuning.ts'
+import type { Difficulty, Labyrinth, Room, RoomId, ScentField, WumpusTier } from '../src/engine/types.ts'
+import { DIFFICULTY, HEART, OIL, SCENT, SCENT_BY_ACTION, WUMPUS_TIERS, oilBandFor, oilCostFor } from '../src/engine/data/tuning.ts'
 
 const seed = Number(process.argv[2] ?? 1)
 const tier = Number(process.argv[3] ?? 2) as WumpusTier
@@ -103,7 +103,6 @@ let wumpus = createWumpus(chooseWumpusStart(lab, rng), tier)
 let scent = emptyScent()
 let oil: number = OIL.starting
 let carrying = false
-let facing: Direction | null = null
 let step = 1
 let outcome = 'ran out of plan'
 
@@ -112,12 +111,13 @@ console.log(`entrance ${lab.entranceId}  heart ${lab.heartRoomId}  wumpus starts
 console.log(`plan: ${inbound.length - 1} moves in, ${plan.length - inbound.length} out, of ${contract.maxTurns} turns\n`)
 
 for (let turn = 1; turn <= contract.maxTurns && step < plan.length; turn++) {
-  const from = plan[step - 1]!
   const to = plan[step]!
-  const dir = DIRECTIONS.find((d) => lab.rooms[from]!.exits[d] === to) ?? null
 
   // 1. player acts
-  facing = dir
+  //
+  // `facing` used to be tracked here because the oil band restricted tells to
+  // the doorway last moved through. That mechanism is retired (GDD 2.8.1) and
+  // FOCUS replaced it, so there is nothing left for a direction to gate.
   const player = to
   step++
 
@@ -153,9 +153,12 @@ for (let turn = 1; turn <= contract.maxTurns && step < plan.length; turn++) {
 
   // 6. report
   const band = oilBandFor(oil)
+  // Everything resolved: this visualiser is a view of the WORLD, not a
+  // simulation of what a player has paid to learn. Passing every doorway as
+  // resolved is what keeps it showing the whole truth, the way it always has.
   const tells = getTells(lab, player, wumpus.roomId, {
-    tellRange: band.tellRange, confused: false, facing, heartTaken: carrying,
-  })
+    confused: false, resolved: [...DIRECTIONS], heartTaken: carrying,
+  }).flatMap((d) => d.tells)
   const sensed = perceive(lab, wumpus, scent)
   const gap = distancesFrom(lab, player)[wumpus.roomId] ?? -1
 
@@ -178,7 +181,10 @@ for (let turn = 1; turn <= contract.maxTurns && step < plan.length; turn++) {
 
   // 7. upkeep
   scent = decayScent(scent)
-  if (turn % OIL.burnEveryNTurns === 0) oil = Math.max(0, oil - 1)
+  // Oil is spent per ACTION now (GDD 2.8.1) and this walker's action every turn
+  // is a MOVE, so it pays a MOVE's price at the signature band. The old passive
+  // burn — one oil every two turns — is retired.
+  oil = Math.max(0, oil - oilCostFor('move', 'mixed'))
 }
 
 console.log(`${'='.repeat(62)}\n${outcome}\n`)

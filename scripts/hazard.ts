@@ -63,6 +63,8 @@ import {
   DEFAULT_DIFFICULTY,
   HAZARD_VERB_OUTCOMES,
   HAZARD_VERB_STAT,
+  oilCostFor,
+  PLAYER,
   HAZARD_VERBS,
   HAZARD_DC,
   HAZARD_STAT,
@@ -157,15 +159,27 @@ function hazardFor(verb: HazardVerb): HazardKind {
  * exactly that much oil and nothing about the conversion is a judgement call.
  *
  * Damage and Confused are NOT folded in, and that is deliberate. There is no
- * honest exchange rate between a point of health and a point of oil — health is
- * a countdown toward death, not a resource you manage (see the design log's
- * rejection of an HP trade for Endure) — and Confused is turns of blindness,
- * which is a different currency again. Folding either one in would produce a
- * single tidy number that quietly encoded a design decision nobody made. They
- * are reported alongside, in their own units.
+ * honest exchange rate between turns and oil now that the passive burn is gone:
+ * a turn no longer costs a fraction of a lamp on a timer, it costs whatever the
+ * player spends it on. So this reports the ACTION's oil and leaves turns and
+ * Confused in their own units alongside, which is what they always should have
+ * been — the old version folded turns into oil at the burn rate and produced a
+ * single tidy number that quietly encoded a design decision nobody made.
+ *
+ * Signed, per GDD 2.6: positive is spent, negative is oil coming back.
  */
-function oilCostOf(out: { oilLoss: number; extraTurns: number }): number {
-  return out.oilLoss + out.extraTurns / OIL.burnEveryNTurns
+function verbOil(verb: HazardVerb, band: OutcomeBand): number {
+  return oilCostFor(verb, band)
+}
+
+/**
+ * The stat column. DISARM has no row in `HAZARD_VERB_STAT` — being absent from
+ * that table is what makes it stat-agnostic (GDD 2.7), so the panel says so
+ * rather than printing a blank and leaving the reader to wonder.
+ */
+function statLabel(verb: HazardVerb): string {
+  const key = HAZARD_VERB_STAT[verb]
+  return key === undefined ? 'any' : STAT_SHORT[key]
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +228,7 @@ function panelCoverage(): void {
     const loud = scent > SCENT_BY_ACTION.tame
     console.log(
       `  ${pad(verb.toUpperCase(), 10)}${pad(HAZARD_WORD[hazardFor(verb)], 16)}` +
-        `${pad(STAT_SHORT[HAZARD_VERB_STAT[verb]], 6)}${pad(String(ACTION_DC[verb]), 4)}` +
+        `${pad(statLabel(verb), 6)}${pad(String(ACTION_DC[verb]), 4)}` +
         `${pad(num(scent, 2), 7)}${loud ? 'LOUD  (> TAME)' : 'quiet (<= TAME)'}` +
         (scent === quietest ? '  <- quietest' : ''),
     )
@@ -247,7 +261,7 @@ function panelCost(): void {
     console.log(
       `  ${pad('band', 10)}` +
         verbs
-          .map((v) => pad(`${v.toUpperCase()}: turns  oil  dmg  conf  flask`, 40))
+          .map((v) => pad(`${v.toUpperCase()}: turns     oil  conf`, 40))
           .join(''),
     )
     for (const band of BAND_ORDER) {
@@ -256,9 +270,10 @@ function panelCost(): void {
         const o = HAZARD_VERB_OUTCOMES[verb][band]
         const turns = 1 + o.extraTurns
         const conf = o.applies === null ? '—' : String(o.statusTurns)
+        const oil = verbOil(verb, band)
         line += pad(
-          `       ${padLeft(String(turns), 5)}${padLeft(num(o.oilLoss, 0), 5)}` +
-            `${padLeft(String(o.damage), 5)}${padLeft(conf, 6)}${padLeft(String(o.rewardFlasks), 7)}`,
+          `       ${padLeft(String(turns), 5)}${padLeft((oil > 0 ? '-' : oil < 0 ? '+' : ' ') + num(Math.abs(oil)), 8)}` +
+            `${padLeft(conf, 6)}`,
           40,
         )
       }
@@ -290,15 +305,17 @@ function panelCost(): void {
     for (const verb of verbs) {
       const dc = ACTION_DC[verb]
       console.log('')
-      console.log(`    ${verb.toUpperCase()} (${STAT_SHORT[HAZARD_VERB_STAT[verb]]} vs DC ${dc})`)
+      console.log(`    ${verb.toUpperCase()} (${statLabel(verb)} vs DC ${dc})`)
       console.log(
-        `      ${pad('stat', 6)}${BAND_ORDER.map((b) => padLeft(BAND_SHORT[b], 10)).join('')}${padLeft('cleared', 10)}`,
+        `      ${pad('stat', 6)}${BAND_ORDER.map((b) => padLeft(BAND_SHORT[b], 10)).join('')}${padLeft('paid', 10)}`,
       )
       for (const stat of [8, 10, 12, 14, 16, 18]) {
         const odds = bandOdds(dc, statModifier(stat))
-        // "Cleared" is mixed-or-better, read off rewardFlasks rather than off a
-        // band name, so a retune of which bands pay moves this column with it.
-        const cleared = BAND_ORDER.filter((b) => HAZARD_VERB_OUTCOMES[verb][b].rewardFlasks > 0)
+        // "Paid" is the bands where the verb hands oil BACK, read off the price
+        // model rather than off a band name, so a retune moves this column with
+        // it. Panel B's lesson from 1e: a visualiser that hardcodes the rule it
+        // is watching lies on the day the rule changes.
+        const cleared = BAND_ORDER.filter((b) => verbOil(verb, b) < 0)
           .reduce((s, b) => s + odds[b], 0)
         console.log(
           `      ${pad(String(stat), 6)}${BAND_ORDER.map((b) => padLeft(pct(odds[b]), 10)).join('')}${padLeft(pct(cleared), 10)}`,
@@ -309,29 +326,24 @@ function panelCost(): void {
     // The expectation both numbers have to satisfy, at the stat the player
     // actually starts with.
     console.log('')
-    console.log(`  Expected value of ONE attempt at starting stats (8, mod ${statModifier(8)}), in oil:`)
+    console.log(`  Expected value of ONE attempt at starting stats (${PLAYER.startingStat}, mod ${statModifier(PLAYER.startingStat)}):`)
     console.log(
-      `    ${pad('verb', 8)}${padLeft('cost', 8)}${padLeft('reward', 9)}${padLeft('net', 8)}` +
-        `${padLeft('dmg', 7)}${padLeft('conf', 7)}`,
+      `    ${pad('verb', 8)}${padLeft('oil', 8)}${padLeft('turns', 8)}${padLeft('conf', 7)}`,
     )
     for (const verb of verbs) {
-      const odds = bandOdds(ACTION_DC[verb], statModifier(8))
-      let cost = 0
-      let reward = 0
-      let dmg = 0
+      const odds = bandOdds(ACTION_DC[verb], statModifier(PLAYER.startingStat))
+      let oil = 0
+      let turns = 0
       let conf = 0
       for (const band of BAND_ORDER) {
         const o = HAZARD_VERB_OUTCOMES[verb][band]
-        cost += odds[band] * oilCostOf(o)
-        reward += odds[band] * o.rewardFlasks * OIL.flaskValue
-        dmg += odds[band] * o.damage
+        oil += odds[band] * verbOil(verb, band)
+        turns += odds[band] * (1 + o.extraTurns)
         conf += odds[band] * (o.applies === null ? 0 : o.statusTurns)
       }
-      const net = reward - cost
       console.log(
-        `    ${pad(verb.toUpperCase(), 8)}${padLeft(num(cost), 8)}${padLeft(num(reward), 9)}` +
-          `${padLeft((net >= 0 ? '+' : '') + num(net), 8)}${padLeft(num(dmg), 7)}${padLeft(num(conf), 7)}` +
-          (net > 0 ? '   <- NET POSITIVE' : ''),
+        `    ${pad(verb.toUpperCase(), 8)}${padLeft('-' + num(oil), 8)}${padLeft(num(turns), 8)}${padLeft(num(conf), 7)}` +
+          (oil < 0 ? '   <- NET POSITIVE, this is an oil farm' : ''),
       )
     }
     console.log('')
@@ -374,11 +386,14 @@ type PolicyName = 'route' | 'forager' | 'quiet'
  * chooses on this axis" rather than "a player who always picks FORCE".
  */
 function hazardVerbValue(state: GameState, verb: HazardVerb): number {
-  const odds = bandOdds(ACTION_DC[verb], statModifier(state.player.stats[HAZARD_VERB_STAT[verb]]))
+  const key = HAZARD_VERB_STAT[verb]
+  // A stat-agnostic verb rolls flat, so its odds take no modifier — the same
+  // short-circuit the reducer makes in `rollForAction`.
+  const mod = key === undefined ? 0 : statModifier(state.player.stats[key])
+  const odds = bandOdds(ACTION_DC[verb], mod)
   let value = 0
   for (const band of BAND_ORDER) {
-    const o = HAZARD_VERB_OUTCOMES[verb][band]
-    value += odds[band] * (o.rewardFlasks * OIL.flaskValue - oilCostOf(o) - o.damage * 2)
+    value += odds[band] * -verbOil(verb, band)
   }
   return value
 }
@@ -480,7 +495,7 @@ interface RunTally {
   hazardsByVerb: Record<HazardVerb, number>
   bandsByVerb: Record<HazardVerb, Record<OutcomeBand, number>>
   confusedTurns: number
-  hazardDamage: number
+  hazardOil: number
   minOil: number
   /** Oil still in the lamp when the run ended. */
   endOil: number
@@ -508,7 +523,7 @@ function emptyTally(outcome: RunOutcome, turns: number): RunTally {
     hazardsByVerb: byVerb,
     bandsByVerb: bands,
     confusedTurns: 0,
-    hazardDamage: 0,
+    hazardOil: 0,
     minOil: OIL.max,
     endOil: OIL.starting,
     turnsInBand: Object.fromEntries(OIL_BANDS.map((b) => [b.name, 0])),
@@ -566,8 +581,7 @@ function driveRun(
         const verb = event.action as HazardVerb
         tally.hazardsByVerb[verb] += 1
         tally.bandsByVerb[verb][event.result.band] += 1
-        const out = HAZARD_VERB_OUTCOMES[verb][event.result.band]
-        tally.hazardDamage += out.damage
+        tally.hazardOil += verbOil(verb, event.result.band)
       }
       if (event.kind === 'statusChanged' && event.status === 'confused') {
         tally.confusedTurns += event.turns
@@ -653,7 +667,7 @@ function panelOil(difficulty: Difficulty, sweep: number): void {
   console.log('  how much oil should be lying on the floor? They are one number. Sizing')
   console.log('  either alone solves for it and breaks the other.')
   console.log('')
-  console.log(`  Current settings: reward pays on ${BAND_ORDER.filter((b) => HAZARD_VERB_OUTCOMES.avoid[b].rewardFlasks > 0).map((b) => BAND_SHORT[b]).join('/')},`)
+  console.log(`  Current settings: oil comes back on ${BAND_ORDER.filter((b) => verbOil('avoid', b) < 0).map((b) => BAND_SHORT[b]).join('/')},`)
   console.log(`  ambient flasks ${POPULATION.oilFlasks[0]}-${POPULATION.oilFlasks[1]} per labyrinth, flask worth ${OIL.flaskValue} oil, lamp starts at ${OIL.starting}.`)
   console.log(`  Hazards per labyrinth: bloom ${HAZARD_COUNTS.sporeBloom.join('-')}, snare ${HAZARD_COUNTS.snareCarving.join('-')}, pit ${HAZARD_COUNTS.pit.join('-')}.`)
 
@@ -673,9 +687,9 @@ function panelOil(difficulty: Difficulty, sweep: number): void {
 
     console.log('')
     console.log(`     OIL OUT (mean per run)`)
-    console.log(`       passive burn (1 per ${OIL.burnEveryNTurns} turns) ${padLeft(num(mean((t) => t.passiveBurn)), 7)}`)
-    console.log(`       hazard bands + action extra costs            ${padLeft(num(mean((t) => t.otherBurn)), 7)}`)
-    console.log(`       total out                                   ${padLeft(num(mean((t) => t.passiveBurn + t.otherBurn)), 7)}`)
+    // The passive burn is retired (GDD 2.8.1) — every point of oil out is now
+    // the price of something the player chose to do.
+    console.log(`       spent on actions                            ${padLeft(num(mean((t) => t.otherBurn)), 7)}`)
 
     const ambient = mean((t) => t.flasksFoundAmbient)
     const earnedH = mean((t) => t.flasksEarnedHazard)
@@ -720,7 +734,7 @@ function panelOil(difficulty: Difficulty, sweep: number): void {
       const inBand = runs.reduce((s, t) => s + (t.turnsInBand[band.name] ?? 0), 0)
       console.log(
         `       ${pad(band.name, 12)}${padLeft(pct(totalTurns > 0 ? inBand / totalTurns : 0), 8)}` +
-          `   (roll ${band.modifier >= 0 ? '+' : ''}${band.modifier}, tells: ${band.tellRange})`,
+          `   (roll ${band.modifier >= 0 ? '+' : ''}${band.modifier}, lantern ${band.lanternRadius})`,
       )
     }
 
@@ -729,7 +743,7 @@ function panelOil(difficulty: Difficulty, sweep: number): void {
     console.log(`       met per run, mean                           ${padLeft(num(mean((t) => t.hazardsMet)), 7)}`)
     console.log(`       runs that met none                          ${padLeft(pct(share((t) => t.hazardsMet === 0)), 7)}`)
     console.log(`       Confused turns inflicted, mean              ${padLeft(num(mean((t) => t.confusedTurns)), 7)}`)
-    console.log(`       damage from hazard verbs, mean              ${padLeft(num(mean((t) => t.hazardDamage)), 7)}`)
+    console.log(`       net oil spent on hazard verbs, mean         ${padLeft(num(mean((t) => t.hazardOil)), 7)}`)
     console.log('')
     console.log(`       ${pad('verb', 9)}${padLeft('n', 6)}   ` + BAND_ORDER.map((b) => padLeft(BAND_SHORT[b], 10)).join('') + padLeft('paid', 8))
     for (const verb of HAZARD_VERBS) {
@@ -740,7 +754,7 @@ function panelOil(difficulty: Difficulty, sweep: number): void {
       }
       const bands = BAND_ORDER.map((b) => runs.reduce((s, t) => s + t.bandsByVerb[verb][b], 0))
       const paid = BAND_ORDER.reduce(
-        (s, b, i) => s + (HAZARD_VERB_OUTCOMES[verb][b].rewardFlasks > 0 ? (bands[i] ?? 0) : 0),
+        (s, b, i) => s + (verbOil(verb, b) < 0 ? (bands[i] ?? 0) : 0),
         0,
       )
       console.log(

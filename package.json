@@ -18,7 +18,8 @@
     "turn": "tsx scripts/turn.ts",
     "prose": "tsx scripts/prose.ts",
     "hazard": "tsx scripts/hazard.ts",
-    "devlog": "tsx scripts/devlog.ts"
+    "devlog": "tsx scripts/devlog.ts",
+    "economy": "tsx scripts/economy.ts"
   },
   "dependencies": {
     "react": "19.3.0",

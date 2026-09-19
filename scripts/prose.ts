@@ -243,8 +243,8 @@ function narrate(event: GameEvent): string | null {
       return `${pad('[tell]', 20)} ${event.text}`
     case 'roll':
       return `${pad(`[roll:${event.hazard ?? event.action}]`, 20)} d20=${event.result.natural} → ${event.result.total} vs DC ${event.result.dc} → ${event.result.band}`
-    case 'damage':
-      return `${pad('[damage]', 20)} -${event.amount} health (${event.cause})`
+    case 'presence':
+      return `${pad('[presence]', 20)} ${event.text}`
     case 'creatureEncounter':
       return `${pad('[encounter]', 20)} ${event.creature}`
     case 'wumpusTierChanged':
@@ -303,7 +303,7 @@ function panelC(seed: number, difficulty: Difficulty): void {
     const label =
       'direction' in action ? `${action.kind} ${action.direction}` : action.kind
     console.log(
-      `\n  ${rule('─', 74)}\n  turn ${state.turn}  ·  ${label}  ·  oil ${state.player.oil} (${register})  ·  hp ${state.player.health}\n`,
+      `\n  ${rule('─', 74)}\n  turn ${state.turn}  ·  ${label}  ·  oil ${state.player.oil.toFixed(2)} (${register})\n`,
     )
     for (const event of result.events) {
       const line = narrate(event)

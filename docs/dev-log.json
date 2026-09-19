@@ -440,6 +440,71 @@
           "foundBy": "test"
         }
       ]
+    },
+    {
+      "id": 9,
+      "date": "2026-09-18",
+      "label": "Phase 1i part 1 — economy rebuild + rebalance",
+      "hours": null,
+      "surface": "cowork",
+      "steps": [
+        "1i-1"
+      ],
+      "tests": {
+        "before": 288,
+        "after": 310
+      },
+      "tokens": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "The 18 Sep economy unification, built. Health is retired everywhere: Player.health, Player.maxHealth, PLAYER.maxHealth, the damage column on every outcome table (HazardOutcome, TameOutcome, FightOutcome, SneakOutcome, FleeOutcome), the damage GameEvent and the killedByDamage ending are all gone, and only a pit and the Wumpus end a run. In their place every action carries an oil price (OIL_PRICE) scaled by the band it rolls (BAND_OIL_MULTIPLIER), computed in exactly one place (oilCostFor) and charged once at step 1 - which replaced three separate mechanisms at a stroke: the passive burn every two turns, OIL.extraCost for the quiet verbs, and 1g's conditional flask reward. The pit is strictly binary. LISTEN and READ are retired and replaced by FOCUS, which resolves one doorway and is capped per room by difficulty (4/4/1/1); the base lamp now reports PRESENCE for free and identity costs a turn. DISARM clears a bloom or snare permanently and is the only stat-agnostic roll in the game. DROP HEART is free and unconditional. SEND's decoy is decided by its own roll (3 turns good, 2 bad, halved carrying the Heart) rather than by which creature was tamed. Turn caps are 50/45/40/35, the mandatory Wumpus stench reaches two rooms, USE is rolled, REST refunds instead of healing, and ENTER PORTAL's bad roll lands the player already holding the new labyrinth's Heart. getTells returns DoorwaySense[] - one entry per doorway with its resolved tells, an unresolved flag and a suppressed flag - which closes 1h finding 1 by making the distinction true by construction instead of re-derived in every renderer. src/classic/ follows: FOCUS/DISARM/DROP HEART in the menu, health out of the status line, the unresolved marker in the doorway panel, and directional labels spelled out (1h finding 5). New visualiser scripts/economy.ts, seven panels, which is what produced every number in the 1i findings.",
+      "defects": [
+        {
+          "what": "The band curve was an oil farm at high stats.",
+          "detail": "The first per-band multipliers were symmetric (-0.5 and -1, the exact negatives of success and mixed). Against a Trivial DC - MOVE and FOCUS - a character at stat 16 or 18 lands in the paying bands often enough that the EXPECTED value of the action turns positive: +0.07 oil per move at stat 18, so a maxed lanternbearer refilled the lamp by walking. This is 1g's oil farm in a new mechanism, and it is the exact trap the 1i brief warned would recur. Halving the two paying bands to -0.25/-0.5 makes the expectation negative for every verb at every stat while keeping GDD 2.6's promise that a great roll hands something back.",
+          "foundBy": "npm run economy -- price, first run"
+        },
+        {
+          "what": "npm run devlog silently replaced eight sessions of churn with zeros.",
+          "detail": "1h finding 3, and the first attempt at fixing it made it worse: it warned loudly and wrote anyway, which destroyed the correct Lines figures for sessions 1-8 and then explained why the zeros were meaningless. The warning is read once; the damaged file is committed forever. It now probes git before rendering anything and exits rather than writing. Third time this project has been bitten by a close-out step that reports success and carries the wrong content (stale scratch path in 1d, double-counted session 3 in 1h).",
+          "foundBy": "running npm run devlog in this container and reading DEV-LOG.md after"
+        },
+        {
+          "what": "The dark prose register turned LIT again at zero oil.",
+          "detail": "isDarkProse was rewritten to compare the band name against DARK_PROSE_BAND for equality. OIL_BANDS is ordered brightest-first, so only 'ember' matched and a player at zero oil - in total darkness - read prose about what they could see. Fixed with an at-or-below test (isDarkBand).",
+          "foundBy": "a monotonicity assertion added to tests/outcomes.test.ts in the same pass"
+        },
+        {
+          "what": "The doorway panel hid the Wumpus's stench behind the unresolved marker.",
+          "detail": "The stench is exempt from the FOCUS economy, so a doorway can carry a resolved stench AND an unresolved remainder at once. The renderer's ternary chain showed the unresolved marker first and returned, swallowing the one tell CLAUDE.md 3 says may never be hidden - on exactly the turns it matters most. The panel now prints tells before the marker.",
+          "foundBy": "reading the render path while wiring DoorwaySense into view.ts"
+        },
+        {
+          "what": "hazardCleared became a beat nothing could emit.",
+          "detail": "Removing the flask reward removed the only thing that fired the hazardCleared note, leaving an orphaned NoteBeat - the same dead content 1g deleted from HAZARD_NARRATION. It is now gated on whether the band actually returned oil, and the line was rewritten because the old one promised a flask the player would not find in their inventory.",
+          "foundBy": "tests/outcomes.test.ts's unreached-beat ledger"
+        },
+        {
+          "what": "A zero-priced action produced -0.",
+          "detail": "0 * -0.5 is -0, and Object.is(-0, 0) is false. It survives JSON.stringify as 0 and compares unequal in a round-trip test - a difference visible nowhere except where it matters. Normalised in oilCostFor, which also now quantizes to OIL_QUANTUM so accumulated oil cannot drift into 7.749999999999999 and break replay determinism.",
+          "foundBy": "tests/tuning.test.ts's DROP HEART price assertion"
+        },
+        {
+          "what": "The log printed +0.125 oil against a status line reading Lamp 11.5.",
+          "detail": "Two different precisions for one resource on one screen, the same class of defect as 1h finding 7's hyphen-minus. Oil is quantized in the engine now and the log's signed() trims to two decimals.",
+          "foundBy": "playing a full run through the classic view layer"
+        },
+        {
+          "what": "The FOCUS menu and the doorway panel disagreed while Confused.",
+          "detail": "getTells reported a Confused doorway as not focusable while legalActions went on offering FOCUS on it - a verb that would spend a turn and an oil price to learn nothing. GDD 2.17 says legalActions is filtered to what is ACTUALLY available, so the verb is withdrawn while Confused rather than offered as a trap.",
+          "foundBy": "a suppression assertion in tests/resolve.test.ts"
+        }
+      ]
     }
   ],
   "$tokenNote": "Cowork writes exact per-turn usage to the session transcript; these figures were harvested from it rather than estimated. All three sessions below were ONE continuous Cowork conversation, so the split is by calendar day of that conversation and the session boundaries are editorial. Sessions 2 and 3 fall in the same day bucket and share one figure. No dollar amount exists: usage inside a Pro/Max plan allowance is not metered in dollars, only against plan limits."

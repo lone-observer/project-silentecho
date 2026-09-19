@@ -17,7 +17,10 @@
 
 import type {
   Direction,
+  DoorwaySense,
+  HazardKind,
   Labyrinth,
+  Room,
   RoomId,
   ScentField,
   Tell,
@@ -27,8 +30,7 @@ import type {
 } from './types.ts'
 import { DIRECTIONS } from './types.ts'
 import type { Rng } from './rng.ts'
-import type { TellRange } from './data/tuning.ts'
-import { SCENT, WUMPUS_TIERS } from './data/tuning.ts'
+import { SCENT, WUMPUS, WUMPUS_TIERS } from './data/tuning.ts'
 
 // ---------------------------------------------------------------------------
 // Scent
@@ -317,16 +319,29 @@ export function hasCaught(wumpus: Wumpus, playerRoomId: RoomId): boolean {
 // ---------------------------------------------------------------------------
 
 export interface TellOptions {
-  /** From the oil band. `facing` restricts WHICH doorways report, never whether they tell the truth. */
-  readonly tellRange: TellRange
   /** Confused suppresses tells entirely for its duration. GDD 2.8.2 */
   readonly confused: boolean
-  /** Direction of the player's last move; null means they sense all four. */
-  readonly facing: Direction | null
-  /** LISTEN buys the full set back for a turn, whatever the oil level. */
-  readonly listening?: boolean
+  /**
+   * Doorways `FOCUS` has resolved in this room. GDD 2.7 (18 Sep 2026).
+   *
+   * Everything NOT in this set still reports honestly — it reports PRESENCE.
+   * The base lamp says a doorway has something behind it; what it is costs a
+   * turn and a small price to learn. That is the whole of the information
+   * economy, and it replaced the old oil-band `tellRange` restriction, which
+   * gated by how much lamp you had left and which 1g measured as almost never
+   * firing.
+   */
+  readonly resolved: readonly Direction[]
+  /** Doorways a FOCUS is still available on this turn. Reported, never used here. */
+  readonly focusable?: readonly Direction[]
   /** Once the Heart is off its plinth it stops calling. Default false. */
   readonly heartTaken?: boolean
+  /**
+   * Hazards a companion names for free, whatever the lamp and whatever FOCUS has
+   * been spent (GDD 2.8.1 — the grellhound has no use for your lamp). Listed as
+   * directions, and they resolve those doorways the same way a FOCUS does.
+   */
+  readonly freeDirections?: readonly Direction[]
 }
 
 const TELL_FOR_HAZARD: Record<string, TellKind> = {
@@ -337,52 +352,162 @@ const TELL_FOR_HAZARD: Record<string, TellKind> = {
 }
 
 /**
- * Everything leaking into the player's room, keyed by the doorway it comes through.
+ * Which doorways the Wumpus's stench comes through, and it is NOT simply the
+ * doorway it is standing behind. GDD 2.10, widened 18 Sep 2026.
  *
- * INVARIANT: this is exhaustive and honest. A tell appears whenever its source
- * is adjacent and never when it is not. Darkness and Confused may reduce HOW
- * MANY doorways report; nothing may make a reported tell false.
+ * The mandatory tell now reaches `WUMPUS.mandatoryStenchRadius` rooms, so the
+ * honest directional reading of "it is two rooms that way" is: the doorways that
+ * lie on a SHORTEST path to it. A doorway reports when stepping through it gets
+ * you strictly closer.
+ *
+ * Why not "every doorway whose room is within radius-1 of the Wumpus", which is
+ * the easier thing to write: with the Wumpus one room north, a doorway east into
+ * a room that also touches it would report a stench too, and the player would
+ * read two directions for one monster. Both statements would be TRUE, and the
+ * second would still be useless — GDD 2.4 is explicit that a tell points at the
+ * doorway its source is through, not merely at a doorway near it.
+ *
+ * At radius 1 this reduces exactly to the old behaviour, which is what keeps the
+ * shape of the fairness guarantee unchanged while the constant moves.
+ */
+function stenchDirections(
+  labyrinth: Labyrinth,
+  playerRoomId: RoomId,
+  wumpusRoomId: RoomId,
+): Direction[] {
+  const reach = withinRadius(labyrinth, playerRoomId, WUMPUS.mandatoryStenchRadius)
+  const distance = reach[wumpusRoomId]
+  if (distance === undefined || distance === 0) return []
+
+  const exits = exitsOf(labyrinth, playerRoomId)
+  const out: Direction[] = []
+  for (const direction of DIRECTIONS) {
+    const neighbourId = exits[direction]
+    if (neighbourId === undefined) continue
+    // Distance from the far side of this doorway, measured out to the same
+    // radius — a neighbour that is one step nearer the Wumpus is on a shortest
+    // path to it, and that is the doorway the stench comes through.
+    const fromNeighbour = withinRadius(labyrinth, neighbourId, WUMPUS.mandatoryStenchRadius)[wumpusRoomId]
+    if (fromNeighbour !== undefined && fromNeighbour === distance - 1) out.push(direction)
+  }
+  return out
+}
+
+/**
+ * Everything the player knows about each doorway this turn.
+ *
+ * INVARIANT, and it is the one this whole file exists to hold: nothing here is
+ * ever false. What changed on 18 Sep 2026 is that a doorway now answers in two
+ * registers rather than one — PRESENCE, which the lamp gives away for nothing,
+ * and IDENTITY, which `FOCUS` buys one doorway at a time. Neither register can
+ * lie. A doorway with `unresolved: true` is the engine saying "there is
+ * something here and you have not looked", which is a fact; a doorway with
+ * neither tells nor `unresolved` is the engine saying "there is nothing here",
+ * which is also a fact, and the reason silence is worth something again.
+ *
+ * TWO CHANNELS ARE EXEMPT AND ALWAYS RESOLVED, per GDD 2.8.1: the Wumpus's own
+ * stench, and any hazard a companion names (`freeDirections`). They are never
+ * gated by oil, by FOCUS or by difficulty — that exemption is what keeps
+ * CLAUDE.md 3's mandatory-adjacency guarantee intact underneath a real
+ * information economy, and it is why a doorway can carry a resolved stench and
+ * an unresolved remainder at the same time.
  */
 export function getTells(
   labyrinth: Labyrinth,
   playerRoomId: RoomId,
   wumpusRoomId: RoomId,
   options: TellOptions,
-): Tell[] {
-  if (options.confused) return []
-
+): DoorwaySense[] {
   const exits = exitsOf(labyrinth, playerRoomId)
-  // LISTEN buys back the full set for a turn; otherwise a dark lamp reports
-  // only the doorway the player is facing. Range, never honesty.
-  const listening = options.listening ?? false
-  const restricted = options.tellRange === 'facing' && !listening && options.facing !== null
+  const stench = new Set(stenchDirections(labyrinth, playerRoomId, wumpusRoomId))
+  const resolved = new Set(options.resolved)
+  const free = new Set(options.freeDirections ?? [])
+  const focusable = new Set(options.focusable ?? [])
 
-  const doorways = restricted
-    ? ([options.facing] as Direction[])
-    : DIRECTIONS
-
-  const tells: Tell[] = []
-  for (const direction of doorways) {
+  const senses: DoorwaySense[] = []
+  for (const direction of DIRECTIONS) {
     const neighbourId = exits[direction]
     if (neighbourId === undefined) continue
     const room = labyrinth.rooms[neighbourId]
     if (!room) continue
 
-    // Violet is reserved for the Wumpus and nothing else. GDD 2.4
-    if (neighbourId === wumpusRoomId) tells.push({ direction, kind: 'stench' })
-    if (room.hazard) {
-      const kind = TELL_FOR_HAZARD[room.hazard]
-      if (kind) tells.push({ direction, kind })
+    // GDD 2.8.2: Confused is suppression, not misdirection — no tells at all,
+    // and the player is told plainly that is why. It is reported per doorway
+    // rather than as an empty list so a renderer cannot mistake it for safety.
+    if (options.confused) {
+      senses.push({ direction, tells: [], unresolved: false, suppressed: true, focusable: false })
+      continue
     }
-    if (room.creature) tells.push({ direction, kind: 'skittering' })
+
+    const tells: Tell[] = []
+    let unresolved = false
+    const known = resolved.has(direction) || free.has(direction)
+
+    // Violet is reserved for the Wumpus and nothing else (GDD 2.4), and it is
+    // never hidden (CLAUDE.md 3) — it lands whether or not this doorway was
+    // focused, so it is added outside the `known` branches entirely.
+    if (stench.has(direction)) tells.push({ direction, kind: 'stench' })
+
+    const hazard = activeHazardOf(room)
+    if (hazard !== null) {
+      const kind = TELL_FOR_HAZARD[hazard]
+      if (kind) {
+        if (known) tells.push({ direction, kind })
+        else unresolved = true
+      }
+    }
+    if (room.creature) {
+      if (known) tells.push({ direction, kind: 'skittering' })
+      else unresolved = true
+    }
     // The Heart calls only while it sits on the plinth — once carried, it is
     // in your hands, not through a doorway.
-    if (room.hasHeart && !options.heartTaken) tells.push({ direction, kind: 'metallic' })
+    if (room.hasHeart && !options.heartTaken) {
+      if (known) tells.push({ direction, kind: 'metallic' })
+      else unresolved = true
+    }
+
+    senses.push({
+      direction,
+      tells,
+      unresolved,
+      suppressed: false,
+      focusable: focusable.has(direction),
+    })
   }
-  return tells
+  return senses
+}
+
+/**
+ * The hazard actually in a room, as opposed to the one generation put there.
+ *
+ * `DISARM` clears a bloom or a snare permanently (GDD 2.7) and records it as a
+ * flag rather than by erasing `Room.hazard`, because generation's contracts —
+ * the pit-free route, the hazard-free route counts, the minimum safe detour —
+ * are claims about what was BUILT and have to stay checkable after a player has
+ * been through. So every question about what is dangerous NOW comes through
+ * here, and `Room.hazard` answers only "what was here to begin with".
+ *
+ * It lives in this module because `getTells` is the caller that must never get
+ * it wrong: a disarmed bloom that went on leaking sweetness would be a tell
+ * without a source, which is the exact half of CLAUDE.md 3 that says a tell
+ * never appears for something that is not there.
+ */
+export function activeHazardOf(room: Pick<Room, 'hazard' | 'hazardCleared'>): HazardKind | null {
+  return room.hazardCleared ? null : room.hazard
+}
+
+/** Every resolved tell across the doorways, for consumers that want them flat. */
+export function tellsOf(senses: readonly DoorwaySense[]): Tell[] {
+  return senses.flatMap((s) => s.tells)
 }
 
 /** True when the Wumpus is close enough that ambience should drop out. GDD 2.13 */
-export function wumpusIsNear(labyrinth: Labyrinth, playerRoomId: RoomId, wumpusRoomId: RoomId, radius = 2): boolean {
+export function wumpusIsNear(
+  labyrinth: Labyrinth,
+  playerRoomId: RoomId,
+  wumpusRoomId: RoomId,
+  radius = WUMPUS.mandatoryStenchRadius,
+): boolean {
   return withinRadius(labyrinth, playerRoomId, radius)[wumpusRoomId] !== undefined
 }

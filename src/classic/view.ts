@@ -16,7 +16,7 @@ import type {
   RollResult,
   Room,
   RunOutcome,
-  Tell,
+  DoorwaySense,
   TellKind,
 } from '../engine/types.ts'
 import { DIRECTIONS } from '../engine/types.ts'
@@ -67,33 +67,43 @@ export interface DoorwayTell {
 /**
  * Why a doorway said nothing, when it was not simply empty.
  *
- * The two are different mechanics with different counterplay and GDD 2.8.1 and
- * 2.8.2 keep them apart on purpose — `range` is the lamp and LISTEN buys it
- * back for a turn; `confused` is suppression that runs out on its own clock and
- * that the player is explicitly told about. Rendering both as one shrug throws
- * away the only thing that tells the player which lever to pull.
+ * The two are different mechanics with different counterplay and GDD 2.7 and
+ * 2.8.2 keep them apart on purpose — `unresolved` is a doorway you have not paid
+ * to look through, and FOCUS is the lever; `confused` is suppression that runs
+ * out on its own clock and that the player is explicitly told about. Rendering
+ * both as one shrug throws away the only thing that tells the player which lever
+ * to pull, and in the FOCUS economy it also hides the price list.
+ *
+ * WHAT CHANGED IN 1i: this used to distinguish `range` (the lamp could not reach)
+ * from `confused`. The oil-band tell-range mechanism is retired, so `range` has
+ * no referent; `unresolved` took its place and means something the player can
+ * act on rather than something they have to wait out.
  */
-export type UnsensedReason = 'range' | 'confused'
+export type UnsensedReason = 'unresolved' | 'confused'
 
 export interface DoorwayView {
   readonly direction: Direction
   readonly word: string
   readonly tells: readonly DoorwayTell[]
   /**
-   * Whether the player's senses reached this doorway at all this turn.
+   * Whether this doorway's contents are known.
    *
-   * THIS IS NOT COSMETIC. At Ember and below only the facing doorway reports,
-   * and Confused suppresses all four. A doorway that was not sensed and a
-   * doorway that reported nothing are completely different facts — one is "I do
-   * not know", the other is "there is nothing there" — and rendering them the
-   * same way lets the player read darkness as safety. CLAUDE.md 3 says darkness
-   * restricts the RANGE of tells and never their honesty; collapsing this
-   * distinction in the renderer is how you break that without touching the
-   * engine.
+   * THIS IS NOT COSMETIC, AND IT MATTERS MORE NOW THAN IT DID. A doorway you
+   * have not FOCUSed and a doorway that reported nothing are completely
+   * different facts — one is "there is something and I have not looked", the
+   * other is "there is nothing there" — and rendering them the same way lets the
+   * player read an unlooked-at doorway as safety. It is also the entire
+   * interface to the information economy: if these look alike, there is no way
+   * to tell which doorway is worth the turn.
+   *
+   * The engine now supplies this rather than the renderer deriving it
+   * (`DoorwaySense`), which is 1h finding 1 closed.
    */
   readonly sensed: boolean
   /** Set only when `sensed` is false. */
   readonly unsensed: UnsensedReason | null
+  /** A FOCUS on this doorway is on the menu this turn. */
+  readonly focusable: boolean
   /** Reserved for the Wumpus alone. GDD 2.17, "exactly one alarming signal". */
   readonly alarming: boolean
   /** The doorway you came in by. A label, never a different action. */
@@ -101,49 +111,36 @@ export interface DoorwayView {
 }
 
 /**
- * Which doorways reported this turn.
+ * The doorway panel, straight off the engine's own sensing query.
  *
- * DUPLICATED FROM `getTells`, KNOWINGLY, AND FLAGGED. The engine computes this
- * set and then throws it away: `tellsFor` returns only the tells it found, so
- * "no tell through the north door" and "the north door was out of range" arrive
- * at every renderer as the same absence. The diorama and `AgentView` will each
- * have to re-derive it exactly like this. The fix is for the engine to emit the
- * sensed set — a `GameEvent` or a second return from `tellsFor` — and that is an
- * engine change, so it is written up in PHASE-1-PROGRESS instead of made here.
- *
- * `listening` is the action the player just took, not a state flag: LISTEN buys
- * the full set back for exactly one turn (GDD 2.8.1).
+ * `sensedDirections` USED TO LIVE HERE and it was a knowing duplicate of a
+ * branch inside `getTells` — 1h flagged it as the one engine gap it would fix
+ * first, because the diorama and `AgentView` were each going to re-derive it
+ * again and the darkness invariant would only ever be as safe as the least
+ * careful renderer. `tellsFor` returns `DoorwaySense[]` now, so this function
+ * arranges facts rather than recomputing them, and there is nothing left here
+ * for a third renderer to get wrong.
  */
-export function sensedDirections(state: GameState, listening: boolean): Direction[] {
-  if (hasStatus(state.player, 'confused')) return []
-  const restricted =
-    oilBandFor(state.player.oil).tellRange === 'facing' && !listening && state.player.facing !== null
-  return restricted && state.player.facing !== null ? [state.player.facing] : [...DIRECTIONS]
-}
-
-export function doorways(
-  state: GameState,
-  tells: readonly Tell[],
-  sensed: readonly Direction[],
-): DoorwayView[] {
+export function doorways(state: GameState, senses: readonly DoorwaySense[]): DoorwayView[] {
   const room = state.labyrinth.rooms[state.player.roomId]
   if (room === undefined) throw new Error(`classic/view: no room ${state.player.roomId}`)
 
-  const confused = hasStatus(state.player, 'confused')
   const back = wayBack(state)
   const out: DoorwayView[] = []
-  for (const direction of DIRECTIONS) {
-    if (room.exits[direction] === undefined) continue
-    const here = tells.filter((t) => t.direction === direction)
-    const isSensed = sensed.includes(direction)
+  for (const sense of senses) {
+    // Silence is a FACT now, not an absence: a doorway with no tells and nothing
+    // unresolved is the engine saying there is nothing through there. That is
+    // what makes the panel worth reading and what makes FOCUS worth paying for.
+    const known = !sense.suppressed && !sense.unresolved
     out.push({
-      direction,
-      word: DIRECTION_WORD[direction],
-      tells: here.map((t) => ({ kind: t.kind, text: TELL_TEXT[t.kind] })),
-      sensed: isSensed,
-      unsensed: isSensed ? null : confused ? 'confused' : 'range',
-      alarming: here.some((t) => t.kind === 'stench'),
-      wayBack: direction === back,
+      direction: sense.direction,
+      word: DIRECTION_WORD[sense.direction],
+      tells: sense.tells.map((t) => ({ kind: t.kind, text: TELL_TEXT[t.kind] })),
+      sensed: known,
+      unsensed: known ? null : sense.suppressed ? 'confused' : 'unresolved',
+      focusable: sense.focusable,
+      alarming: sense.tells.some((t) => t.kind === 'stench'),
+      wayBack: sense.direction === back,
     })
   }
   return out
@@ -359,6 +356,20 @@ export interface StatusChunk {
  * Wumpus alone (GDD 2.17), so the only alarming thing on the screen is a
  * doorway. A lamp about to go out is a warning, which is a different register.
  */
+/**
+ * Oil, as a number a person reads.
+ *
+ * Oil went fractional on 18 Sep — `OIL_PRICE.move` is 0.5 and a strong roll
+ * hands quarters back — so the raw value can arrive as 7.749999999999999. One
+ * decimal, and the `.0` trimmed, because "Lamp 8.0" reads like a precision the
+ * game is not offering and "Lamp 7.75" is three characters of noise in a status
+ * line GDD 2.17 already calls over budget.
+ */
+export function formatOil(oil: number): string {
+  const rounded = Math.round(oil * 10) / 10
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1)
+}
+
 export function statusChunks(state: GameState): StatusChunk[] {
   const { player, turn, maxTurns } = state
   const band = oilBandFor(player.oil)
@@ -366,14 +377,17 @@ export function statusChunks(state: GameState): StatusChunk[] {
     { label: 'Turn', value: `${turn} / ${maxTurns}`, tone: turn > maxTurns - 4 ? 'warn' : 'plain' },
     {
       label: 'Lamp',
-      value: `${player.oil} · ${band.name}`,
-      tone: band.tellRange === 'facing' ? 'warn' : 'plain',
+      // Oil is fractional now — a MOVE costs half a point and a good one a
+      // quarter — so it is rounded for the line rather than printed raw. One
+      // decimal, and no trailing `.0`: `Lamp 8.5 · bright`, `Lamp 8 · bright`.
+      value: `${formatOil(player.oil)} · ${band.name}`,
+      tone: band.name === 'ember' || band.name === 'dark' ? 'warn' : 'plain',
     },
-    {
-      label: 'Health',
-      value: `${player.health} / ${player.maxHealth}`,
-      tone: player.health <= 1 ? 'warn' : 'plain',
-    },
+    // HEALTH IS GONE FROM THE STATUS LINE, and GDD 2.17 counts that as a win
+    // rather than a hole: the run already asks the player to hold turn, oil, oil
+    // band, Fortune, companion, carrying-Heart and statuses before the four
+    // doorways, which the budget section calls over budget. A fact removed is a
+    // slot returned, and nothing was put in its place.
     { label: 'Fortune', value: `${player.fortune}`, tone: 'plain' },
   ]
 

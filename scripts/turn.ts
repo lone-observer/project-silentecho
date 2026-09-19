@@ -73,7 +73,9 @@ function stepOf(event: GameEvent): number {
     case 'creatureEncounter': return 1
     case 'graveFound': return 1
     case 'companionGained': return 1
-    case 'damage': return 3
+    // `presence` is the sensing query's other half and lands with `tell` at
+    // step 8; `damage` is retired with health (GDD 2.6).
+    case 'presence': return 8
     case 'statusChanged': return event.turns > 0 ? 3 : 7
     case 'heartTaken': return 3
     case 'wumpusTierChanged': return 3
@@ -111,7 +113,6 @@ function stepOf(event: GameEvent): number {
         case 'braveOverride':
         case 'foundFlask':
         case 'caughtBreath':
-        case 'carvingsWarn':
         case 'companionReveals':
         case 'creatureFound':
         case 'portalCrossed':
@@ -151,7 +152,7 @@ function describeEvent(event: GameEvent): string {
       )
     case 'moved': return `moved ${event.direction}: ${event.from} → ${event.to}`
     case 'tell': return `tell ${event.tell.direction} ${event.tell.kind}`
-    case 'damage': return `damage ${event.amount} (${event.cause})`
+    case 'presence': return `presence ${event.direction} (unresolved)`
     case 'oilChanged': return `oil ${event.delta >= 0 ? '+' : ''}${event.delta} — ${event.text}`
     case 'wumpusMoved': return `WUMPUS moved → ${event.to}`
     case 'wumpusTierChanged': return `WUMPUS escalates to tier ${event.tier}`
@@ -259,7 +260,7 @@ function choose(state: GameState, policy: PolicyName): Action | null {
   }
 
   // SEND: the stench is firing and you have something brave. Spend it.
-  const stench = tellsFor(state).filter((t) => t.kind === 'stench')
+  const stench = tellsFor(state).flatMap((d) => d.tells).filter((t) => t.kind === 'stench')
   const sendable = menu.filter((m) => m.action.kind === 'send')
   if (stench.length > 0 && sendable.length > 0) {
     const towardIt = sendable.find(
@@ -287,7 +288,10 @@ function choose(state: GameState, policy: PolicyName): Action | null {
   // careful: refuse to walk toward an announced pit or the Wumpus, if there is
   // any other open doorway. Everything else about the route is unchanged.
   const warned = new Set(
-    tellsFor(state).filter((t) => t.kind === 'draft' || t.kind === 'stench').map((t) => t.direction),
+    tellsFor(state)
+      .flatMap((d) => d.tells)
+      .filter((t) => t.kind === 'draft' || t.kind === 'stench')
+      .map((t) => t.direction),
   )
   const isWarned = (m: LegalAction): boolean =>
     'direction' in m.action && warned.has(m.action.direction)
@@ -439,7 +443,7 @@ function panelRun(summary: RunSummary): void {
   console.log(`\n${render(summary.final)}`)
   const p = summary.final.player
   console.log(
-    `\nfinal: ${summary.outcome} on turn ${summary.turnsUsed}  hp ${p.health}  oil ${p.oil}  ` +
+    `\nfinal: ${summary.outcome} on turn ${summary.turnsUsed}  oil ${p.oil.toFixed(2)}  ` +
     `${p.carryingHeart ? '[HEART] ' : ''}companion ${p.companion?.kind ?? '—'}`,
   )
 }

@@ -257,6 +257,19 @@ button {
   font-style: italic;
 }
 
+/*
+ * The FOCUS hint. Deliberately the quietest thing in the panel — dimmer than an
+ * unresolved doorway, nowhere near the `alarming` register, which GDD 2.17
+ * reserves for the Wumpus alone. An unresolved doorway is now the most common
+ * sight on the screen, and styling the common case as a warning would turn the
+ * whole panel into a threat display and undo the cozy half of cozy horror.
+ */
+.doorways .focusable {
+  color: var(--dim);
+  opacity: 0.75;
+  margin-left: 0.4em;
+}
+
 .doorways li.alarming .sense {
   color: var(--violet);
 }
