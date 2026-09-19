@@ -58,7 +58,8 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
 | 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | +2987 / −203 | — | 8 |
 | 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 288 (+22) | +2311 / −49 | — | 15 |
-| | | **Total** | **9.0 h** | | **288** | **+20,124 / −750** | **—** | **51** |
+| 9 | 2026-09-18 | Phase 1i part 1 — economy rebuild + rebalance | — | 1i-1 | 288 → 310 (+22) | +3884 / −1301 | — | 8 |
+| | | **Total** | **9.0 h** | | **310** | **+24,008 / −2,051** | **—** | **59** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -66,14 +67,22 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| eye | 15 | 29% |
-| visualiser | 13 | 25% |
-| played it | 8 | 16% |
-| test | 5 | 10% |
-| tests | 4 | 8% |
-| mutation check | 3 | 6% |
-| probe | 2 | 4% |
+| eye | 15 | 25% |
+| visualiser | 13 | 22% |
+| played it | 8 | 14% |
+| test | 5 | 8% |
+| tests | 4 | 7% |
+| mutation check | 3 | 5% |
+| probe | 2 | 3% |
 | tooling | 1 | 2% |
+| npm run economy -- price, first run | 1 | 2% |
+| running npm run devlog in this container and reading DEV-LOG.md after | 1 | 2% |
+| a monotonicity assertion added to tests/outcomes.test.ts in the same pass | 1 | 2% |
+| reading the render path while wiring DoorwaySense into view.ts | 1 | 2% |
+| tests/outcomes.test.ts's unreached-beat ledger | 1 | 2% |
+| tests/tuning.test.ts's DROP HEART price assertion | 1 | 2% |
+| playing a full run through the classic view layer | 1 | 2% |
+| a suppression assertion in tests/resolve.test.ts | 1 | 2% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -128,6 +137,14 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-18 | The roll breakdown rendered '= -3' with a hyphen-minus next to 'Agility -1 . Failing lamp -4' with real minus signs, on the same line. Only visible on a failed roll at low oil, which is a negative total - found by reading a pit death in the log | played it |
 | 2026-09-18 | An arrow key with no legal action behind it fell through to the browser and scrolled the log out from under the player. Direction keys are swallowed whether or not they resolve | played it |
 | 2026-09-18 | A test asserting a direction key never binds SEND PASSED when the guard was deliberately removed - twice. First because the scripted policy never tames so SEND never reaches the menu (the same unreachable-mutation trap as 1f finding 3), then because SEND always co-occurs with a MOVE in the same direction and the MOVE preference hides it anyway. Rebuilt against a hand-built menu, which is what the guard is actually for: the day SEND turns up without its MOVE | test |
+| 2026-09-18 | The band curve was an oil farm at high stats. | npm run economy -- price, first run |
+| 2026-09-18 | npm run devlog silently replaced eight sessions of churn with zeros. | running npm run devlog in this container and reading DEV-LOG.md after |
+| 2026-09-18 | The dark prose register turned LIT again at zero oil. | a monotonicity assertion added to tests/outcomes.test.ts in the same pass |
+| 2026-09-18 | The doorway panel hid the Wumpus's stench behind the unresolved marker. | reading the render path while wiring DoorwaySense into view.ts |
+| 2026-09-18 | hazardCleared became a beat nothing could emit. | tests/outcomes.test.ts's unreached-beat ledger |
+| 2026-09-18 | A zero-priced action produced -0. | tests/tuning.test.ts's DROP HEART price assertion |
+| 2026-09-18 | The log printed +0.125 oil against a status line reading Lamp 11.5. | playing a full run through the classic view layer |
+| 2026-09-18 | The FOCUS menu and the doorway panel disagreed while Confused. | a suppression assertion in tests/resolve.test.ts |
 
 <!-- devlog:end -->
 
