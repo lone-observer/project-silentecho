@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
-import type { Action, Direction } from '../engine/types.ts'
+import type { Action, ActionKind, Direction } from '../engine/types.ts'
 import type { LegalAction } from '../engine/resolve.ts'
 import { RUN_INTRO } from '../engine/data/outcomes.ts'
 import { useRun } from '../state/run.ts'
@@ -34,6 +34,7 @@ import {
   OUTCOME_LABEL,
   roomView,
   statusChunks,
+  waivedVerb,
   wayBack,
 } from './view.ts'
 import type { DoorwayView, MapCell, RollView, StatusChunk, UnsensedReason } from './view.ts'
@@ -97,6 +98,7 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
   const lastRoll = useMemo(() => lastRollOf(run.turns), [run.turns])
   const chart = useMemo(() => chartedMap(run.state), [run.state])
   const back = useMemo(() => wayBack(run.state), [run.state])
+  const waived = useMemo(() => waivedVerb(run.state), [run.state])
 
   const choose = useCallback((action: Action) => act(action), [act])
 
@@ -196,7 +198,7 @@ export function Classic({ run }: { run: RunView }): React.JSX.Element {
             {ended ? (
               <Ending run={run} />
             ) : (
-              <Menu menu={run.menu} onChoose={choose} back={back} />
+              <Menu menu={run.menu} onChoose={choose} back={back} waived={waived} />
             )}
           </section>
         </div>
@@ -352,10 +354,12 @@ function Menu({
   menu,
   onChoose,
   back,
+  waived,
 }: {
   menu: readonly LegalAction[]
   onChoose: (action: Action) => void
   back: Direction | null
+  waived: ActionKind | null
 }): React.JSX.Element {
   return (
     <ul className="menu">
@@ -377,6 +381,21 @@ function Menu({
                 {entry.label}
                 {dir !== null && dir === back && <span className="back"> (go back)</span>}
               </span>
+              {/*
+                A companion is paying for this one. Marked HERE as well as on
+                the status line because this is where the decision is made:
+                the status line answers "is this companion worth keeping",
+                and the player weighing a verb against a guttering lamp is
+                asking a different question, one turn at a time.
+
+                It says "no oil" rather than "free" on purpose. The menu shows
+                no prices at all — see the close-out note — so "free" would be
+                free of something the screen never mentions, and oil is the
+                only currency it could mean.
+              */}
+              {waived !== null && entry.action.kind === waived && (
+                <span className="waived">no oil</span>
+              )}
               {entry.dc !== undefined && <span className="dc">DC {entry.dc}</span>}
             </button>
           </li>

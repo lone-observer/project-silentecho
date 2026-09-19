@@ -357,6 +357,21 @@ button {
   color: var(--amber);
 }
 
+/* A companion is paying this verb's oil. Sits left of the DC, dimmer than the
+   label and warmer than the chrome — it is good news, and the only good news
+   the menu ever carries. */
+.menu .waived {
+  margin-left: auto;
+  color: var(--amber);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+/* With a waiver present the DC loses its auto-margin, or the two fight. */
+.menu .waived + .dc {
+  margin-left: 14px;
+}
+
 .menu .dc {
   margin-left: auto;
   color: var(--dim);

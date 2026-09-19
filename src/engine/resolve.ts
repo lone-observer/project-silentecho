@@ -128,6 +128,7 @@ import type { GrellhoundWarningBand, HazardVerb } from './data/tuning.ts'
 import type { EndingBeat, NoteBeat, Slots } from './data/outcomes.ts'
 import {
   companionLossText,
+  CREATURE_WORD,
   DIRECTION_WORD,
   endingText,
   HAZARD_WORD,
@@ -299,7 +300,16 @@ export function hasStatus(player: Player, status: StatusEffect): boolean {
   return statusTurnsLeft(player, status) > 0
 }
 
-const ACTION_LABEL: Record<ActionKind, string> = {
+/**
+ * What each verb is called on screen.
+ *
+ * Exported since the legibility pass: the classic renderer needs to name a verb
+ * OUTSIDE the menu — the status line says which verb a companion makes free —
+ * and a second copy of these words in `src/classic/` would be a dictionary to
+ * drift. Same reasoning as `TELL_TEXT` in 1h. It is a label table, not prose:
+ * the sentences all live in `data/outcomes.ts`.
+ */
+export const ACTION_LABEL: Record<ActionKind, string> = {
   move: 'Move',
   focus: 'Focus',
   search: 'Search the room',
@@ -447,7 +457,15 @@ export function legalActions(state: GameState): LegalAction[] {
     for (const option of encounterOptions(here)) {
       const dc = encounterRollSpec(option, creature).dc
       if (option === 'fight' || option === 'tame') {
-        out.push({ action: { kind: option }, label: `${ACTION_LABEL[option]} the ${creature}`, dc })
+        // CREATURE_WORD, not the raw CreatureKind. The union's member is
+        // `quietOne`; the creature is called the Quiet One, and that table
+        // exists precisely so one spelling reaches the player. The prose has
+        // always used it — only the menu was printing the identifier.
+        out.push({
+          action: { kind: option },
+          label: `${ACTION_LABEL[option]} the ${CREATURE_WORD[creature]}`,
+          dc,
+        })
       } else if (option === 'sneak') {
         // Slipping past means slipping past INTO somewhere. Every doorway but
         // the one you came in by is a candidate.
@@ -509,7 +527,9 @@ export function legalActions(state: GameState): LegalAction[] {
     if (!canSend(labyrinth, player, direction)) continue
     out.push({
       action: { kind: 'send', direction },
-      label: `Send the ${player.companion?.kind ?? 'companion'} ${DIRECTION_WORD[direction]}`,
+      label: `Send the ${
+        player.companion === null ? 'companion' : CREATURE_WORD[player.companion.kind]
+      } ${DIRECTION_WORD[direction]}`,
       dc: dcOf('send'),
     })
   }

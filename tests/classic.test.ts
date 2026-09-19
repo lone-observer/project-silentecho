@@ -18,14 +18,18 @@ import { describe, it, expect } from 'vitest'
 
 import type {
   Action,
+  ActionKind,
+  CreatureKind,
   Difficulty,
   Direction,
   GameEvent,
   GameState,
   RunOutcome,
 } from '../src/engine/types.ts'
-import { DIRECTIONS } from '../src/engine/types.ts'
-import { applyAction, legalActions } from '../src/engine/resolve.ts'
+import { BAND_ORDER, DIRECTIONS } from '../src/engine/types.ts'
+import { ACTION_LABEL, applyAction, legalActions } from '../src/engine/resolve.ts'
+import { COMPANION_FREE_VERB, companionWaivesOil } from '../src/engine/data/tuning.ts'
+import { CREATURE_WORD } from '../src/engine/data/outcomes.ts'
 import type { LegalAction } from '../src/engine/resolve.ts'
 import { rngFromState } from '../src/engine/rng.ts'
 import { eventsToLines, toStrings } from '../src/classic/lines.ts'
@@ -35,6 +39,7 @@ import {
   doorways,
   roomView,
   statusChunks,
+  waivedVerb,
   wayBack,
 } from '../src/classic/view.ts'
 import type { MapCell } from '../src/classic/view.ts'
@@ -729,6 +734,134 @@ describe('eventsToLines', () => {
             expect(line.text, `slot leaked: ${line.text}`).not.toMatch(/\{[a-zA-Z]+\}/)
           }
         }
+      }
+    }
+  })
+})
+
+/**
+ * Every `ActionKind`, guarded in both directions — the `as const` matters, and
+ * `tests/tuning.test.ts` carries the scar explaining why (annotating this as
+ * `readonly ActionKind[]` makes the assertion below read `ActionKind extends
+ * ActionKind` and hold whatever the list contains).
+ */
+const ALL_ACTION_KINDS = [
+  'move', 'focus', 'search', 'force', 'endure', 'avoid', 'dodge', 'disarm', 'sneak',
+  'fight', 'tame', 'flee', 'use', 'send', 'enterPortal', 'rest', 'dropHeart',
+] as const
+type _KindsCovered = ActionKind extends (typeof ALL_ACTION_KINDS)[number] ? true : never
+const _kindsCovered: _KindsCovered = true
+void _kindsCovered
+const _kindsReal: readonly ActionKind[] = ALL_ACTION_KINDS
+void _kindsReal
+
+describe('classic renderer — the companion oil discount', () => {
+  /**
+   * The discount was invisible until the legibility pass: `oilCostWith` waived
+   * the charge and nothing on screen said so, so a player who tamed a lumewing
+   * could only learn that FOCUS was free by noticing the oil number had not
+   * moved. Two surfaces now say it, and the point of these assertions is that
+   * both read the same table the reducer charges from.
+   */
+  const CREATURES: readonly CreatureKind[] = ['goblin', 'lumewing', 'grellhound', 'quietOne']
+
+  function withCompanion(seed: number, kind: CreatureKind): GameState {
+    const base = startRun(seed, { difficulty: 'stirring' })
+    return {
+      ...base.state,
+      player: { ...base.state.player, companion: { kind, brave: false, skittish: false } },
+    }
+  }
+
+  it('reports exactly what COMPANION_FREE_VERB says, for every creature', () => {
+    expect(waivedVerb(startRun(1, { difficulty: 'stirring' }).state)).toBeNull()
+
+    for (const kind of CREATURES) {
+      const state = withCompanion(1, kind)
+      const expected = COMPANION_FREE_VERB[kind] ?? null
+      expect(waivedVerb(state), `${kind}`).toBe(expected)
+      // And it agrees with the function the reducer actually charges through.
+      for (const action of ALL_ACTION_KINDS) {
+        expect(companionWaivesOil(kind, action), `${kind}/${action}`).toBe(
+          expected !== null && action === expected,
+        )
+      }
+    }
+  })
+
+  /**
+   * MUTATION-CHECKED. Naming the verb on the Companion row is what makes the
+   * buff discoverable at the moment it is acquired — "is this worth keeping".
+   * A companion with no waiver must not grow a row that implies one.
+   */
+  it('names the waived verb on the Companion row, and only when there is one', () => {
+    for (const kind of CREATURES) {
+      const chunks = statusChunks(withCompanion(3, kind))
+      const row = chunks.find((c) => c.label === 'Companion')
+      expect(row, `${kind} had no Companion row`).toBeDefined()
+
+      const free = COMPANION_FREE_VERB[kind]
+      if (free === undefined) {
+        expect(row?.value, `${kind}`).not.toMatch(/free/i)
+      } else {
+        expect(row?.value, `${kind}`).toContain(`free ${ACTION_LABEL[free]}`)
+      }
+      // The creature is always named first, waiver or not.
+      expect(row?.value.startsWith(CREATURE_WORD[kind])).toBe(true)
+    }
+
+    // No companion, no row at all — the status budget does not spend a slot to
+    // say "none" (GDD 2.17).
+    expect(
+      statusChunks(startRun(3, { difficulty: 'stirring' }).state).some(
+        (c) => c.label === 'Companion',
+      ),
+    ).toBe(false)
+  })
+
+  /**
+   * MUTATION-CHECKED. The menu marker is the other half: the status line says
+   * the companion waives a verb, this says which entry in front of you is the
+   * one. Asserted through `legalActions` rather than a hand-built menu, so it
+   * is the real list the screen renders.
+   */
+  it('marks the waived entry in a real menu, and marks nothing else', () => {
+    let seenWaived = 0
+
+    for (const kind of CREATURES) {
+      for (let seed = 1; seed <= 25; seed++) {
+        const state = withCompanion(seed, kind)
+        const waived = waivedVerb(state)
+        for (const entry of legalActions(state)) {
+          const marked = waived !== null && entry.action.kind === waived
+          // The marker fires exactly where the reducer waives the charge.
+          expect(
+            marked,
+            `${kind} seed ${seed}: ${entry.label} marked=${marked}`,
+          ).toBe(companionWaivesOil(kind, entry.action.kind))
+          if (marked) seenWaived += 1
+        }
+      }
+    }
+
+    // A vacuous pass is the failure mode: if no menu ever contained a waived
+    // verb the loop above proved nothing. FOCUS is in every unobstructed room's
+    // menu, so a lumewing sweep must find plenty.
+    expect(seenWaived, 'no waived entry ever appeared in a menu').toBeGreaterThan(20)
+  })
+
+  /**
+   * The waiver is a property of the companion, not of the turn. 1i part 2 made
+   * it flat at every band precisely so there is no state where the companion
+   * waives a verb and the action still charges — so the screen may state it
+   * unconditionally without ever being wrong.
+   */
+  it('never disagrees with the price the reducer charges, at any band', () => {
+    for (const kind of CREATURES) {
+      const free = COMPANION_FREE_VERB[kind]
+      if (free === undefined) continue
+      for (const band of BAND_ORDER) {
+        expect(companionWaivesOil(kind, free), `${kind} at ${band}`).toBe(true)
       }
     }
   })

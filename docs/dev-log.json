@@ -375,7 +375,8 @@
       },
       "costUsd": null,
       "commits": [
-        "8caf871"
+        "8caf871",
+        "fc2263a"
       ],
       "landed": "The game is playable start to finish in a browser. src/classic/ renders the five things GDD 2.14 names - room, directional tells listed per doorway, a numbered action menu, the roll breakdown, an event log - plus a title screen taking a seed and a difficulty and an end screen carrying the run record as seed + actionLog. src/state/run.ts holds startRun and takeAction, both pure with no React in them, so tests/classic.test.ts drives the renderer's real action path rather than a parallel one. view.ts is the screen as data (room heading, doorway rows, status chunks, roll parts) and is assertable without a DOM; lines.ts is eventsToLines, total over the GameEvent union with a never check, and is the projection AgentView.log wants - its wumpusMoved case is deliberately silent because that event carries the Wumpus's true room id, with a mutation-checked test that no line ever contains it. No prose was written: no sentence added to data/outcomes.ts and none inlined in the renderer, and a new test asserts every narration on screen is character-for-character the string the engine emitted. Two engine additions, both for text parity rather than convenience: ARCHETYPE_WORD (six title-case nouns, the missing peer of HAZARD_WORD and CREATURE_WORD, because the archetype is a fact the diorama shows and text could not say) and exporting resolve.ts's existing TELL_TEXT/tellText (needed on turn 1 before any tell event exists, and already the declared shape of AgentView.tells). A doorway renders in three states rather than two - sensed-and-silent, out of lamp range, suppressed by Confused - because collapsing the last two lets a player read darkness as safety, which breaks CLAUDE.md 3's darkness invariant at the presentation layer; the sensed set is re-derived in the renderer because the engine throws it away, flagged as the engine gap to close first. Status line is four chunks plus three conditional ones with oil level and band as one fact, per GDD 2.17. tests/tuning.test.ts's vacuous compile-time guard fixed with as const plus an assertion in the other direction, mutation-checked. Explicitly not built: CRT skin, WUMPUS easter egg, epitaph, known-path map, anything agent-related. QoL pass after the first real playtest (seed 730339, stirring - mapped on paper, mis-mapped, died in a pit carrying the Heart): RUN_INTRO, four paragraphs of opening frame in data/outcomes.ts, collapsible, every claim checked against the tables because an intro that oversells is the game lying on turn one; WASD and arrow keys bound to the compass, because a FILTERED menu renumbers every turn and directions do not - actionForDirection resolves to an entry legalActions already returned, never invents one, and excludes SEND because a sent companion never comes back and that should not be reachable by the walking key; a (go back) label on the doorway you came in by, since the compass is absolute and the player's memory is relative; and a charted map for drowsing and stirring, drawing visited rooms and the doorways out of them including into rooms never entered, never an unvisited room's contents, never the Heart before it is stood on, and never the Wumpus - asserted by a mutation-checked test that the drawing is a pure function of the labyrinth and the player's position, so moving the Wumpus to every room in turn changes not one character. The MOVE-rolls-for-nothing complaint was answered with a rendering fix rather than the engine change asked for: the roll stays (its critical failure is the only thing making a careless step loud) and the breakdown panel is hidden when the band did nothing.",
       "defects": [
@@ -461,7 +462,9 @@
         "cacheWrite": null
       },
       "costUsd": null,
-      "commits": ["0f827c3"],
+      "commits": [
+        "0f827c3"
+      ],
       "landed": "The 18 Sep economy unification, built. Health is retired everywhere: Player.health, Player.maxHealth, PLAYER.maxHealth, the damage column on every outcome table (HazardOutcome, TameOutcome, FightOutcome, SneakOutcome, FleeOutcome), the damage GameEvent and the killedByDamage ending are all gone, and only a pit and the Wumpus end a run. In their place every action carries an oil price (OIL_PRICE) scaled by the band it rolls (BAND_OIL_MULTIPLIER), computed in exactly one place (oilCostFor) and charged once at step 1 - which replaced three separate mechanisms at a stroke: the passive burn every two turns, OIL.extraCost for the quiet verbs, and 1g's conditional flask reward. The pit is strictly binary. LISTEN and READ are retired and replaced by FOCUS, which resolves one doorway and is capped per room by difficulty (4/4/1/1); the base lamp now reports PRESENCE for free and identity costs a turn. DISARM clears a bloom or snare permanently and is the only stat-agnostic roll in the game. DROP HEART is free and unconditional. SEND's decoy is decided by its own roll (3 turns good, 2 bad, halved carrying the Heart) rather than by which creature was tamed. Turn caps are 50/45/40/35, the mandatory Wumpus stench reaches two rooms, USE is rolled, REST refunds instead of healing, and ENTER PORTAL's bad roll lands the player already holding the new labyrinth's Heart. getTells returns DoorwaySense[] - one entry per doorway with its resolved tells, an unresolved flag and a suppressed flag - which closes 1h finding 1 by making the distinction true by construction instead of re-derived in every renderer. src/classic/ follows: FOCUS/DISARM/DROP HEART in the menu, health out of the status line, the unresolved marker in the doorway panel, and directional labels spelled out (1h finding 5). New visualiser scripts/economy.ts, seven panels, which is what produced every number in the 1i findings.",
       "defects": [
         {
@@ -503,6 +506,98 @@
           "what": "The FOCUS menu and the doorway panel disagreed while Confused.",
           "detail": "getTells reported a Confused doorway as not focusable while legalActions went on offering FOCUS on it - a verb that would spend a turn and an oil price to learn nothing. GDD 2.17 says legalActions is filtered to what is ACTUALLY available, so the verb is withdrawn while Confused rather than offered as a trap.",
           "foundBy": "a suppression assertion in tests/resolve.test.ts"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "date": "2026-09-18",
+      "label": "Phase 1i part 2 — companion buff rework",
+      "hours": null,
+      "surface": "cowork",
+      "steps": [
+        "1i-part-2"
+      ],
+      "tests": {
+        "before": 310,
+        "after": 319
+      },
+      "tokens": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null
+      },
+      "costUsd": null,
+      "commits": [
+        "2787c34"
+      ],
+      "landed": "RECONSTRUCTED 19 Sep from docs/PHASE-1-PROGRESS.md and the commit, because this session was never added to the dev log at its own close-out. Hours, tokens and cost are unrecoverable and are recorded null rather than guessed. Three companion buffs, only one of which needed the engine. Goblin: DISARM free. Lumewing: FOCUS free (the per-room cap untouched). Both are one COMPANION_FREE_VERB row and one branch at the single price hook, via oilCostWith - used at BOTH callers, because the spoils beat asks the price list whether oil came back and would otherwise narrate a payout nobody received. A waived verb is free at EVERY band including the two that pay oil back: min(0, oilCostFor(...)) would keep the payouts while removing every way to lose, rebuilding 1i part 1's oil farm out of a companion. Grellhound: an escalating directional warning at 3/2/1 rooms, which needed new surface in wumpus.ts because its old passive was a bare yes/no at the same radius as the already-directional mandatory stench floor. stenchDirections takes a radius and is exported; wumpusGrowl: boolean became wumpusWarning; grellhoundGrowls kept its name and became the middle band. Measured at 4-7 points of catch rate, paired test p <= 0.011 at three of four difficulties. Three stale leftovers fixed by reading, and the beat ledger made total, which found three more.",
+      "defects": [
+        {
+          "what": "The pre-rework grellhound's entire remaining value came from a GDD-vs-code divergence: GDD 2.8.1 exempts companion passives from oil and FOCUS but not from the spores, and 2.8.2 says a Confused player receives no tells at all. getTells implements that; companionSenses does not. So the free stench goes silent under spores and the hound keeps talking - 13 to 21 runs in 300 saved from the Wumpus, and all 65 of 65 measured turns were Confused turns. Decided 19 Sep by Gautham: leave it as shipped, track it",
+          "foundBy": "visualiser"
+        },
+        {
+          "what": "The beat ledger was one-directional and had already let three things through. tests/outcomes.test.ts asserted that LISTED beats stay unreached but never that reached beats stay reached, so a beat that stopped being reached, or never started, was invisible. grellhoundGrowls had been recorded as reached and was not. Making the ledger total immediately added heartThrustUpon (the bad ENTER PORTAL branch, unverified since written) and lampBurnsDown (not merely unreached but unreachable - nothing emits it since the passive burn was retired)",
+          "foundBy": "test"
+        },
+        {
+          "what": "INERT_ABOVE_CRIT_FAIL in src/classic/view.ts still read ['move','listen'] after LISTEN was retired in part 1, so every FOCUS got a full roll-breakdown panel for a roll whose band only moves the price. The test passed throughout because it checked move/listen too - it agreed with the stale constant rather than with the game",
+          "foundBy": "eye"
+        },
+        {
+          "what": "Companion.skittish's doc comment still read 'they flee if the player takes damage' after health was retired and the trigger moved to a critical failure. A doc comment describing a mechanic that cannot fire, on the type where the next person looks first",
+          "foundBy": "eye"
+        },
+        {
+          "what": "docs/ROADMAP.md claimed 246 authored prose cells; re-counted it is 186. The number moved because retiring LISTEN/READ took 144 strings and FOCUS gave 12 back",
+          "foundBy": "eye"
+        },
+        {
+          "what": "The bridge carried a stale file twice and reported success both times: scripts/economy.ts and tests/outcomes.test.ts landed as an earlier revision than the one sent. The same clobber 1d documented. Caught by checksumming written files, not by anything failing - and a test file that silently reverts is worse than a doc that does, because the suite goes green",
+          "foundBy": "eye"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "date": "2026-09-19",
+      "label": "Text-renderer legibility pass",
+      "hours": null,
+      "surface": "cowork",
+      "steps": [
+        "legibility"
+      ],
+      "tests": {
+        "before": 319,
+        "after": 323
+      },
+      "tokens": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null
+      },
+      "costUsd": null,
+      "commits": [],
+      "landed": "A screen pass before Gate 1, not a balance pass: no DC, price, oil cost or turn cap moved. Five items proposed; two were already done, one declined, two built, and looking at the result found a third defect nobody had listed. BUILT: the companion oil discount is visible on two surfaces - the Companion status row names the waived verb (lumewing . brave . free Focus) and the menu marks the entry itself (no oil). Both read waivedVerb, which reads COMPANION_FREE_VERB, the same table oilCostWith charges from, so no renderer-side copy can drift. Two surfaces rather than one because they answer different questions at different moments: the status row answers 'is this companion worth keeping' (asked once, at the tame), the menu marker answers 'what does this cost me now' (asked every turn a bloom is in the way). It says 'no oil' rather than 'free' because the menu shows no prices at all. ACTION_LABEL exported from resolve.ts so the status line can name a verb outside the menu. DECIDED AND DOCUMENTED: the charted map's difficulty gate, pending since 1h, written into GDD 2.14.1 and cross-referenced from 2.2.1. Difficulty was already allowed an information axis - focusesPerRoom is one - so the map is that axis's second expression, not a new kind of rule; and gating a RECORD of facts already delivered never touches CLAUDE.md 3's tell invariant. Placement stays open and narrower. DECLINED: a flavour line at DISARM's top two bands. Its premise was wrong - the four top bands already carry four distinct strings - and what is actually flat is the oil ledger, which prose must not paper over: implying a better outcome than the engine delivers is 1f finding 2's exact failure.",
+      "defects": [
+        {
+          "what": "The menu has never shown what any action costs. LegalAction carries {action,label,dc} and no price, so in a game whose whole resource model is per-action oil scaled by band, the player picks a verb without being told its price and learns it afterwards from the oil line. This is the root cause the invisible companion discount was a symptom of - a discount is invisible partly because the thing being discounted is invisible. Not fixed: the exact cost is unknowable before the roll (the band sets the multiplier) so the menu could only show the base price, which is a new column on every row of the primary screen and deserves to be chosen rather than slipped in under a legibility pass",
+          "foundBy": "eye"
+        },
+        {
+          "what": "legalActions printed raw CreatureKind union members where every other surface printed the creature's name: 'Send the quietOne east' and 'Fight the quietOne', beside a status line correctly saying 'Quiet One' and prose that has always used CREATURE_WORD. No test could have caught it - every renderer assertion checks that the menu IS legalActions(state), which is true of a menu full of identifiers. Fixed at both sites",
+          "foundBy": "played it"
+        },
+        {
+          "what": "PLAYER.startingStat 8->10 was proposed a second time, six days after it shipped in 1i part 1, because it was never struck off the 'Not yet decided' list. The proposal was entirely reasonable - the original reasoning is still correct and nothing on the bullet said the work had happened. A resolved item left on an open list will be re-proposed and will sound right when it is",
+          "foundBy": "eye"
+        },
+        {
+          "what": "1i part 2 was never added to this dev log at its own close-out: the last session recorded was 1i part 1 at 310 tests, while part 2 had landed as 2787c34 with 319. Reconstructed on 19 Sep from PHASE-1-PROGRESS and the commit; hours, tokens and cost are unrecoverable and recorded null rather than guessed. Session 8's QoL follow-up commit fc2263a was also missing, so 1h's churn was undercounted",
+          "foundBy": "eye"
         }
       ]
     }

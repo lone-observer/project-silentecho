@@ -70,6 +70,8 @@ The caveat is load-bearing: 1i's sweep policies walk shortest paths and do not e
 
 **`focusesPerRoom` is new, and it makes difficulty a contract on INFORMATION as well as on generation** (GDD 2.7). Drowsing and Stirring may resolve all four doorways; Hunting and Ravening get one. Measured at 1.6–1.7 focuses per run at the top two difficulties against 2.2 at the bottom two, so the cap binds.
 
+**The information axis has a second expression, and it splits the same way.** The charted map is drawn at Drowsing and Stirring and withheld at Hunting and Ravening (§2.14.1). The two are not the same mechanic — `FOCUS` gates what the game will *tell* you, the map gates whether it *remembers* it for you — but they are the same intent, and a future change to one should ask whether it applies to the other. Neither touches the honesty of a tell; see §2.14.1 for why gating a record is not gating a sense.
+
 **The Wumpus start is a band, and the ceiling is the load-bearing half.** It was once a floor alone — "at least 5 rooms from the entrance" — which on a 10×10 grid put it a mean of 11 rooms away. A Drowsing Wumpus covers 6 rooms in twenty turns, so in 83% of Drowsing seeds and 63% of Stirring ones **it could not reach the player at all**, and the teaching tier could not teach the tell it exists to teach. This is the same failure as a Heart distance specified at one end only (§2.2): a bound that only says *not too close* guarantees *too far*.
 
 The band compensates for how fast each tier moves, so that the thing arrives at all; the **tier** then decides how bad its arrival is. Drowsing is tighter because a tier-1 Wumpus moves once every three turns. The other three share a band and escalate purely through perception radius and move rate — a tier-4 Wumpus placed identically to a tier-2 one is a far worse problem.
@@ -497,6 +499,20 @@ The 1973 original and *The Oregon Trail* are this game's direct ancestors, and t
 **Classic mode** is a toggle available from the main menu at all times. It renders the full game as text: room description, directional tells listed per doorway, numbered action menu, roll breakdown, event log. Optional green-phosphor or amber CRT skin with scanlines.
 
 Everything playable in the diorama is playable here, with no information withheld and no outcome altered. Same engine, same seeds, same runs — a run started in one mode can be finished in the other.
+
+### 2.14.1 The charted map, and why difficulty gates it
+
+**Drowsing and Stirring draw a charted map; Hunting and Ravening do not.** *(Built 1h, promoted from a pending renderer flag to a rule 19 Sep 2026.)*
+
+The map is a fixed grid of what the player has already been told: rooms they have entered and what was in them, plus every doorway leading out of such a room — including doorways into rooms they have never entered, because standing in a room the menu offered them that exit. It never shows an unvisited room's contents, never shows the Heart before they have stood on it, and never shows the Wumpus at all. It is a *record*, not a sense: it adds no fact the player did not already receive, it only stops them having to hold all of it in their head at once.
+
+**That is why gating it by difficulty does not touch `CLAUDE.md` §3.** The darkness invariant governs what the game *tells* you — a tell fires when the thing is adjacent and never when it is not, and §2.8.1's `FOCUS` decides how much of that you can resolve. A map is a convenience layer over facts already delivered under those rules. Withholding it at the top two difficulties asks the player to do their own bookkeeping; it never makes the game say something false, and it never withholds a tell.
+
+**It is the second thing difficulty gates on the information axis, not the first.** §2.2.1's `focusesPerRoom` already made difficulty a contract on information as well as on generation — Drowsing and Stirring resolve all four doorways, Hunting and Ravening get one. The map follows the same split for the same reason and should be read as one rule with two expressions: **the lower two difficulties help you know where you are; the upper two make knowing it your problem.**
+
+The grid is never cropped to the charted area. Cropping would re-frame the map each time exploration reached a new edge, moving every room the player had already placed, which is the opposite of what an orientation aid is for — fixed coordinates for the whole run, empty space and all.
+
+*(Gate: `docs/ROADMAP.md` deferred a map render pending evidence that players get lost. The evidence is the author mapping seed 730339 on paper, mis-mapping it, taking the pit route and dying carrying the Heart.)*
 
 **The `WUMPUS` easter egg.** Typing `WUMPUS` at the title screen opens a faithful implementation of the 1973 original: 20-room dodecahedron, superbats, bottomless pits, five crooked arrows, the original phrasing. It is a separate small module with its own state, deliberately *not* wired into the main engine — an homage, not a game mode. Leave the original's difficulty and prose alone.
 

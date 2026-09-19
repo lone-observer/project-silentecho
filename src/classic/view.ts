@@ -8,6 +8,7 @@
 
 import type {
   Action,
+  ActionKind,
   Difficulty,
   Direction,
   GameState,
@@ -20,9 +21,9 @@ import type {
   TellKind,
 } from '../engine/types.ts'
 import { DIRECTIONS } from '../engine/types.ts'
-import { oilBandFor } from '../engine/data/tuning.ts'
+import { COMPANION_FREE_VERB, oilBandFor } from '../engine/data/tuning.ts'
 import { ARCHETYPE_WORD, CREATURE_WORD, DIRECTION_WORD } from '../engine/data/outcomes.ts'
-import { hasStatus, statusTurnsLeft, TELL_TEXT } from '../engine/resolve.ts'
+import { ACTION_LABEL, hasStatus, statusTurnsLeft, TELL_TEXT } from '../engine/resolve.ts'
 import type { LegalAction } from '../engine/resolve.ts'
 import { BAD_BANDS, BAND_LABEL, signed } from './labels.ts'
 
@@ -225,18 +226,22 @@ export interface MapCell {
 /**
  * Which difficulties give the player a charted map.
  *
- * THIS IS A DESIGN CHANGE AND IT IS BIGGER THAN IT LOOKS. GDD 2.2.1 says
- * "difficulty is a contract on GENERATION, not just a Wumpus tier" — it decides
- * how the labyrinth is BUILT. This adds a second axis: difficulty now also
- * decides how much of what you have seen you are allowed to keep. Whether that
- * belongs in the difficulty contract at all, or belongs in `tuning.ts` where the
- * diorama and `AgentView` would read the same rule, is Gautham's call. It sits
- * here, in the renderer, until it is made — because a renderer capability that
- * turns out to be a game rule is cheaper to move than to unpick.
+ * **DECIDED AND WRITTEN DOWN — GDD 2.14.1, 19 Sep 2026.** This carried a
+ * "pending Gautham's call" flag from 1h through the whole of 1i; the call is
+ * made and the reasoning now lives in the spec rather than in this comment.
+ * The short version: a map is a RECORD of facts the player already received
+ * under the tell rules, not a sense of its own, so gating it by difficulty
+ * never touches `CLAUDE.md` 3 — and it is the information axis's second
+ * expression, not its first, because 1i's `focusesPerRoom` had already made
+ * difficulty a contract on information (GDD 2.2.1).
  *
- * `docs/ROADMAP.md` parked the map render pending "telemetry showing players
- * actually get lost". That gate is met: Gautham mapped seed 730339 on paper,
- * mis-mapped it, took the pit route and died carrying the Heart.
+ * WHAT IS STILL OPEN IS PLACEMENT, NOT THE RULE. `focusesPerRoom` lives in
+ * `DifficultyContract` in `tuning.ts`; this lives here. One renderer can carry
+ * that, but the moment a second one wants a map — the diorama, or `AgentView`
+ * deciding what a bot may remember — the rule needs to be somewhere both read,
+ * and the precedent for where is `focusesPerRoom`. Left in the renderer
+ * deliberately rather than moved on spec: adding a field to the difficulty
+ * contract touches the generation tests, and no second consumer exists yet.
  */
 export const MAP_DIFFICULTIES: readonly Difficulty[] = ['drowsing', 'stirring'] as const
 
@@ -370,6 +375,27 @@ export function formatOil(oil: number): string {
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1)
 }
 
+/**
+ * The verb this run's companion makes free, or null.
+ *
+ * ONE SOURCE FOR BOTH PLACES THAT SAY SO. The status line names it and the menu
+ * marks it, and the two must never disagree — so both ask this, and this asks
+ * `COMPANION_FREE_VERB`, which is the same table `oilCostWith` charges from.
+ * A renderer-side list of "verbs that are free with a goblin" would be a third
+ * copy of a rule that already exists twice, and the copy that drifted would be
+ * the one the player reads.
+ *
+ * It reports what the COMPANION waives, not what this turn happens to cost.
+ * The distinction matters: a waived verb is free at every band including the
+ * two that would otherwise pay oil back (1i part 2), so there is no state in
+ * which this is true of the companion and false of the action.
+ */
+export function waivedVerb(state: GameState): ActionKind | null {
+  const companion = state.player.companion
+  if (companion === null) return null
+  return COMPANION_FREE_VERB[companion.kind] ?? null
+}
+
 export function statusChunks(state: GameState): StatusChunk[] {
   const { player, turn, maxTurns } = state
   const band = oilBandFor(player.oil)
@@ -392,9 +418,17 @@ export function statusChunks(state: GameState): StatusChunk[] {
   ]
 
   if (player.companion !== null) {
+    // The waived verb sits with the companion because that is what it is a
+    // property OF. GDD 2.17 attaches a fact to the thing it concerns, and this
+    // is also the answer to a question the status line is the only place to
+    // ask: is this companion worth keeping? The menu marker below answers the
+    // other question — what does this cost me right now — and the two are
+    // different decisions made at different moments.
+    const free = waivedVerb(state)
     const traits = [
       player.companion.brave ? 'brave' : null,
       player.companion.skittish ? 'skittish' : null,
+      free === null ? null : `free ${ACTION_LABEL[free]}`,
     ].filter((t): t is string => t !== null)
     out.push({
       label: 'Companion',
