@@ -57,9 +57,11 @@ Weight the raw counts to get a figure worth comparing across sessions: `effectiv
 | 5 | 2026-09-17 | Phase 1e — resolve | 2 h | 1e, 1d-fix | 180 → 217 (+37) | +3137 / −86 | — | 7 |
 | 6 | 2026-09-17 | Phase 1f — outcomes table | 2 h | 1f | 217 → 239 (+22) | +3821 / −180 | — | 6 |
 | 7 | 2026-09-18 | Phase 1g — hazard-verb redesign | 3 h | 1g | 239 → 266 (+27) | +2987 / −203 | — | 8 |
-| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 288 (+22) | +2311 / −49 | — | 15 |
+| 8 | 2026-09-18 | Phase 1h — text (classic) renderer | — | 1h | 266 → 288 (+22) | +3127 / −75 | — | 15 |
 | 9 | 2026-09-18 | Phase 1i part 1 — economy rebuild + rebalance | — | 1i-1 | 288 → 310 (+22) | +3884 / −1301 | — | 8 |
-| | | **Total** | **9.0 h** | | **310** | **+24,008 / −2,051** | **—** | **59** |
+| 10 | 2026-09-18 | Phase 1i part 2 — companion buff rework | — | 1i-part-2 | 310 → 319 (+9) | +1106 / −112 | — | 6 |
+| 11 | 2026-09-19 | Text-renderer legibility pass | — | legibility | 319 → 323 (+4) | +411 / −26 | — | 4 |
+| | | **Total** | **9.0 h** | | **323** | **+26,341 / −2,215** | **—** | **69** |
 
 Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles.
 
@@ -67,22 +69,22 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 
 | Found by | Count | Share |
 |---|---|---|
-| eye | 15 | 25% |
-| visualiser | 13 | 22% |
-| played it | 8 | 14% |
-| test | 5 | 8% |
-| tests | 4 | 7% |
-| mutation check | 3 | 5% |
+| eye | 22 | 32% |
+| visualiser | 14 | 20% |
+| played it | 9 | 13% |
+| test | 6 | 9% |
+| tests | 4 | 6% |
+| mutation check | 3 | 4% |
 | probe | 2 | 3% |
-| tooling | 1 | 2% |
-| npm run economy -- price, first run | 1 | 2% |
-| running npm run devlog in this container and reading DEV-LOG.md after | 1 | 2% |
-| a monotonicity assertion added to tests/outcomes.test.ts in the same pass | 1 | 2% |
-| reading the render path while wiring DoorwaySense into view.ts | 1 | 2% |
-| tests/outcomes.test.ts's unreached-beat ledger | 1 | 2% |
-| tests/tuning.test.ts's DROP HEART price assertion | 1 | 2% |
-| playing a full run through the classic view layer | 1 | 2% |
-| a suppression assertion in tests/resolve.test.ts | 1 | 2% |
+| tooling | 1 | 1% |
+| npm run economy -- price, first run | 1 | 1% |
+| running npm run devlog in this container and reading DEV-LOG.md after | 1 | 1% |
+| a monotonicity assertion added to tests/outcomes.test.ts in the same pass | 1 | 1% |
+| reading the render path while wiring DoorwaySense into view.ts | 1 | 1% |
+| tests/outcomes.test.ts's unreached-beat ledger | 1 | 1% |
+| tests/tuning.test.ts's DROP HEART price assertion | 1 | 1% |
+| playing a full run through the classic view layer | 1 | 1% |
+| a suppression assertion in tests/resolve.test.ts | 1 | 1% |
 
 | Date | Defect | Found by |
 |---|---|---|
@@ -145,6 +147,16 @@ Lines are derived from the commits listed in `dev-log.json`, excluding lockfiles
 | 2026-09-18 | A zero-priced action produced -0. | tests/tuning.test.ts's DROP HEART price assertion |
 | 2026-09-18 | The log printed +0.125 oil against a status line reading Lamp 11.5. | playing a full run through the classic view layer |
 | 2026-09-18 | The FOCUS menu and the doorway panel disagreed while Confused. | a suppression assertion in tests/resolve.test.ts |
+| 2026-09-18 | The pre-rework grellhound's entire remaining value came from a GDD-vs-code divergence: GDD 2.8.1 exempts companion passives from oil and FOCUS but not from the spores, and 2.8.2 says a Confused player receives no tells at all. getTells implements that; companionSenses does not. So the free stench goes silent under spores and the hound keeps talking - 13 to 21 runs in 300 saved from the Wumpus, and all 65 of 65 measured turns were Confused turns. Decided 19 Sep by Gautham: leave it as shipped, track it | visualiser |
+| 2026-09-18 | The beat ledger was one-directional and had already let three things through. tests/outcomes.test.ts asserted that LISTED beats stay unreached but never that reached beats stay reached, so a beat that stopped being reached, or never started, was invisible. grellhoundGrowls had been recorded as reached and was not. Making the ledger total immediately added heartThrustUpon (the bad ENTER PORTAL branch, unverified since written) and lampBurnsDown (not merely unreached but unreachable - nothing emits it since the passive burn was retired) | test |
+| 2026-09-18 | INERT_ABOVE_CRIT_FAIL in src/classic/view.ts still read ['move','listen'] after LISTEN was retired in part 1, so every FOCUS got a full roll-breakdown panel for a roll whose band only moves the price. The test passed throughout because it checked move/listen too - it agreed with the stale constant rather than with the game | eye |
+| 2026-09-18 | Companion.skittish's doc comment still read 'they flee if the player takes damage' after health was retired and the trigger moved to a critical failure. A doc comment describing a mechanic that cannot fire, on the type where the next person looks first | eye |
+| 2026-09-18 | docs/ROADMAP.md claimed 246 authored prose cells; re-counted it is 186. The number moved because retiring LISTEN/READ took 144 strings and FOCUS gave 12 back | eye |
+| 2026-09-18 | The bridge carried a stale file twice and reported success both times: scripts/economy.ts and tests/outcomes.test.ts landed as an earlier revision than the one sent. The same clobber 1d documented. Caught by checksumming written files, not by anything failing - and a test file that silently reverts is worse than a doc that does, because the suite goes green | eye |
+| 2026-09-19 | The menu has never shown what any action costs. LegalAction carries {action,label,dc} and no price, so in a game whose whole resource model is per-action oil scaled by band, the player picks a verb without being told its price and learns it afterwards from the oil line. This is the root cause the invisible companion discount was a symptom of - a discount is invisible partly because the thing being discounted is invisible. Not fixed: the exact cost is unknowable before the roll (the band sets the multiplier) so the menu could only show the base price, which is a new column on every row of the primary screen and deserves to be chosen rather than slipped in under a legibility pass | eye |
+| 2026-09-19 | legalActions printed raw CreatureKind union members where every other surface printed the creature's name: 'Send the quietOne east' and 'Fight the quietOne', beside a status line correctly saying 'Quiet One' and prose that has always used CREATURE_WORD. No test could have caught it - every renderer assertion checks that the menu IS legalActions(state), which is true of a menu full of identifiers. Fixed at both sites | played it |
+| 2026-09-19 | PLAYER.startingStat 8->10 was proposed a second time, six days after it shipped in 1i part 1, because it was never struck off the 'Not yet decided' list. The proposal was entirely reasonable - the original reasoning is still correct and nothing on the bullet said the work had happened. A resolved item left on an open list will be re-proposed and will sound right when it is | eye |
+| 2026-09-19 | 1i part 2 was never added to this dev log at its own close-out: the last session recorded was 1i part 1 at 310 tests, while part 2 had landed as 2787c34 with 319. Reconstructed on 19 Sep from PHASE-1-PROGRESS and the commit; hours, tokens and cost are unrecoverable and recorded null rather than guessed. Session 8's QoL follow-up commit fc2263a was also missing, so 1h's churn was undercounted | eye |
 
 <!-- devlog:end -->
 

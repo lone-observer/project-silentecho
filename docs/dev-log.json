@@ -580,7 +580,9 @@
         "cacheWrite": null
       },
       "costUsd": null,
-      "commits": [],
+      "commits": [
+        "1c8de34"
+      ],
       "landed": "A screen pass before Gate 1, not a balance pass: no DC, price, oil cost or turn cap moved. Five items proposed; two were already done, one declined, two built, and looking at the result found a third defect nobody had listed. BUILT: the companion oil discount is visible on two surfaces - the Companion status row names the waived verb (lumewing . brave . free Focus) and the menu marks the entry itself (no oil). Both read waivedVerb, which reads COMPANION_FREE_VERB, the same table oilCostWith charges from, so no renderer-side copy can drift. Two surfaces rather than one because they answer different questions at different moments: the status row answers 'is this companion worth keeping' (asked once, at the tame), the menu marker answers 'what does this cost me now' (asked every turn a bloom is in the way). It says 'no oil' rather than 'free' because the menu shows no prices at all. ACTION_LABEL exported from resolve.ts so the status line can name a verb outside the menu. DECIDED AND DOCUMENTED: the charted map's difficulty gate, pending since 1h, written into GDD 2.14.1 and cross-referenced from 2.2.1. Difficulty was already allowed an information axis - focusesPerRoom is one - so the map is that axis's second expression, not a new kind of rule; and gating a RECORD of facts already delivered never touches CLAUDE.md 3's tell invariant. Placement stays open and narrower. DECLINED: a flavour line at DISARM's top two bands. Its premise was wrong - the four top bands already carry four distinct strings - and what is actually flat is the oil ledger, which prose must not paper over: implying a better outcome than the engine delivers is 1f finding 2's exact failure.",
       "defects": [
         {
